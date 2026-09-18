@@ -1,6 +1,6 @@
 # Architecture
 
-This page describes the shape of Phase 1 and, more importantly, the boundaries I want to preserve while it changes.
+This page describes the current extension and the boundaries that keep it understandable.
 
 ## Runtime pieces
 
@@ -8,7 +8,7 @@ This page describes the shape of Phase 1 and, more importantly, the boundaries I
 
 The React side panel is the product surface. It shows the local corpus, review state, settings, fallback exports, and Anki export.
 
-It talks to IndexedDB through `CaptureRepository` rather than reaching into Dexie tables everywhere. The repository is intentionally small today; the boundary matters more than the amount of code behind it.
+It talks to IndexedDB through `CaptureRepository` rather than reaching into Dexie tables everywhere. The repository is intentionally small; the boundary matters more than the amount of code behind it.
 
 ### Background service worker
 
@@ -38,9 +38,9 @@ The adapter decides how to find useful visible context. It never receives cookie
 
 `SourceAdapter` isolates page-specific DOM knowledge.
 
-`GenericWebAdapter` is the fallback and therefore the most important implementation. `DuolingoAdapter` only improves context selection for visible Duolingo challenge markup. If Duolingo changes its DOM tomorrow, generic capture still works.
+`GenericWebAdapter` is the fallback and therefore the most important implementation. `DuolingoAdapter` only improves context selection for visible Duolingo challenge markup. If Duolingo changes its DOM, generic capture still works.
 
-That is deliberate: the product should not depend on one external site's private implementation.
+That is deliberate: the extension should not depend on one external site's private implementation.
 
 ### Persistence
 
@@ -95,7 +95,7 @@ browser/UI -> application repository + clients -> domain types
 
 DOM adapters know nothing about storage. Storage knows nothing about Chrome. The Anki client knows nothing about page capture.
 
-For a project this size, that is enough architecture. Adding a DI framework or a distributed service boundary would create ceremony without buying clearer ownership.
+For a project this size, that is enough architecture. Adding a DI framework or distributed service boundary would create ceremony without buying clearer ownership.
 
 ## Failure behaviour
 
@@ -107,9 +107,3 @@ The collector assumes partial failure is normal.
 - Anki is closed: local data stays untouched and TSV remains available.
 - An Anki note was deleted externally: the next export falls back to lookup / create.
 - A source adapter stops matching: generic capture remains available.
-
-## Where a backend would enter later
-
-A backend becomes justified when there is a real cross-device or multi-user requirement: sync, shared corpora, server-side enrichment, durable job processing, or commercial accounts.
-
-If that happens, the public interfaces worth keeping are the capture DTO, lexical-unit/occurrence split, source-adapter boundary, and stable Collector identity. The browser database should then become one persistence adapter rather than being treated as the domain itself.

@@ -4,7 +4,7 @@ I built this because I kept running into the same small annoyance while studying
 
 Anki Cards Collector keeps that gap small. Select a word, phrase, or sentence, collect it into a local inbox, keep the context, and decide later whether it deserves a card.
 
-This repository is the public Phase 1 of the project: deliberately small, local-first, and usable without an account or backend.
+This repository contains the public implementation: deliberately small, local-first, and usable without an account or application server.
 
 ## What it does
 
@@ -41,7 +41,7 @@ If I collect `tener ganas de` today and meet it again next week in a different s
 - **LexicalUnit** — the thing I may want to learn;
 - **Occurrence** — where and how I met it.
 
-That small distinction makes deduplication useful instead of destructive, and leaves room for better prioritisation later.
+That distinction makes deduplication useful without throwing away the context in which an expression appeared.
 
 ## Architecture
 
@@ -58,7 +58,7 @@ flowchart LR
     DB --> Backup[JSON backup]
 ```
 
-There is no application backend in Phase 1. The background service worker coordinates user-triggered capture; the side panel owns review and export; Dexie keeps persistence behind a repository boundary.
+There is no application backend. The background service worker coordinates user-triggered capture; the side panel owns review and export; Dexie keeps persistence behind a repository boundary.
 
 More detail: [architecture](docs/architecture.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
 
@@ -66,7 +66,7 @@ More detail: [architecture](docs/architecture.md) · [privacy](docs/privacy.md) 
 
 This project is intentionally not a feature catalogue.
 
-- **Local-first over a backend.** Phase 1 does not need accounts, sync, deployment, or a privacy policy for a server that adds no value yet.
+- **Local-first over a backend.** The current workflow does not need accounts, deployment, or remote data retention.
 - **Manual capture over ambient scraping.** The extension wakes up because the user selected something.
 - **Generic web first.** A source-specific integration is an adapter, not the product boundary.
 - **Stable Collector IDs.** Export is an upsert workflow, not a repeated “add note” button.
@@ -111,17 +111,15 @@ Tests currently focus on the parts where accidental regressions are expensive: t
 
 ## Scope
 
-Phase 1 is meant to be a finished portfolio project and a tool I can actually use.
+The public repository is intentionally focused on the local capture → review → Anki workflow. Its roadmap covers maintenance and hardening of that implementation only.
 
-It deliberately leaves out cloud sync, accounts, AI-generated cards, automatic translation, browser history mining, mobile capture, and a SaaS backend. Those may be useful later, but adding them here would make the privacy story worse and the architecture harder to judge.
-
-See the [roadmap](docs/roadmap.md) for the boundary between “polish Phase 1” and “build a different product”.
+See the [maintenance roadmap](docs/roadmap.md).
 
 ## Project status
 
-**Public Phase 1: working vertical slice.**
+**Working public release.**
 
-The next useful work is mostly product hardening: richer editing before export, import/restore for JSON backups, browser-level integration tests, accessibility passes, and packaging/release automation.
+The current hardening backlog includes richer editing before export, JSON restore, browser-level integration tests, accessibility work, and release packaging.
 
 ## Disclaimer
 

@@ -8,7 +8,7 @@ Please keep these boundaries in mind:
 
 - generic web capture must remain a first-class path;
 - source adapters must not depend on private APIs, credentials, cookies, or network interception;
-- captured study data stays local in Phase 1;
+- captured study data stays local;
 - new browser permissions need a concrete reason;
 - duplicate capture must not silently become duplicate study material.
 

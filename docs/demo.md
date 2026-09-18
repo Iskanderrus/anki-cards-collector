@@ -38,7 +38,7 @@ That failure path is part of the design, not an afterthought.
 - What happens when a source page changes?
 - Why separate lexical units from occurrences?
 - Where is the idempotency boundary for Anki?
-- What would force the introduction of a server?
-- Which permissions can be removed or narrowed further before store release?
+- How does the local-first boundary shape failure behaviour?
+- Which permissions can be removed or narrowed further before release?
 
 Those are more interesting engineering conversations than the number of screens in the extension.

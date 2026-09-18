@@ -1,6 +1,6 @@
 # Privacy boundary
 
-The short version: Phase 1 is designed so there is very little to trust.
+The short version: the extension is designed so there is very little to trust.
 
 ## Data that stays local
 
@@ -8,7 +8,7 @@ Collected expressions, contexts, source URLs, review states, and Anki note IDs l
 
 Settings live in `chrome.storage.local`.
 
-The extension has no application server, analytics SDK, telemetry endpoint, account system, or cloud sync.
+The extension has no application server, analytics SDK, telemetry endpoint, or account system.
 
 ## Page access
 
@@ -39,9 +39,9 @@ That connection is used only when the user starts an Anki export.
 
 ## What a captured URL can reveal
 
-A source URL is useful study context, but URLs can contain private identifiers or query parameters on some sites. Phase 1 stores the current URL as-is.
+A source URL is useful study context, but URLs can contain private identifiers or query parameters on some sites. The current implementation stores the source URL as-is.
 
-Before a store release, I would add URL sanitisation rules and a visible per-capture source toggle. That is a product-hardening item, not something hidden behind a claim that URLs are always harmless.
+URL sanitisation is tracked as a public hardening item before packaging the extension for broader distribution.
 
 ## Public repository vs personal data
 
