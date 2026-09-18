@@ -35,7 +35,9 @@ function App(): React.ReactElement {
   useEffect(() => {
     void load();
     const listener = (message: unknown) => {
-      if ((message as { type?: string })?.type === "DATA_CHANGED") void load();
+      const event = message as { type?: string; error?: string };
+      if (event.type === "DATA_CHANGED") void load();
+      if (event.type === "CAPTURE_ERROR") setError(event.error ?? "Capture failed.");
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);

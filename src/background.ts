@@ -4,6 +4,10 @@ import type { CaptureDraft } from "./core/types";
 
 type CaptureResponse = { ok: true; draft: CaptureDraft | null } | { ok: false; error: string };
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Capture failed.";
+}
+
 async function collectFromTab(tabId: number, language: string): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -35,9 +39,17 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== "collect-selection" || tab.id === undefined) return;
 
   void (async () => {
-    const settings = await loadSettings();
-    await collectFromTab(tab.id!, settings.defaultLanguage);
     await chrome.sidePanel.open({ tabId: tab.id! }).catch(() => undefined);
+
+    try {
+      const settings = await loadSettings();
+      await collectFromTab(tab.id!, settings.defaultLanguage);
+    } catch (error) {
+      chrome.runtime.sendMessage({
+        type: "CAPTURE_ERROR",
+        error: errorMessage(error),
+      }).catch(() => undefined);
+    }
   })();
 });
 
@@ -53,10 +65,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await collectFromTab(tab.id, message.language ?? settings.defaultLanguage);
       sendResponse({ ok: true });
     } catch (error) {
-      sendResponse({
-        ok: false,
-        error: error instanceof Error ? error.message : "Capture failed.",
-      });
+      sendResponse({ ok: false, error: errorMessage(error) });
     }
   })();
 
