@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { BackupDocumentV1 } from "../backup/format";
+import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
 import type { CollectedItem, CollectorSettings, ReviewStatus, SourceUrlMode } from "../core/types";
 import type { RestorePreview } from "../storage/repository";
@@ -12,15 +12,20 @@ import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 
 interface EditDraft {
-  displayText: string;
+  canonicalText: string;
   language: string;
+  surfaceText: string;
   context: string;
   note: string;
   occurrenceId?: string;
 }
 
+function latestOccurrence(item: CollectedItem) {
+  return item.occurrences.at(-1);
+}
+
 function latestContext(item: CollectedItem): string {
-  return item.occurrences.at(-1)?.context ?? "";
+  return latestOccurrence(item)?.context ?? "";
 }
 
 function sourceLabel(item: CollectedItem): string {
@@ -41,7 +46,7 @@ function App(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
-  const [pendingBackup, setPendingBackup] = useState<BackupDocumentV1 | null>(null);
+  const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
@@ -116,8 +121,9 @@ function App(): React.ReactElement {
     const occurrence = item.occurrences.at(-1);
     setEditingId(item.lexicalUnit.id);
     setEditDraft({
-      displayText: item.lexicalUnit.displayText,
+      canonicalText: item.lexicalUnit.canonicalText,
       language: item.lexicalUnit.language,
+      surfaceText: occurrence?.surfaceText ?? item.lexicalUnit.canonicalText,
       context: occurrence?.context ?? "",
       note: item.lexicalUnit.note,
       occurrenceId: occurrence?.id,
@@ -142,8 +148,12 @@ function App(): React.ReactElement {
       const updated = await repository.update(id, editDraft);
       const proposal = proposeLearningCard(updated);
       if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
-        await repository.setStatus(id, "inbox");
+        await repository.setStatus(updated.lexicalUnit.id, "inbox");
         setNotice("Changes saved. This item returned to the inbox because its learning target needs review.");
+      } else if (updated.lexicalUnit.id !== id) {
+        setNotice("Changes saved. Matching observed forms were consolidated under one canonical unit; review it before export.");
+      } else if (updated.lexicalUnit.status === "inbox") {
+        setNotice("Changes saved. Review the updated learning target before marking it ready again.");
       } else {
         setNotice("Changes saved. The next Anki export will update the same Collector note.");
       }
@@ -519,15 +529,19 @@ function App(): React.ReactElement {
               data-card-id={unit.id}
               data-active={active ? "true" : "false"}
               tabIndex={active ? 0 : -1}
-              aria-label={`Review ${unit.displayText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
+              aria-label={`Review ${unit.canonicalText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
               onFocus={() => setActiveId(unit.id)}
             >
               <div className="card-head">
                 <div>
-                  <div className="term">{unit.displayText}</div>
+                  <div className="term">{unit.canonicalText}</div>
                   <div className="meta">
                     {unit.language} · {sourceLabel(item)} · {item.occurrences.length} occurrence{item.occurrences.length === 1 ? "" : "s"}
                   </div>
+                  {latestOccurrence(item)?.surfaceText &&
+                    latestOccurrence(item)?.surfaceText !== unit.canonicalText && (
+                      <div className="meta">Observed: {latestOccurrence(item)?.surfaceText}</div>
+                    )}
                 </div>
                 <span className="pill">{unit.status}</span>
               </div>
@@ -541,11 +555,18 @@ function App(): React.ReactElement {
                   }}
                 >
                   <label>
-                    Expression
+                    Canonical form
                     <input
                       autoFocus
-                      value={editDraft.displayText}
-                      onChange={(event) => setEditDraft({ ...editDraft, displayText: event.target.value })}
+                      value={editDraft.canonicalText}
+                      onChange={(event) => setEditDraft({ ...editDraft, canonicalText: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Observed form
+                    <input
+                      value={editDraft.surfaceText}
+                      onChange={(event) => setEditDraft({ ...editDraft, surfaceText: event.target.value })}
                     />
                   </label>
                   <label>

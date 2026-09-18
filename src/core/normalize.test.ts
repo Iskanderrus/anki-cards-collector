@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeContentKey, normalizeText } from "./normalize";
+import { makeContentKey, normalizeIdentityText, normalizeText } from "./normalize";
 
 describe("normalizeText", () => {
   it("collapses whitespace without changing meaningful punctuation", () => {
@@ -8,6 +8,12 @@ describe("normalizeText", () => {
 
   it("normalizes unicode compatibility forms", () => {
     expect(normalizeText("ＡＢＣ")).toBe("ABC");
+  });
+});
+
+describe("normalizeIdentityText", () => {
+  it("normalizes case and whitespace for identity comparisons", () => {
+    expect(normalizeIdentityText("  Tengo   GANAS de ")).toBe("tengo ganas de");
   });
 });
 

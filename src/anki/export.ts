@@ -15,7 +15,8 @@ export function toTsv(items: CollectedItem[]): string {
       proposal.prompt,
       proposal.answer,
       proposal.reason,
-      item.lexicalUnit.displayText,
+      item.lexicalUnit.canonicalText,
+      latest?.surfaceText ?? item.lexicalUnit.canonicalText,
       latest?.context ?? "",
       item.lexicalUnit.note,
       latest?.source.url ?? "",
@@ -23,7 +24,7 @@ export function toTsv(items: CollectedItem[]): string {
   });
 
   return [
-    "CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tExpression\tContext\tNote\tSource",
+    "CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tCanonical\tObserved\tContext\tNote\tSource",
     ...rows,
   ].join("\n");
 }

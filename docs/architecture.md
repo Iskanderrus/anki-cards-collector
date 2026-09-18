@@ -49,9 +49,9 @@ IndexedDB contains two primary entities.
 ```text
 LexicalUnit
   id
-  contentKey = language + normalized text
-  displayText
-  normalizedText
+  contentKey = language + normalized canonical text
+  canonicalText
+  normalizedCanonicalText
   language
   review status
   optional Anki note id
@@ -59,20 +59,22 @@ LexicalUnit
 Occurrence
   id
   lexicalUnitId
+  surfaceText
+  normalizedSurfaceText
   context
   source metadata
   capturedAt
 ```
 
-A new capture either creates a lexical unit or attaches another occurrence to an existing one.
+A new capture either creates a lexical unit or attaches another occurrence to an existing one. Once a unit has been canonicalized, a repeated capture of an already-observed surface form can still find that unit through the occurrence index.
 
-The unique `contentKey` is a local invariant. It gives the repository a simple idempotency boundary while still retaining repeated encounters.
+The unique `contentKey` belongs to the canonical form. Surface-form identity belongs to occurrences. Manual canonicalization can consolidate compatible local units; if both candidates already point to different Anki notes, consolidation is refused rather than guessing which external identity should survive.
 
 ### Learning-card policy
 
 The persistent corpus is not the exported card format.
 
-The review layer derives one deterministic proposal from each `CollectedItem`. It classifies the material, uses captured context to build a retrieval prompt when possible, and refuses to invent semantic information that is not already present in the corpus or learner note.
+The review layer derives one deterministic proposal from each `CollectedItem`. It classifies the canonical target, uses the latest observed surface form to build a contextual retrieval prompt when possible, and refuses to invent semantic information that is not already present in the corpus or learner note.
 
 The proposal is intentionally not stored. Editing the source material recomputes it immediately, while `LexicalUnit.id` remains stable.
 

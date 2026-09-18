@@ -17,20 +17,20 @@ export type ExportItemOutcome =
   | {
       kind: "exported";
       id: string;
-      displayText: string;
+      canonicalText: string;
       noteId: number;
     }
   | {
       kind: "exported_untracked";
       id: string;
-      displayText: string;
+      canonicalText: string;
       noteId: number;
       error: string;
     }
   | {
       kind: "failed";
       id: string;
-      displayText: string;
+      canonicalText: string;
       error: string;
     };
 
@@ -66,12 +66,12 @@ export async function exportBatch(
 
   for (const item of items) {
     const id = item.lexicalUnit.id;
-    const displayText = item.lexicalUnit.displayText;
+    const canonicalText = item.lexicalUnit.canonicalText;
     onProgress({
       completed: results.length,
       total,
       currentId: id,
-      currentText: displayText,
+      currentText: canonicalText,
     });
 
     try {
@@ -80,13 +80,13 @@ export async function exportBatch(
 
       try {
         await persistNoteId(id, noteId);
-        results.push({ kind: "exported", id, displayText, noteId });
+        results.push({ kind: "exported", id, canonicalText, noteId });
       } catch (persistError) {
         warnings += 1;
         results.push({
           kind: "exported_untracked",
           id,
-          displayText,
+          canonicalText,
           noteId,
           error: `Anki export succeeded, but the local note ID was not saved: ${errorMessage(persistError)}`,
         });
@@ -96,7 +96,7 @@ export async function exportBatch(
       results.push({
         kind: "failed",
         id,
-        displayText,
+        canonicalText,
         error: errorMessage(exportError),
       });
     }
@@ -105,7 +105,7 @@ export async function exportBatch(
       completed: results.length,
       total,
       currentId: id,
-      currentText: displayText,
+      currentText: canonicalText,
     });
   }
 

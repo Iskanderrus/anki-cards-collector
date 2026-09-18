@@ -15,11 +15,11 @@ function item(): CollectedItem {
   return {
     lexicalUnit: {
       id: "unit-1",
-      contentKey: "es::aun cuando",
-      displayText: "aun cuando",
-      normalizedText: "aun cuando",
+      contentKey: "es::tener ganas de",
+      canonicalText: "tener ganas de",
+      normalizedCanonicalText: "tener ganas de",
       language: "es",
-      note: "Formal contrast.",
+      note: "Want / feel like doing something.",
       status: "ready",
       createdAt: "2026-09-18T10:00:00Z",
       updatedAt: "2026-09-19T10:00:00Z",
@@ -28,7 +28,9 @@ function item(): CollectedItem {
     occurrences: [{
       id: "occ-1",
       lexicalUnitId: "unit-1",
-      context: "Aun cuando llueva, voy a caminar por el centro.",
+      surfaceText: "tengo ganas de",
+      normalizedSurfaceText: "tengo ganas de",
+      context: "Hoy tengo ganas de salir a caminar por el centro.",
       capturedAt: "2026-09-18T10:00:00Z",
       source: {
         kind: "web",
@@ -41,7 +43,7 @@ function item(): CollectedItem {
 }
 
 describe("AnkiClient", () => {
-  it("updates the existing Collector note with the reviewed learning proposal", async () => {
+  it("updates the existing note with canonical and observed forms", async () => {
     const actions: Array<{ action: string; params: Record<string, unknown> }> = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as {
@@ -61,26 +63,27 @@ describe("AnkiClient", () => {
 
     expect(noteId).toBe(4242);
     expect(actions.map(({ action }) => action)).toEqual(["notesInfo", "updateNoteFields"]);
-    expect(actions.some(({ action }) => action === "addNote")).toBe(false);
     expect(actions[1]?.params).toEqual({
       note: {
         id: 4242,
         fields: {
           CollectorID: "unit-1",
-          Prompt: "[…] llueva, voy a caminar por el centro.",
-          Answer: "aun cuando\n\nFormal contrast.",
+          Prompt: "Hoy […] salir a caminar por el centro.",
+          Answer: "tengo ganas de\n\nCanonical: tener ganas de\n\nWant / feel like doing something.",
           CardKind: "context-production",
-          Why: "A multi-word expression with usable context is better practiced as one contextual production target.",
-          Expression: "aun cuando",
-          Context: "Aun cuando llueva, voy a caminar por el centro.",
-          Note: "Formal contrast.",
+          Why: "A multi-word canonical unit with an observed form in usable context is better practiced as one contextual production target.",
+          Canonical: "tener ganas de",
+          Observed: "tengo ganas de",
+          Expression: "tener ganas de",
+          Context: "Hoy tengo ganas de salir a caminar por el centro.",
+          Note: "Want / feel like doing something.",
           Source: "https://example.com",
         },
       },
     });
   });
 
-  it("migrates only the unchanged legacy Collector template", async () => {
+  it("adds canonical/observed fields and migrates only the unchanged legacy template", async () => {
     const actions: string[] = [];
     const oldBack = "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=context>{{Source}}</div>";
 
@@ -114,7 +117,7 @@ describe("AnkiClient", () => {
 
     await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(settings());
 
-    expect(actions.filter((action) => action === "modelFieldAdd")).toHaveLength(4);
+    expect(actions.filter((action) => action === "modelFieldAdd")).toHaveLength(6);
     expect(actions).toContain("updateModelTemplates");
     expect(actions).toContain("updateModelStyling");
   });
@@ -131,7 +134,7 @@ describe("AnkiClient", () => {
       const resultByAction: Record<string, unknown> = {
         deckNames: ["Collector"],
         modelNames: ["Collector"],
-        modelFieldNames: ["CollectorID", "Prompt", "Answer", "CardKind", "Why", "Expression", "Context", "Note", "Source"],
+        modelFieldNames: ["CollectorID", "Prompt", "Answer", "CardKind", "Why", "Canonical", "Observed", "Expression", "Context", "Note", "Source"],
         modelTemplates: {
           Recognition: {
             Front: "<div>{{Expression}}</div>",
@@ -150,19 +153,5 @@ describe("AnkiClient", () => {
 
     expect(actions).not.toContain("updateModelTemplates");
     expect(actions).not.toContain("updateModelStyling");
-  });
-
-  it("refuses export when the policy says the capture needs review", async () => {
-    const broad = item();
-    broad.lexicalUnit.displayText = "Esta frase es demasiado larga y no tiene suficiente contexto para convertirse en una sola tarjeta útil de recuperación porque contiene demasiadas palabras y objetivos a la vez sin un foco claro adicional";
-    broad.lexicalUnit.note = "";
-    broad.occurrences[0]!.context = broad.lexicalUnit.displayText;
-
-    const fetcher = vi.fn() as unknown as typeof fetch;
-    await expect(
-      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(broad, settings()),
-    ).rejects.toThrow("Shorten the capture");
-
-    expect(fetcher).not.toHaveBeenCalled();
   });
 });

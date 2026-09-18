@@ -2,15 +2,15 @@
 
 The collector does not treat every captured string as a finished flashcard.
 
-A capture first becomes a `LexicalUnit` with one or more `Occurrence` records. Review then derives one learning-card proposal from that local evidence.
+A capture first becomes a canonical `LexicalUnit` with one or more `Occurrence` records containing the surface forms actually observed. Review then derives one learning-card proposal from that local evidence.
 
 ## Current policy
 
 The first policy is deliberately small and deterministic.
 
-- classify the selected material as a word, chunk, or sentence;
+- classify the canonical learning target as a word, chunk, or sentence;
 - derive at most one card proposal per lexical unit;
-- prefer contextual production for a multi-word expression when the captured context can be turned into a useful prompt;
+- prefer contextual production for a multi-word canonical unit when its observed surface form can be blanked from the captured context;
 - use the learner's own note when an explicit meaning or distinction is needed;
 - do not manufacture translations or semantic explanations;
 - treat repeated encounters as additional evidence for the same learning target, not as a reason to create duplicate cards;
@@ -21,7 +21,7 @@ The first policy is deliberately small and deterministic.
 
 Card proposals are not stored in IndexedDB.
 
-They are a pure function of the current lexical unit and its occurrences. Editing the expression, learner note, or latest context immediately changes the proposal.
+They are a pure function of the current canonical lexical unit and its occurrences. Editing the canonical form, observed form, learner note, or latest context immediately changes the proposal.
 
 This keeps the persistent corpus about observed material rather than one rendering of that material. It also means JSON backups do not need a separate schema for generated card state.
 
@@ -37,7 +37,7 @@ If a learner note exists, it becomes the explicit answer. Otherwise the original
 
 Preferred for a short multi-word expression when it appears inside enough surrounding context.
 
-The expression is blanked from the context and becomes the answer.
+The observed surface form is blanked from the context. The answer keeps that observed form and also shows the canonical form when the two differ.
 
 ### Context recall
 
@@ -66,6 +66,6 @@ The exported note carries:
 - `Answer`;
 - `CardKind`;
 - `Why`;
-- the original expression, context, learner note, and retained source URL.
+- the canonical form, latest observed form, context, learner note, and retained source URL.
 
 The stable Collector ID remains the synchronization key. If an edit changes the suggested prompt or card kind, the next export updates the same Anki note.
