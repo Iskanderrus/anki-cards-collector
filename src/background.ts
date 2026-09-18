@@ -1,3 +1,5 @@
+declare const __COLLECTOR_E2E__: boolean;
+
 import { sanitizeSourceUrl } from "./capture/source-url";
 import type { CaptureDraft, SourceUrlMode } from "./core/types";
 import { loadSettings } from "./settings";
@@ -47,24 +49,43 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
 });
 
+async function captureFromContextMenu(tabId: number): Promise<{ ok: boolean; error?: string }> {
+  await chrome.sidePanel.open({ tabId }).catch(() => undefined);
+
+  try {
+    const settings = await loadSettings();
+    await collectFromTab(tabId, settings.defaultLanguage, settings.sourceUrlMode);
+    return { ok: true };
+  } catch (error) {
+    const message = errorMessage(error);
+    chrome.runtime.sendMessage({
+      type: "CAPTURE_ERROR",
+      error: message,
+    }).catch(() => undefined);
+    return { ok: false, error: message };
+  }
+}
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const tabId = tab?.id;
   if (info.menuItemId !== "collect-selection" || tabId === undefined) return;
-
-  void (async () => {
-    await chrome.sidePanel.open({ tabId }).catch(() => undefined);
-
-    try {
-      const settings = await loadSettings();
-      await collectFromTab(tabId, settings.defaultLanguage, settings.sourceUrlMode);
-    } catch (error) {
-      chrome.runtime.sendMessage({
-        type: "CAPTURE_ERROR",
-        error: errorMessage(error),
-      }).catch(() => undefined);
-    }
-  })();
+  void captureFromContextMenu(tabId);
 });
+
+if (__COLLECTOR_E2E__) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "E2E_CONTEXT_MENU_CLICK") return false;
+
+    const tabId = Number(message.tabId);
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ ok: false, error: "E2E tab id is missing." });
+      return false;
+    }
+
+    void captureFromContextMenu(tabId).then(sendResponse);
+    return true;
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "COLLECT_ACTIVE_SELECTION") return false;

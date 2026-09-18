@@ -2,7 +2,6 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-- add browser-level integration tests for capture and side-panel messaging;
 - improve keyboard-first review;
 - run an accessibility audit;
 - improve export progress and per-item error reporting;

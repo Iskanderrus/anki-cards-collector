@@ -6,9 +6,11 @@
   "description": "Local-first Chromium extension for collecting real language from the web and reviewing it before sending it to Anki.",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:e2e": "COLLECTOR_E2E=1 node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build"
+    "test:e2e": "node tests/e2e/extension.mjs",
+    "check": "npm run typecheck && npm test && npm run build && node scripts/check-built.mjs"
   },
   "dependencies": {
     "dexie": "^4.0.11",
@@ -21,6 +23,7 @@
     "@types/react-dom": "^19.1.6",
     "esbuild": "0.28.2",
     "fake-indexeddb": "^6.0.0",
+    "playwright": "^1.55.0",
     "typescript": "^5.8.3",
     "vitest": "5.0.1"
   }

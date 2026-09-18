@@ -111,9 +111,11 @@ npm test
 npm run build
 ```
 
-`npm run check` runs all three. GitHub Actions runs the same check for pull requests.
+`npm run check` runs all three and also asserts that the production manifest has no persistent all-sites content script or broad host permission.
 
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, and portable export formatting.
+A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, and restricted-page failure. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
+
+Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, portable export formatting, and browser permission/capture boundaries.
 
 ## Scope
 
@@ -125,7 +127,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog includes browser-level integration tests, accessibility work, and release packaging.
+The current hardening backlog includes accessibility work, keyboard-first review, export diagnostics, and release packaging.
 
 ## Disclaimer
 
