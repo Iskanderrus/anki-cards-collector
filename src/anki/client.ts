@@ -1,9 +1,35 @@
 import type { CollectedItem, CollectorSettings } from "../core/types";
+import { proposeLearningCard } from "../learning/policy";
 
 interface AnkiResponse<T> {
   result: T;
   error: string | null;
 }
+
+interface AnkiTemplate {
+  Front: string;
+  Back: string;
+}
+
+type AnkiTemplates = Record<string, AnkiTemplate>;
+
+const COLLECTOR_FIELDS = [
+  "CollectorID",
+  "Prompt",
+  "Answer",
+  "CardKind",
+  "Why",
+  "Expression",
+  "Context",
+  "Note",
+  "Source",
+] as const;
+
+const LEGACY_FRONT = "{{Expression}}";
+const LEGACY_BACK = "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=context>{{Source}}</div>";
+const POLICY_FRONT = "{{Prompt}}";
+const POLICY_BACK = "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>";
+const COLLECTOR_CSS = ".card { font-family: sans-serif; font-size: 22px; text-align: left; } .answer { margin-top: 16px; font-weight: 650; } .context { margin-top: 16px; font-size: 16px; opacity: .78; } .meta { margin-top: 16px; font-size: 12px; opacity: .58; }";
 
 export class AnkiClient {
   constructor(
@@ -39,31 +65,66 @@ export class AnkiClient {
     if (!models.includes(settings.modelName)) {
       await this.invoke("createModel", {
         modelName: settings.modelName,
-        inOrderFields: ["CollectorID", "Expression", "Context", "Note", "Source"],
-        css: ".card { font-family: sans-serif; font-size: 22px; text-align: left; } .context { margin-top: 16px; font-size: 16px; opacity: .78; }",
+        inOrderFields: [...COLLECTOR_FIELDS],
+        css: COLLECTOR_CSS,
         isCloze: false,
         cardTemplates: [{
           Name: "Recognition",
-          Front: "{{Expression}}",
-          Back: "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=context>{{Source}}</div>",
+          Front: POLICY_FRONT,
+          Back: POLICY_BACK,
         }],
       });
       return;
     }
 
     const fields = await this.invoke<string[]>("modelFieldNames", { modelName: settings.modelName });
-    if (!fields.includes("Note")) {
-      await this.invoke("modelFieldAdd", {
-        modelName: settings.modelName,
-        fieldName: "Note",
+    for (const fieldName of COLLECTOR_FIELDS) {
+      if (!fields.includes(fieldName)) {
+        await this.invoke("modelFieldAdd", {
+          modelName: settings.modelName,
+          fieldName,
+        });
+      }
+    }
+
+    const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
+      modelName: settings.modelName,
+    });
+    const recognition = templates.Recognition;
+    if (recognition?.Front === LEGACY_FRONT && recognition.Back === LEGACY_BACK) {
+      await this.invoke("updateModelTemplates", {
+        model: {
+          name: settings.modelName,
+          templates: {
+            Recognition: {
+              Front: POLICY_FRONT,
+              Back: POLICY_BACK,
+            },
+          },
+        },
+      });
+      await this.invoke("updateModelStyling", {
+        model: {
+          name: settings.modelName,
+          css: COLLECTOR_CSS,
+        },
       });
     }
   }
 
   async upsert(item: CollectedItem, settings: CollectorSettings): Promise<number> {
+    const proposal = proposeLearningCard(item);
+    if (!proposal.recommended) {
+      throw new Error(proposal.warning ?? "This item needs review before export.");
+    }
+
     const occurrence = item.occurrences.at(-1);
     const fields = {
       CollectorID: item.lexicalUnit.id,
+      Prompt: proposal.prompt,
+      Answer: proposal.answer,
+      CardKind: proposal.cardKind,
+      Why: proposal.reason,
       Expression: item.lexicalUnit.displayText,
       Context: occurrence?.context ?? "",
       Note: item.lexicalUnit.note,
@@ -97,7 +158,7 @@ export class AnkiClient {
         modelName: settings.modelName,
         fields,
         options: { allowDuplicate: false },
-        tags: ["anki-cards-collector"],
+        tags: ["anki-cards-collector", `collector::${proposal.cardKind}`],
       },
     });
   }

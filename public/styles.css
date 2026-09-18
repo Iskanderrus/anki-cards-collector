@@ -187,3 +187,55 @@ summary:focus-visible {
 .item-export-result.error { border: 1px solid #d92d20; }
 .item-export-result.warning { border: 1px solid #b54708; }
 .item-export-result.success { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); }
+
+.learning-proposal {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, CanvasText 4%, transparent);
+}
+.learning-proposal.blocked {
+  border-style: dashed;
+}
+.proposal-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.proposal-kinds {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.proposal-field {
+  display: grid;
+  gap: 3px;
+}
+.proposal-field > span {
+  font-size: 11px;
+  font-weight: 650;
+  color: color-mix(in srgb, CanvasText 58%, transparent);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.proposal-field > div {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.proposal-why {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 72%, transparent);
+}
+.proposal-warning {
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid #b54708;
+}
