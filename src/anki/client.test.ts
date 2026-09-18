@@ -49,6 +49,7 @@ describe("AnkiClient", () => {
       defaultLanguage: "es",
       deckName: "Collector",
       modelName: "Collector",
+      sourceUrlMode: "sanitized",
     };
 
     const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item, settings);
