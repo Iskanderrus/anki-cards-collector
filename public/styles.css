@@ -42,6 +42,24 @@ textarea { resize: vertical; line-height: 1.4; }
   font-size: 13px;
   color: color-mix(in srgb, CanvasText 70%, transparent);
 }
+.shortcuts {
+  display: flex;
+  gap: 7px 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 68%, transparent);
+}
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, CanvasText 24%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, CanvasText 6%, transparent);
+  color: CanvasText;
+  font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+}
 .notice {
   border-radius: 10px;
   padding: 10px 12px;
@@ -102,6 +120,19 @@ label {
   padding: 12px;
   display: grid;
   gap: 9px;
+  outline: none;
+}
+.card[data-active="true"] {
+  border-color: color-mix(in srgb, CanvasText 34%, transparent);
+}
+.card:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid CanvasText;
+  outline-offset: 2px;
 }
 .card-head {
   display: flex;

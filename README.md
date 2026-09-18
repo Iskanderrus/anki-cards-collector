@@ -14,6 +14,7 @@ This repository contains the public implementation: deliberately small, local-fi
 - has a small Duolingo adapter for visible DOM context, without private APIs or network interception;
 - deduplicates lexical units while preserving repeated occurrences;
 - gives every item an inbox / ready / archived review state;
+- supports keyboard-first review with J/K or arrow navigation and E/R/I/A actions;
 - lets you correct the expression, language, context, and learner note before export;
 - exports ready items through AnkiConnect;
 - updates previously exported notes instead of blindly creating duplicates;
@@ -113,7 +114,7 @@ npm run build
 
 `npm run check` runs all three and also asserts that the production manifest has no persistent all-sites content script or broad host permission.
 
-A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, and restricted-page failure. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
+A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, keyboard review, and restricted-page failure. The same browser job runs axe against the rendered side panel to catch WCAG A/AA regressions. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
 
 Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, portable export formatting, and browser permission/capture boundaries.
 
@@ -127,7 +128,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog includes accessibility work, keyboard-first review, export diagnostics, and release packaging.
+The current hardening backlog includes export diagnostics, release packaging, and IndexedDB migration tests.
 
 ## Disclaimer
 

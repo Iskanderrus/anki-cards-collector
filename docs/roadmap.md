@@ -2,8 +2,6 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-- improve keyboard-first review;
-- run an accessibility audit;
 - improve export progress and per-item error reporting;
 - add extension icons, screenshots, release packaging, and a signed browser-store build;
 - add migration tests as the IndexedDB schema evolves.
