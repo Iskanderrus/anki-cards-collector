@@ -6,7 +6,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: Canvas; color: CanvasText; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button {
   border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
   border-radius: 10px;
@@ -19,7 +19,7 @@ button.primary { background: CanvasText; color: Canvas; }
 button.ghost { background: transparent; }
 button.danger { color: #b42318; }
 button:disabled { opacity: .55; cursor: default; }
-input {
+input, textarea {
   width: 100%;
   border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
   border-radius: 9px;
@@ -27,6 +27,7 @@ input {
   background: Canvas;
   color: CanvasText;
 }
+textarea { resize: vertical; line-height: 1.4; }
 .app { display: grid; gap: 14px; padding: 16px; }
 .header h1 { margin: 0; font-size: 20px; }
 .header p {
@@ -86,11 +87,21 @@ label {
   font-size: 12px;
   color: color-mix(in srgb, CanvasText 62%, transparent);
 }
-.context {
+.context, .learner-note {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
   color: color-mix(in srgb, CanvasText 82%, transparent);
+}
+.learner-note {
+  border-left: 2px solid color-mix(in srgb, CanvasText 20%, transparent);
+  padding-left: 9px;
+  white-space: pre-wrap;
+}
+.editor {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
 }
 .card-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .pill {

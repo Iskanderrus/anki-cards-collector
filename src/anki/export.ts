@@ -11,11 +11,12 @@ export function toTsv(items: CollectedItem[]): string {
       item.lexicalUnit.id,
       item.lexicalUnit.displayText,
       latest?.context ?? "",
+      item.lexicalUnit.note,
       latest?.source.url ?? "",
     ].map(cleanCell).join("\t");
   });
 
-  return ["CollectorID\tExpression\tContext\tSource", ...rows].join("\n");
+  return ["CollectorID\tExpression\tContext\tNote\tSource", ...rows].join("\n");
 }
 
 export function downloadText(filename: string, content: string, type: string): void {

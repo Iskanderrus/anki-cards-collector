@@ -39,14 +39,23 @@ export class AnkiClient {
     if (!models.includes(settings.modelName)) {
       await this.invoke("createModel", {
         modelName: settings.modelName,
-        inOrderFields: ["CollectorID", "Expression", "Context", "Source"],
+        inOrderFields: ["CollectorID", "Expression", "Context", "Note", "Source"],
         css: ".card { font-family: sans-serif; font-size: 22px; text-align: left; } .context { margin-top: 16px; font-size: 16px; opacity: .78; }",
         isCloze: false,
         cardTemplates: [{
           Name: "Recognition",
           Front: "{{Expression}}",
-          Back: "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</div><div class=context>{{Source}}</div>",
+          Back: "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=context>{{Source}}</div>",
         }],
+      });
+      return;
+    }
+
+    const fields = await this.invoke<string[]>("modelFieldNames", { modelName: settings.modelName });
+    if (!fields.includes("Note")) {
+      await this.invoke("modelFieldAdd", {
+        modelName: settings.modelName,
+        fieldName: "Note",
       });
     }
   }
@@ -57,6 +66,7 @@ export class AnkiClient {
       CollectorID: item.lexicalUnit.id,
       Expression: item.lexicalUnit.displayText,
       Context: occurrence?.context ?? "",
+      Note: item.lexicalUnit.note,
       Source: occurrence?.source.url ?? "",
     };
 
