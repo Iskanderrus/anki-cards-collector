@@ -1,63 +1,113 @@
 import type { CollectedItem, CollectorSettings } from "../core/types";
 
-export interface BatchAnkiClient {
+export interface AnkiExportClient {
+  ping(): Promise<number>;
+  ensureDeckAndModel(settings: CollectorSettings): Promise<void>;
   upsert(item: CollectedItem, settings: CollectorSettings): Promise<number>;
 }
 
 export interface ExportProgress {
   completed: number;
   total: number;
-  currentDisplayText: string;
+  currentId?: string;
+  currentText?: string;
 }
 
-export interface ExportFailure {
-  id: string;
-  displayText: string;
-  message: string;
-}
+export type ExportItemOutcome =
+  | {
+      kind: "exported";
+      id: string;
+      displayText: string;
+      noteId: number;
+    }
+  | {
+      kind: "exported_untracked";
+      id: string;
+      displayText: string;
+      noteId: number;
+      error: string;
+    }
+  | {
+      kind: "failed";
+      id: string;
+      displayText: string;
+      error: string;
+    };
 
-export interface BatchExportResult {
-  succeeded: number;
-  failures: ExportFailure[];
+export interface ExportBatchReport {
+  total: number;
+  exported: number;
+  failed: number;
+  warnings: number;
+  results: ExportItemOutcome[];
 }
-
-type PersistNoteId = (id: string, noteId: number) => Promise<void>;
-type ProgressListener = (progress: ExportProgress) => void;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown export error.";
 }
 
-export async function exportReadyItems(
+export async function exportBatch(
   items: CollectedItem[],
-  client: BatchAnkiClient,
   settings: CollectorSettings,
-  persistNoteId: PersistNoteId,
-  onProgress: ProgressListener = () => undefined,
-): Promise<BatchExportResult> {
-  const failures: ExportFailure[] = [];
-  let succeeded = 0;
+  client: AnkiExportClient,
+  persistNoteId: (id: string, noteId: number) => Promise<void>,
+  onProgress: (progress: ExportProgress) => void = () => undefined,
+): Promise<ExportBatchReport> {
+  const total = items.length;
+  onProgress({ completed: 0, total });
 
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index]!;
+  await client.ping();
+  await client.ensureDeckAndModel(settings);
+
+  const results: ExportItemOutcome[] = [];
+  let exported = 0;
+  let failed = 0;
+  let warnings = 0;
+
+  for (const item of items) {
+    const id = item.lexicalUnit.id;
+    const displayText = item.lexicalUnit.displayText;
     onProgress({
-      completed: index,
-      total: items.length,
-      currentDisplayText: item.lexicalUnit.displayText,
+      completed: results.length,
+      total,
+      currentId: id,
+      currentText: displayText,
     });
 
     try {
       const noteId = await client.upsert(item, settings);
-      await persistNoteId(item.lexicalUnit.id, noteId);
-      succeeded += 1;
-    } catch (error) {
-      failures.push({
-        id: item.lexicalUnit.id,
-        displayText: item.lexicalUnit.displayText,
-        message: errorMessage(error),
+      exported += 1;
+
+      try {
+        await persistNoteId(id, noteId);
+        results.push({ kind: "exported", id, displayText, noteId });
+      } catch (persistError) {
+        warnings += 1;
+        results.push({
+          kind: "exported_untracked",
+          id,
+          displayText,
+          noteId,
+          error: `Anki export succeeded, but the local note ID was not saved: ${errorMessage(persistError)}`,
+        });
+      }
+    } catch (exportError) {
+      failed += 1;
+      results.push({
+        kind: "failed",
+        id,
+        displayText,
+        error: errorMessage(exportError),
       });
     }
+
+    onProgress({
+      completed: results.length,
+      total,
+      currentId: id,
+      currentText: displayText,
+    });
   }
 
-  return { succeeded, failures };
+  return { total, exported, failed, warnings, results };
 }

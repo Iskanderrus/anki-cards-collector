@@ -6,7 +6,7 @@ import type { CollectedItem, CollectorSettings, ReviewStatus, SourceUrlMode } fr
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
-import { exportReadyItems, type ExportFailure, type ExportProgress } from "../anki/batch";
+import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
 import { downloadText, toTsv } from "../anki/export";
 
@@ -44,7 +44,7 @@ function App(): React.ReactElement {
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
-  const [exportFailures, setExportFailures] = useState<ExportFailure[]>([]);
+  const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
 
   const load = useCallback(async () => {
     const loadedItems = await repository.list();
@@ -147,33 +147,31 @@ function App(): React.ReactElement {
     setBusy(true);
     setError("");
     setNotice("");
-    setExportFailures([]);
-    setExportProgress(null);
+    setExportOutcomes({});
+    setExportProgress({ completed: 0, total: ready.length });
 
     try {
-      const client = new AnkiClient();
-      await client.ping();
-      await client.ensureDeckAndModel(settings);
-
-      const result = await exportReadyItems(
+      const report = await exportBatch(
         ready,
-        client,
         settings,
+        new AnkiClient(),
         (id, noteId) => repository.setAnkiNoteId(id, noteId),
         setExportProgress,
       );
 
-      setExportFailures(result.failures);
+      setExportOutcomes(Object.fromEntries(
+        report.results.map((result) => [result.id, result]),
+      ));
 
-      if (result.failures.length === 0) {
-        setNotice(`Sent ${result.succeeded} item${result.succeeded === 1 ? "" : "s"} to Anki.`);
+      const parts = [`${report.exported} exported`];
+      if (report.failed > 0) parts.push(`${report.failed} failed`);
+      if (report.warnings > 0) parts.push(`${report.warnings} local warning${report.warnings === 1 ? "" : "s"}`);
+
+      if (report.failed > 0 || report.warnings > 0) {
+        setError(`Anki export finished: ${parts.join(", ")}. See the affected cards below.`);
       } else {
-        setNotice(`Sent ${result.succeeded} of ${ready.length} ready items to Anki.`);
-        setError(
-          `${result.failures.length} item${result.failures.length === 1 ? "" : "s"} failed. Details are listed below.`,
-        );
+        setNotice(`Anki export finished: ${parts.join(", ")}.`);
       }
-
       await load();
     } catch (ankiError) {
       setError(
@@ -356,35 +354,18 @@ function App(): React.ReactElement {
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
-
       {exportProgress && (
         <div className="export-progress" role="status" aria-live="polite">
+          <div>
+            Exporting {exportProgress.completed}/{exportProgress.total}
+            {exportProgress.currentText ? ` · ${exportProgress.currentText}` : ""}
+          </div>
           <progress
-            aria-label="Anki export progress"
             value={exportProgress.completed}
-            max={exportProgress.total}
+            max={Math.max(1, exportProgress.total)}
+            aria-label="Anki export progress"
           />
-          <span>
-            Sending {exportProgress.completed + 1}/{exportProgress.total}: {exportProgress.currentDisplayText}
-          </span>
         </div>
-      )}
-
-      {exportFailures.length > 0 && (
-        <section className="export-errors" aria-label="Anki export failures">
-          <strong>Not sent</strong>
-          <ul>
-            {exportFailures.map((failure) => (
-              <li key={failure.id}>
-                <span>{failure.displayText}</span>
-                <span>{failure.message}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="setting-help">
-            Retry the ready batch after fixing the problem. Collector IDs make repeated export safe.
-          </p>
-        </section>
       )}
 
       <div className="shortcuts" aria-label="Keyboard shortcuts">
@@ -501,6 +482,7 @@ function App(): React.ReactElement {
           const unit = item.lexicalUnit;
           const editing = editingId === unit.id && editDraft !== null;
           const active = activeId === unit.id;
+          const exportOutcome = exportOutcomes[unit.id];
 
           return (
             <article
@@ -571,6 +553,21 @@ function App(): React.ReactElement {
                 <>
                   {latestContext(item) && <p className="context">{latestContext(item)}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
+                  {exportOutcome?.kind === "failed" && (
+                    <div className="item-export-result error" role="alert">
+                      Anki export failed: {exportOutcome.error}
+                    </div>
+                  )}
+                  {exportOutcome?.kind === "exported_untracked" && (
+                    <div className="item-export-result warning" role="status">
+                      {exportOutcome.error}
+                    </div>
+                  )}
+                  {exportOutcome?.kind === "exported" && (
+                    <div className="item-export-result success" role="status">
+                      Exported to Anki note {exportOutcome.noteId}.
+                    </div>
+                  )}
 
                   <div className="card-actions">
                     <button aria-keyshortcuts="E" disabled={busy} onClick={() => beginEdit(item)}>Edit</button>
