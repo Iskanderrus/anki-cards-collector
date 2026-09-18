@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
 import { downloadText, toTsv } from "../anki/export";
+import { proposeLearningCard } from "../learning/policy";
 
 interface EditDraft {
   displayText: string;
@@ -95,6 +96,18 @@ function App(): React.ReactElement {
   }
 
   async function changeStatus(id: string, status: ReviewStatus): Promise<void> {
+    if (status === "ready") {
+      const item = items.find((candidate) => candidate.lexicalUnit.id === id);
+      if (item) {
+        const proposal = proposeLearningCard(item);
+        if (!proposal.recommended) {
+          setError(proposal.warning ?? "Review this item before marking it ready.");
+          return;
+        }
+      }
+    }
+
+    setError("");
     await repository.setStatus(id, status);
     await load();
   }
@@ -126,9 +139,15 @@ function App(): React.ReactElement {
     setNotice("");
 
     try {
-      await repository.update(id, editDraft);
+      const updated = await repository.update(id, editDraft);
+      const proposal = proposeLearningCard(updated);
+      if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
+        await repository.setStatus(id, "inbox");
+        setNotice("Changes saved. This item returned to the inbox because its learning target needs review.");
+      } else {
+        setNotice("Changes saved. The next Anki export will update the same Collector note.");
+      }
       cancelEdit();
-      setNotice("Changes saved. The next Anki export will update the same Collector note.");
       await load();
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Could not save changes.");
@@ -141,6 +160,12 @@ function App(): React.ReactElement {
     const ready = items.filter((item) => item.lexicalUnit.status === "ready");
     if (!ready.length) {
       setError("Mark at least one item as ready first.");
+      return;
+    }
+
+    const blocked = ready.filter((item) => !proposeLearningCard(item).recommended);
+    if (blocked.length > 0) {
+      setError(`${blocked.length} ready item${blocked.length === 1 ? "" : "s"} need review before export.`);
       return;
     }
 
@@ -191,7 +216,9 @@ function App(): React.ReactElement {
   }
 
   function exportTsv(): void {
-    const ready = items.filter((item) => item.lexicalUnit.status === "ready");
+    const ready = items.filter(
+      (item) => item.lexicalUnit.status === "ready" && proposeLearningCard(item).recommended,
+    );
     downloadText("anki-cards-collector.tsv", toTsv(ready), "text/tab-separated-values;charset=utf-8");
   }
 
@@ -483,6 +510,7 @@ function App(): React.ReactElement {
           const editing = editingId === unit.id && editDraft !== null;
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
+          const proposal = proposeLearningCard(item);
 
           return (
             <article
@@ -553,6 +581,29 @@ function App(): React.ReactElement {
                 <>
                   {latestContext(item) && <p className="context">{latestContext(item)}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
+
+                  <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
+                    <div className="proposal-head">
+                      <strong>Suggested card</strong>
+                      <span className="proposal-kinds">
+                        <span className="pill">{proposal.unitKind}</span>
+                        <span className="pill">{proposal.cardKind}</span>
+                      </span>
+                    </div>
+                    <div className="proposal-field">
+                      <span>Prompt</span>
+                      <div>{proposal.prompt}</div>
+                    </div>
+                    <div className="proposal-field">
+                      <span>Answer</span>
+                      <div>{proposal.answer || "—"}</div>
+                    </div>
+                    <p className="proposal-why"><strong>Why:</strong> {proposal.reason}</p>
+                    {proposal.warning && (
+                      <div className="proposal-warning" role="status">{proposal.warning}</div>
+                    )}
+                  </div>
+
                   {exportOutcome?.kind === "failed" && (
                     <div className="item-export-result error" role="alert">
                       Anki export failed: {exportOutcome.error}
@@ -572,7 +623,14 @@ function App(): React.ReactElement {
                   <div className="card-actions">
                     <button aria-keyshortcuts="E" disabled={busy} onClick={() => beginEdit(item)}>Edit</button>
                     {unit.status !== "ready" && (
-                      <button aria-keyshortcuts="R" disabled={busy} onClick={() => void changeStatus(unit.id, "ready")}>Ready</button>
+                      <button
+                        aria-keyshortcuts="R"
+                        disabled={busy || !proposal.recommended}
+                        title={proposal.recommended ? "Approve this card for export" : proposal.warning}
+                        onClick={() => void changeStatus(unit.id, "ready")}
+                      >
+                        Ready
+                      </button>
                     )}
                     {unit.status !== "inbox" && (
                       <button aria-keyshortcuts="I" disabled={busy} onClick={() => void changeStatus(unit.id, "inbox")}>Back to inbox</button>

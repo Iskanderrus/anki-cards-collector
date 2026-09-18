@@ -2,7 +2,7 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-Repository-side hardening for the current release is complete: capture/review/export, backup/restore, privacy filtering, browser-level tests, accessibility checks, migration coverage, and validated store packaging are all in place.
+Repository-side hardening for the current release includes capture/review/export, a deterministic learning-card policy, backup/restore, privacy filtering, browser-level tests, accessibility checks, migration coverage, and validated store packaging.
 
 ## External release step
 

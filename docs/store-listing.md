@@ -10,7 +10,7 @@ Collect words and phrases from the web, review them locally, then send the usefu
 
 Anki Cards Collector keeps useful language close to the page where you found it.
 
-Select a word, phrase, or sentence on a web page and collect it into a local review inbox. The extension keeps visible surrounding context, deduplicates repeated lexical items while preserving separate occurrences, and lets you edit the expression, language, context, and learner note before export.
+Select a word, phrase, or sentence on a web page and collect it into a local review inbox. The extension keeps visible surrounding context, deduplicates repeated lexical items while preserving separate occurrences, and lets you edit the expression, language, context, and learner note before export. A deterministic local policy then proposes one bounded study card from the captured evidence and explains why that proposal was chosen.
 
 Ready items can be sent to Anki through AnkiConnect running on localhost. Collector IDs make export idempotent: an item that was already exported is updated instead of blindly creating another note. Batch export reports progress and isolates per-item failures so one rejected card does not stop the rest.
 
@@ -22,6 +22,9 @@ Key properties:
 - local IndexedDB storage with no account or application server;
 - generic web capture plus an optional visible-DOM Duolingo adapter;
 - inbox / ready / archived review states;
+- local word/chunk/sentence classification and reviewable card proposals;
+- contextual production prompts when the captured evidence supports them;
+- no generated translations or invented semantic claims;
 - keyboard-first review;
 - privacy-filtered source URLs;
 - validated JSON backup restore;

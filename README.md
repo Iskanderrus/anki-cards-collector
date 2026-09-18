@@ -16,6 +16,8 @@ This repository contains the public implementation: deliberately small, local-fi
 - gives every item an inbox / ready / archived review state;
 - supports keyboard-first review with J/K or arrow navigation and E/R/I/A actions;
 - lets you correct the expression, language, context, and learner note before export;
+- derives one reviewable learning-card proposal from each captured lexical unit instead of treating raw text as a finished card;
+- explains why a proposal was chosen and blocks overly broad or underspecified captures from becoming ready;
 - exports ready items through AnkiConnect with live batch progress and per-item failure reporting;
 - updates previously exported notes instead of blindly creating duplicates;
 - provides TSV fallback plus versioned JSON backup and restore;
@@ -56,7 +58,8 @@ flowchart LR
     Adapter --> Repo[Capture repository]
     Repo --> DB[(IndexedDB)]
     DB --> Panel[React side panel]
-    Panel --> Review[Inbox / Ready / Archived]
+    Panel --> Policy[Learning-card policy]
+    Policy --> Review[Human review / Ready]
     Review --> Anki[AnkiConnect on localhost]
     Review --> TSV[TSV export]
     DB --> Backup[JSON backup / restore]
@@ -64,7 +67,7 @@ flowchart LR
 
 There is no application backend. The background service worker coordinates user-triggered capture; the side panel owns review and export; Dexie keeps persistence behind a repository boundary.
 
-More detail: [architecture](docs/architecture.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
+More detail: [architecture](docs/architecture.md) · [learning-card policy](docs/learning-card-policy.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
 
 ## Design choices worth discussing
 
@@ -74,6 +77,8 @@ This project is intentionally not a feature catalogue.
 - **Manual capture over ambient scraping.** The extension wakes up because the user selected something.
 - **Generic web first.** A source-specific integration is an adapter, not the product boundary.
 - **Stable Collector IDs.** Export is an upsert workflow, not a repeated “add note” button.
+- **Captured evidence is not automatically a card.** Review derives one bounded proposal and requires explicit approval.
+- **No invented semantics.** If the corpus does not contain a meaning or usable retrieval cue, the policy asks for review instead of fabricating one.
 - **Partial failure isolation.** One rejected Anki note does not hide or stop the rest of a ready batch.
 - **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
 - **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
@@ -117,7 +122,7 @@ npm run build
 
 A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, keyboard review, and restricted-page failure. The same browser job runs axe against the rendered side panel to catch WCAG A/AA regressions. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
 
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts and partial failures, portable export formatting, a frozen IndexedDB v1 migration fixture, and browser permission/capture boundaries.
+Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deterministic learning-card proposals, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts and partial failures, portable export formatting, a frozen IndexedDB v1 migration fixture, and browser permission/capture boundaries.
 
 ## Release package
 

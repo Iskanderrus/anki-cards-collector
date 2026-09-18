@@ -1,4 +1,5 @@
 import type { CollectedItem } from "../core/types";
+import { proposeLearningCard } from "../learning/policy";
 
 function cleanCell(value: string): string {
   return value.replace(/[\t\r\n]+/g, " ").trim();
@@ -7,8 +8,13 @@ function cleanCell(value: string): string {
 export function toTsv(items: CollectedItem[]): string {
   const rows = items.map((item) => {
     const latest = item.occurrences.at(-1);
+    const proposal = proposeLearningCard(item);
     return [
       item.lexicalUnit.id,
+      proposal.cardKind,
+      proposal.prompt,
+      proposal.answer,
+      proposal.reason,
       item.lexicalUnit.displayText,
       latest?.context ?? "",
       item.lexicalUnit.note,
@@ -16,7 +22,10 @@ export function toTsv(items: CollectedItem[]): string {
     ].map(cleanCell).join("\t");
   });
 
-  return ["CollectorID\tExpression\tContext\tNote\tSource", ...rows].join("\n");
+  return [
+    "CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tExpression\tContext\tNote\tSource",
+    ...rows,
+  ].join("\n");
 }
 
 export function downloadText(filename: string, content: string, type: string): void {

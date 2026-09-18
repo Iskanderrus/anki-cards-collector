@@ -68,6 +68,18 @@ A new capture either creates a lexical unit or attaches another occurrence to an
 
 The unique `contentKey` is a local invariant. It gives the repository a simple idempotency boundary while still retaining repeated encounters.
 
+### Learning-card policy
+
+The persistent corpus is not the exported card format.
+
+The review layer derives one deterministic proposal from each `CollectedItem`. It classifies the material, uses captured context to build a retrieval prompt when possible, and refuses to invent semantic information that is not already present in the corpus or learner note.
+
+The proposal is intentionally not stored. Editing the source material recomputes it immediately, while `LexicalUnit.id` remains stable.
+
+`ready` means the user approved the current proposal for export.
+
+See [learning-card policy](learning-card-policy.md).
+
 ### Anki boundary
 
 `AnkiClient` is the only code that knows the AnkiConnect protocol.
@@ -75,11 +87,12 @@ The unique `contentKey` is a local invariant. It gives the repository a simple i
 Export follows an upsert path:
 
 1. make sure the target deck exists;
-2. make sure the Collector note type exists;
-3. use the locally stored Anki note id when possible;
-4. if needed, recover an existing note by `CollectorID`;
-5. update it or create it;
-6. persist the returned note id locally.
+2. make sure the Collector note type contains the proposal fields;
+3. derive the same reviewed prompt/answer shown in the side panel;
+4. use the locally stored Anki note id when possible;
+5. if needed, recover an existing note by `CollectorID`;
+6. update it or create it;
+7. persist the returned note id locally.
 
 The Collector ID is intentionally a first-class Anki field. Human-readable text can change; identity should not.
 
