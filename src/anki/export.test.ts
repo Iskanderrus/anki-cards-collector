@@ -3,7 +3,7 @@ import { toTsv } from "./export";
 import type { CollectedItem } from "../core/types";
 
 describe("toTsv", () => {
-  it("keeps one row per lexical unit and flattens multiline context", () => {
+  it("keeps one row per lexical unit and flattens multiline fields", () => {
     const item: CollectedItem = {
       lexicalUnit: {
         id: "unit-1",
@@ -11,7 +11,7 @@ describe("toTsv", () => {
         displayText: "aunque",
         normalizedText: "aunque",
         language: "es",
-        note: "",
+        note: "Contrast\nwith aunque sí.",
         status: "ready",
         createdAt: "2026-09-18T10:00:00Z",
         updatedAt: "2026-09-18T10:00:00Z",
@@ -30,6 +30,9 @@ describe("toTsv", () => {
       }],
     };
 
-    expect(toTsv([item])).toContain("aunque\tAunque llueva, voy.\thttps://example.com");
+    expect(toTsv([item])).toBe(
+      "CollectorID\tExpression\tContext\tNote\tSource\n" +
+      "unit-1\taunque\tAunque llueva, voy.\tContrast with aunque sí.\thttps://example.com",
+    );
   });
 });

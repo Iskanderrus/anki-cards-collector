@@ -2,7 +2,6 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-- edit expression, language, context, and learner notes before export;
 - restore a JSON backup, not only create one;
 - sanitise source URLs by default;
 - add browser-level integration tests for capture and side-panel messaging;

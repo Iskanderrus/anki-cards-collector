@@ -6,6 +6,14 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
 import { AnkiClient } from "../anki/client";
 import { downloadText, toTsv } from "../anki/export";
 
+interface EditDraft {
+  displayText: string;
+  language: string;
+  context: string;
+  note: string;
+  occurrenceId?: string;
+}
+
 function latestContext(item: CollectedItem): string {
   return item.occurrences.at(-1)?.context ?? "";
 }
@@ -26,6 +34,8 @@ function App(): React.ReactElement {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
   const load = useCallback(async () => {
     setItems(await repository.list());
@@ -72,6 +82,44 @@ function App(): React.ReactElement {
   async function changeStatus(id: string, status: ReviewStatus): Promise<void> {
     await repository.setStatus(id, status);
     await load();
+  }
+
+  function beginEdit(item: CollectedItem): void {
+    const occurrence = item.occurrences.at(-1);
+    setEditingId(item.lexicalUnit.id);
+    setEditDraft({
+      displayText: item.lexicalUnit.displayText,
+      language: item.lexicalUnit.language,
+      context: occurrence?.context ?? "",
+      note: item.lexicalUnit.note,
+      occurrenceId: occurrence?.id,
+    });
+    setError("");
+    setNotice("");
+  }
+
+  function cancelEdit(): void {
+    setEditingId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEdit(id: string): Promise<void> {
+    if (!editDraft) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await repository.update(id, editDraft);
+      cancelEdit();
+      setNotice("Changes saved. The next Anki export will update the same Collector note.");
+      await load();
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : "Could not save changes.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function exportToAnki(): Promise<void> {
@@ -194,6 +242,8 @@ function App(): React.ReactElement {
 
         {items.map((item) => {
           const unit = item.lexicalUnit;
+          const editing = editingId === unit.id && editDraft !== null;
+
           return (
             <article className="card" key={unit.id}>
               <div className="card-head">
@@ -206,25 +256,77 @@ function App(): React.ReactElement {
                 <span className="pill">{unit.status}</span>
               </div>
 
-              {latestContext(item) && <p className="context">{latestContext(item)}</p>}
-
-              <div className="card-actions">
-                {unit.status !== "ready" && (
-                  <button onClick={() => void changeStatus(unit.id, "ready")}>Ready</button>
-                )}
-                {unit.status !== "inbox" && (
-                  <button onClick={() => void changeStatus(unit.id, "inbox")}>Back to inbox</button>
-                )}
-                {unit.status !== "archived" && (
-                  <button className="ghost" onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
-                )}
-                <button
-                  className="ghost danger"
-                  onClick={() => void repository.remove(unit.id).then(load)}
+              {editing ? (
+                <form
+                  className="editor"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveEdit(unit.id);
+                  }}
                 >
-                  Delete
-                </button>
-              </div>
+                  <label>
+                    Expression
+                    <input
+                      autoFocus
+                      value={editDraft.displayText}
+                      onChange={(event) => setEditDraft({ ...editDraft, displayText: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Language code
+                    <input
+                      value={editDraft.language}
+                      onChange={(event) => setEditDraft({ ...editDraft, language: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Context
+                    <textarea
+                      rows={4}
+                      value={editDraft.context}
+                      onChange={(event) => setEditDraft({ ...editDraft, context: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Learner note
+                    <textarea
+                      rows={3}
+                      placeholder="Optional reminder, nuance, or usage note"
+                      value={editDraft.note}
+                      onChange={(event) => setEditDraft({ ...editDraft, note: event.target.value })}
+                    />
+                  </label>
+                  <div className="card-actions">
+                    <button className="primary" type="submit" disabled={busy}>Save</button>
+                    <button className="ghost" type="button" disabled={busy} onClick={cancelEdit}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  {latestContext(item) && <p className="context">{latestContext(item)}</p>}
+                  {unit.note && <p className="learner-note">{unit.note}</p>}
+
+                  <div className="card-actions">
+                    <button disabled={busy} onClick={() => beginEdit(item)}>Edit</button>
+                    {unit.status !== "ready" && (
+                      <button disabled={busy} onClick={() => void changeStatus(unit.id, "ready")}>Ready</button>
+                    )}
+                    {unit.status !== "inbox" && (
+                      <button disabled={busy} onClick={() => void changeStatus(unit.id, "inbox")}>Back to inbox</button>
+                    )}
+                    {unit.status !== "archived" && (
+                      <button className="ghost" disabled={busy} onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
+                    )}
+                    <button
+                      className="ghost danger"
+                      disabled={busy}
+                      onClick={() => void repository.remove(unit.id).then(load)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </>
+              )}
             </article>
           );
         })}

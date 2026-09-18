@@ -14,6 +14,7 @@ This repository contains the public implementation: deliberately small, local-fi
 - has a small Duolingo adapter for visible DOM context, without private APIs or network interception;
 - deduplicates lexical units while preserving repeated occurrences;
 - gives every item an inbox / ready / archived review state;
+- lets you correct the expression, language, context, and learner note before export;
 - exports ready items through AnkiConnect;
 - updates previously exported notes instead of blindly creating duplicates;
 - provides TSV and JSON fallbacks;
@@ -26,7 +27,7 @@ The extension does **not** continuously watch browsing, scrape credentials, read
 1. Open a page containing language you want to keep.
 2. Select a useful expression.
 3. Open the extension side panel and click **Collect selection** (or use **Collect for Anki** from the selection context menu).
-4. Review the captured expression and context.
+4. Review the captured expression and context. Correct them or add a learner note if needed.
 5. Mark it **Ready**.
 6. With Anki + AnkiConnect running, click **Send ready to Anki**.
 
@@ -71,6 +72,7 @@ This project is intentionally not a feature catalogue.
 - **Generic web first.** A source-specific integration is an adapter, not the product boundary.
 - **Stable Collector IDs.** Export is an upsert workflow, not a repeated “add note” button.
 - **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
+- **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
 - **Plain fallbacks.** TSV and JSON keep the user's data useful even if AnkiConnect is unavailable.
 
 The decisions and their consequences are recorded in the ADRs instead of being hidden in code comments.
@@ -107,7 +109,7 @@ npm run build
 
 `npm run check` runs all three. GitHub Actions runs the same check for pull requests.
 
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, deduplication with occurrence preservation, review state, and portable export formatting.
+Tests currently focus on the parts where accidental regressions are expensive: text normalisation, deduplication with occurrence preservation, edit collisions and identity, review state, Anki upserts, and portable export formatting.
 
 ## Scope
 
@@ -119,7 +121,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog includes richer editing before export, JSON restore, browser-level integration tests, accessibility work, and release packaging.
+The current hardening backlog includes JSON restore, browser-level integration tests, accessibility work, and release packaging.
 
 ## Disclaimer
 

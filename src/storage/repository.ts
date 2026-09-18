@@ -2,6 +2,14 @@ import type { CaptureDraft, CollectedItem, LexicalUnit, Occurrence, ReviewStatus
 import { makeContentKey, normalizeText } from "../core/normalize";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
+export interface EditLexicalUnitInput {
+  displayText: string;
+  language: string;
+  note: string;
+  occurrenceId?: string;
+  context?: string;
+}
+
 export class CaptureRepository {
   constructor(private readonly database: CollectorDatabase = defaultDb) {}
 
@@ -77,6 +85,61 @@ export class CaptureRepository {
         occurrences: (grouped.get(lexicalUnit.id) ?? [])
           .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt)),
       }));
+  }
+
+  async update(id: string, changes: EditLexicalUnitInput): Promise<CollectedItem> {
+    const displayText = normalizeText(changes.displayText);
+    if (!displayText) throw new Error("Expression cannot be empty.");
+
+    const language = changes.language.trim().toLowerCase() || "und";
+    const contentKey = makeContentKey(displayText, language);
+    const note = changes.note.trim().slice(0, 2000);
+    const now = new Date().toISOString();
+    let lexicalUnit!: LexicalUnit;
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      async () => {
+        const current = await this.database.lexicalUnits.get(id);
+        if (!current) throw new Error("Collected item no longer exists.");
+
+        const collision = await this.database.lexicalUnits.where("contentKey").equals(contentKey).first();
+        if (collision && collision.id !== id) {
+          throw new Error("Another collected item already uses this expression and language.");
+        }
+
+        lexicalUnit = {
+          ...current,
+          contentKey,
+          displayText,
+          normalizedText: displayText,
+          language,
+          note,
+          updatedAt: now,
+        };
+        await this.database.lexicalUnits.put(lexicalUnit);
+
+        if (changes.occurrenceId !== undefined && changes.context !== undefined) {
+          const occurrence = await this.database.occurrences.get(changes.occurrenceId);
+          if (!occurrence || occurrence.lexicalUnitId !== id) {
+            throw new Error("The selected context no longer belongs to this item.");
+          }
+
+          await this.database.occurrences.update(occurrence.id, {
+            context: normalizeText(changes.context).slice(0, 800),
+          });
+        }
+      },
+    );
+
+    const occurrences = await this.database.occurrences
+      .where("lexicalUnitId")
+      .equals(id)
+      .sortBy("capturedAt");
+
+    return { lexicalUnit, occurrences };
   }
 
   async setStatus(id: string, status: ReviewStatus): Promise<void> {
