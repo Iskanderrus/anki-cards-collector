@@ -3,13 +3,13 @@ import { toTsv } from "./export";
 import type { CollectedItem } from "../core/types";
 
 describe("toTsv", () => {
-  it("exports the same derived card proposal shown to the reviewer", () => {
+  it("exports canonical and observed forms with the reviewed proposal", () => {
     const item: CollectedItem = {
       lexicalUnit: {
         id: "unit-1",
-        contentKey: "es::tengo ganas de",
-        displayText: "tengo ganas de",
-        normalizedText: "tengo ganas de",
+        contentKey: "es::tener ganas de",
+        canonicalText: "tener ganas de",
+        normalizedCanonicalText: "tener ganas de",
         language: "es",
         note: "Want / feel like doing something.",
         status: "ready",
@@ -19,6 +19,8 @@ describe("toTsv", () => {
       occurrences: [{
         id: "occ-1",
         lexicalUnitId: "unit-1",
+        surfaceText: "tengo ganas de",
+        normalizedSurfaceText: "tengo ganas de",
         context: "Hoy tengo ganas de\nsalir a caminar por el centro.",
         capturedAt: "2026-09-18T10:00:00Z",
         source: {
@@ -33,10 +35,9 @@ describe("toTsv", () => {
     const result = toTsv([item]);
     const [header, row] = result.split("\n");
 
-    expect(header).toBe("CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tExpression\tContext\tNote\tSource");
+    expect(header).toBe("CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tCanonical\tObserved\tContext\tNote\tSource");
     expect(row).toContain("unit-1\tcontext-production\tHoy […] salir a caminar por el centro.");
-    expect(row).toContain("\ttengo ganas de Want / feel like doing something.\t");
-    expect(row).toContain("\ttengo ganas de\tHoy tengo ganas de salir a caminar por el centro.");
+    expect(row).toContain("\ttener ganas de\ttengo ganas de\tHoy tengo ganas de salir a caminar por el centro.");
     expect(row).toContain("\thttps://example.com");
   });
 });

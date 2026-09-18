@@ -10,6 +10,32 @@ const LEGACY_V1_SCHEMA = {
   occurrences: "&id, lexicalUnitId, capturedAt",
 } as const;
 
+interface LegacyLexicalUnitV1 {
+  id: string;
+  contentKey: string;
+  displayText: string;
+  normalizedText: string;
+  language: string;
+  note: string;
+  status: "inbox" | "ready" | "archived";
+  createdAt: string;
+  updatedAt: string;
+  ankiNoteId?: number;
+}
+
+interface LegacyOccurrenceV1 {
+  id: string;
+  lexicalUnitId: string;
+  context: string;
+  source: {
+    kind: "web" | "duolingo";
+    adapter: string;
+    url: string;
+    title: string;
+  };
+  capturedAt: string;
+}
+
 describe("CollectorDatabase migration baseline", () => {
   const databaseNames: string[] = [];
 
@@ -17,11 +43,11 @@ describe("CollectorDatabase migration baseline", () => {
     await Promise.all(databaseNames.splice(0).map((name) => Dexie.delete(name)));
   });
 
-  it("opens a frozen v1 corpus without losing identity, state, or occurrences", async () => {
+  it("migrates the frozen v1 corpus without losing identity, state, or occurrences", async () => {
     const name = `collector-v1-migration-${crypto.randomUUID()}`;
     databaseNames.push(name);
 
-    const lexicalUnit: LexicalUnit = {
+    const legacyUnit: LegacyLexicalUnitV1 = {
       id: "legacy-unit-1",
       contentKey: "es::aunque",
       displayText: "aunque",
@@ -33,9 +59,9 @@ describe("CollectorDatabase migration baseline", () => {
       updatedAt: "2026-01-12T12:00:00Z",
       ankiNoteId: 4242,
     };
-    const occurrence: Occurrence = {
+    const legacyOccurrence: LegacyOccurrenceV1 = {
       id: "legacy-occurrence-1",
-      lexicalUnitId: lexicalUnit.id,
+      lexicalUnitId: legacyUnit.id,
       context: "Aunque llueva, voy.",
       source: {
         kind: "web",
@@ -46,25 +72,44 @@ describe("CollectorDatabase migration baseline", () => {
       capturedAt: "2026-01-10T10:00:00Z",
     };
 
-    // This database is deliberately created without CollectorDatabase.
-    // Keep the literal v1 schema stable when future production versions are added.
     const legacy = new Dexie(name);
     legacy.version(1).stores(LEGACY_V1_SCHEMA);
     await legacy.open();
-    await legacy.table<LexicalUnit>("lexicalUnits").add(lexicalUnit);
-    await legacy.table<Occurrence>("occurrences").add(occurrence);
+    await legacy.table<LegacyLexicalUnitV1>("lexicalUnits").add(legacyUnit);
+    await legacy.table<LegacyOccurrenceV1>("occurrences").add(legacyOccurrence);
     legacy.close();
 
     const current = new CollectorDatabase(name);
     await current.open();
 
-    expect(await current.lexicalUnits.get(lexicalUnit.id)).toEqual(lexicalUnit);
-    expect(await current.occurrences.get(occurrence.id)).toEqual(occurrence);
+    const expectedUnit: LexicalUnit = {
+      id: legacyUnit.id,
+      contentKey: legacyUnit.contentKey,
+      canonicalText: "aunque",
+      normalizedCanonicalText: "aunque",
+      language: "es",
+      note: legacyUnit.note,
+      status: "ready",
+      createdAt: legacyUnit.createdAt,
+      updatedAt: legacyUnit.updatedAt,
+      ankiNoteId: 4242,
+    };
+    const expectedOccurrence: Occurrence = {
+      id: legacyOccurrence.id,
+      lexicalUnitId: legacyUnit.id,
+      surfaceText: "aunque",
+      normalizedSurfaceText: "aunque",
+      context: legacyOccurrence.context,
+      source: legacyOccurrence.source,
+      capturedAt: legacyOccurrence.capturedAt,
+    };
+
+    expect(await current.lexicalUnits.get(legacyUnit.id)).toEqual(expectedUnit);
+    expect(await current.occurrences.get(legacyOccurrence.id)).toEqual(expectedOccurrence);
 
     const listed = await new CaptureRepository(current).list();
-    expect(listed).toHaveLength(1);
-    expect(listed[0]?.lexicalUnit).toEqual(lexicalUnit);
-    expect(listed[0]?.occurrences).toEqual([occurrence]);
+    expect(listed[0]?.lexicalUnit).toEqual(expectedUnit);
+    expect(listed[0]?.occurrences).toEqual([expectedOccurrence]);
 
     current.close();
   });

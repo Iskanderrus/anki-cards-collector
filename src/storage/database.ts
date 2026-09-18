@@ -1,5 +1,17 @@
 import Dexie, { type EntityTable } from "dexie";
 import type { LexicalUnit, Occurrence } from "../core/types";
+import { normalizeIdentityText } from "../core/normalize";
+
+interface LegacyLexicalUnitV1 {
+  id: string;
+  displayText: string;
+  normalizedText: string;
+}
+
+interface LegacyOccurrenceV1 {
+  id: string;
+  lexicalUnitId: string;
+}
 
 export class CollectorDatabase extends Dexie {
   lexicalUnits!: EntityTable<LexicalUnit, "id">;
@@ -11,6 +23,30 @@ export class CollectorDatabase extends Dexie {
     this.version(1).stores({
       lexicalUnits: "&id, &contentKey, status, updatedAt",
       occurrences: "&id, lexicalUnitId, capturedAt",
+    });
+
+    this.version(2).stores({
+      lexicalUnits: "&id, &contentKey, status, updatedAt",
+      occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+    }).upgrade(async (transaction) => {
+      const legacyUnits = await transaction.table("lexicalUnits").toArray() as LegacyLexicalUnitV1[];
+      const legacyById = new Map(legacyUnits.map((unit) => [unit.id, unit]));
+
+      await transaction.table("lexicalUnits").toCollection().modify((value: Record<string, unknown>) => {
+        const displayText = String(value.displayText ?? "");
+        value.canonicalText = displayText;
+        value.normalizedCanonicalText = normalizeIdentityText(displayText);
+        delete value.displayText;
+        delete value.normalizedText;
+      });
+
+      await transaction.table("occurrences").toCollection().modify((value: Record<string, unknown>) => {
+        const occurrence = value as unknown as LegacyOccurrenceV1;
+        const legacyUnit = legacyById.get(occurrence.lexicalUnitId);
+        const surfaceText = legacyUnit?.displayText ?? "";
+        value.surfaceText = surfaceText;
+        value.normalizedSurfaceText = normalizeIdentityText(surfaceText);
+      });
     });
   }
 }

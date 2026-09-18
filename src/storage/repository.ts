@@ -1,13 +1,14 @@
-import type { BackupDocumentV1 } from "../backup/format";
+import type { BackupDocument } from "../backup/format";
 import type { CaptureDraft, CollectedItem, LexicalUnit, Occurrence, ReviewStatus } from "../core/types";
-import { makeContentKey, normalizeText } from "../core/normalize";
+import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
-  displayText: string;
+  canonicalText: string;
   language: string;
   note: string;
   occurrenceId?: string;
+  surfaceText?: string;
   context?: string;
 }
 
@@ -33,6 +34,7 @@ function occurrenceFingerprint(occurrence: Occurrence): string {
   return [
     occurrence.lexicalUnitId,
     occurrence.capturedAt,
+    occurrence.normalizedSurfaceText,
     normalizeText(occurrence.context),
     occurrence.source.kind,
     occurrence.source.adapter,
@@ -45,8 +47,16 @@ function sameOccurrence(left: Occurrence, right: Occurrence): boolean {
   return occurrenceFingerprint(left) === occurrenceFingerprint(right);
 }
 
+function combineNotes(primary: string, secondary: string): string {
+  const first = primary.trim();
+  const second = secondary.trim();
+  if (!first) return second.slice(0, 2000);
+  if (!second || first === second) return first.slice(0, 2000);
+  return `${first}\n\n${second}`.slice(0, 2000);
+}
+
 function buildRestorePlan(
-  backup: BackupDocumentV1,
+  backup: BackupDocument,
   localUnits: LexicalUnit[],
   localOccurrences: Occurrence[],
 ): RestorePlan {
@@ -76,7 +86,7 @@ function buildRestorePlan(
 
     if (contentOwner && contentOwner.id !== incoming.id) {
       preview.conflicts.push(
-        `Expression conflict: "${incoming.displayText}" (${incoming.language}) is already stored under another Collector ID.`,
+        `Canonical-form conflict: "${incoming.canonicalText}" (${incoming.language}) is already stored under another Collector ID.`,
       );
       conflictedUnitIds.add(incoming.id);
       continue;
@@ -159,12 +169,32 @@ function buildRestorePlan(
 export class CaptureRepository {
   constructor(private readonly database: CollectorDatabase = defaultDb) {}
 
-  async capture(draft: CaptureDraft): Promise<CollectedItem> {
-    const normalizedText = normalizeText(draft.text);
-    if (!normalizedText) throw new Error("Nothing selected.");
+  private async findUniqueUnitByObservedSurface(
+    normalizedSurfaceText: string,
+    language: string,
+  ): Promise<LexicalUnit | undefined> {
+    const occurrences = await this.database.occurrences
+      .where("normalizedSurfaceText")
+      .equals(normalizedSurfaceText)
+      .toArray();
 
+    const ids = [...new Set(occurrences.map((occurrence) => occurrence.lexicalUnitId))];
+    if (ids.length === 0) return undefined;
+
+    const units = (await this.database.lexicalUnits.bulkGet(ids))
+      .filter((unit): unit is LexicalUnit => unit !== undefined)
+      .filter((unit) => unit.language === language);
+
+    return units.length === 1 ? units[0] : undefined;
+  }
+
+  async capture(draft: CaptureDraft): Promise<CollectedItem> {
+    const surfaceText = normalizeText(draft.text);
+    if (!surfaceText) throw new Error("Nothing selected.");
+
+    const normalizedSurfaceText = normalizeIdentityText(surfaceText);
     const language = draft.language.trim().toLowerCase() || "und";
-    const contentKey = makeContentKey(normalizedText, language);
+    const directContentKey = makeContentKey(surfaceText, language);
     const now = draft.capturedAt || new Date().toISOString();
     let lexicalUnit!: LexicalUnit;
 
@@ -173,7 +203,14 @@ export class CaptureRepository {
       this.database.lexicalUnits,
       this.database.occurrences,
       async () => {
-        const existing = await this.database.lexicalUnits.where("contentKey").equals(contentKey).first();
+        const direct = await this.database.lexicalUnits
+          .where("contentKey")
+          .equals(directContentKey)
+          .first();
+        const observedOwner = direct
+          ? undefined
+          : await this.findUniqueUnitByObservedSurface(normalizedSurfaceText, language);
+        const existing = direct ?? observedOwner;
 
         if (existing) {
           lexicalUnit = { ...existing, updatedAt: now };
@@ -181,9 +218,9 @@ export class CaptureRepository {
         } else {
           lexicalUnit = {
             id: crypto.randomUUID(),
-            contentKey,
-            displayText: normalizedText,
-            normalizedText,
+            contentKey: directContentKey,
+            canonicalText: surfaceText,
+            normalizedCanonicalText: normalizedSurfaceText,
             language,
             note: "",
             status: "inbox",
@@ -196,6 +233,8 @@ export class CaptureRepository {
         await this.database.occurrences.add({
           id: crypto.randomUUID(),
           lexicalUnitId: lexicalUnit.id,
+          surfaceText,
+          normalizedSurfaceText,
           context: normalizeText(draft.context).slice(0, 800),
           source: draft.source,
           capturedAt: now,
@@ -234,14 +273,23 @@ export class CaptureRepository {
   }
 
   async update(id: string, changes: EditLexicalUnitInput): Promise<CollectedItem> {
-    const displayText = normalizeText(changes.displayText);
-    if (!displayText) throw new Error("Expression cannot be empty.");
+    const canonicalText = normalizeText(changes.canonicalText);
+    if (!canonicalText) throw new Error("Canonical form cannot be empty.");
 
     const language = changes.language.trim().toLowerCase() || "und";
-    const contentKey = makeContentKey(displayText, language);
-    const note = changes.note.trim().slice(0, 2000);
+    const normalizedCanonicalText = normalizeIdentityText(canonicalText);
+    const contentKey = makeContentKey(canonicalText, language);
+    const requestedNote = changes.note.trim().slice(0, 2000);
+    const requestedSurface = changes.surfaceText === undefined
+      ? undefined
+      : normalizeText(changes.surfaceText);
+    if (changes.surfaceText !== undefined && !requestedSurface) {
+      throw new Error("Observed form cannot be empty.");
+    }
+
     const now = new Date().toISOString();
     let lexicalUnit!: LexicalUnit;
+    let resultId = id;
 
     await this.database.transaction(
       "rw",
@@ -251,30 +299,103 @@ export class CaptureRepository {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
 
-        const collision = await this.database.lexicalUnits.where("contentKey").equals(contentKey).first();
+        const collision = await this.database.lexicalUnits
+          .where("contentKey")
+          .equals(contentKey)
+          .first();
+
         if (collision && collision.id !== id) {
-          throw new Error("Another collected item already uses this expression and language.");
+          if (
+            current.ankiNoteId !== undefined &&
+            collision.ankiNoteId !== undefined &&
+            current.ankiNoteId !== collision.ankiNoteId
+          ) {
+            throw new Error(
+              "Cannot consolidate these forms because both are linked to different Anki notes.",
+            );
+          }
+
+          const keepCurrent =
+            current.ankiNoteId !== undefined && collision.ankiNoteId === undefined;
+          const mergedNote = combineNotes(requestedNote, collision.note);
+          const createdAt = current.createdAt < collision.createdAt
+            ? current.createdAt
+            : collision.createdAt;
+
+          if (keepCurrent) {
+            await this.database.occurrences
+              .where("lexicalUnitId")
+              .equals(collision.id)
+              .modify({ lexicalUnitId: current.id });
+            await this.database.lexicalUnits.delete(collision.id);
+
+            lexicalUnit = {
+              ...current,
+              contentKey,
+              canonicalText,
+              normalizedCanonicalText,
+              language,
+              note: mergedNote,
+              status: "inbox",
+              createdAt,
+              updatedAt: now,
+            };
+            await this.database.lexicalUnits.put(lexicalUnit);
+            resultId = current.id;
+          } else {
+            await this.database.occurrences
+              .where("lexicalUnitId")
+              .equals(current.id)
+              .modify({ lexicalUnitId: collision.id });
+            await this.database.lexicalUnits.delete(current.id);
+
+            lexicalUnit = {
+              ...collision,
+              contentKey,
+              canonicalText,
+              normalizedCanonicalText,
+              language,
+              note: mergedNote,
+              status: "inbox",
+              createdAt,
+              updatedAt: now,
+            };
+            await this.database.lexicalUnits.put(lexicalUnit);
+            resultId = collision.id;
+          }
+        } else {
+          lexicalUnit = {
+            ...current,
+            contentKey,
+            canonicalText,
+            normalizedCanonicalText,
+            language,
+            note: requestedNote,
+            status: current.status === "ready" ? "inbox" : current.status,
+            updatedAt: now,
+          };
+          await this.database.lexicalUnits.put(lexicalUnit);
         }
 
-        lexicalUnit = {
-          ...current,
-          contentKey,
-          displayText,
-          normalizedText: displayText,
-          language,
-          note,
-          updatedAt: now,
-        };
-        await this.database.lexicalUnits.put(lexicalUnit);
-
-        if (changes.occurrenceId !== undefined && changes.context !== undefined) {
+        if (
+          changes.occurrenceId !== undefined &&
+          (changes.context !== undefined || requestedSurface !== undefined)
+        ) {
           const occurrence = await this.database.occurrences.get(changes.occurrenceId);
-          if (!occurrence || occurrence.lexicalUnitId !== id) {
-            throw new Error("The selected context no longer belongs to this item.");
+          if (!occurrence || occurrence.lexicalUnitId !== resultId) {
+            throw new Error("The selected occurrence no longer belongs to this item.");
           }
 
           await this.database.occurrences.update(occurrence.id, {
-            context: normalizeText(changes.context).slice(0, 800),
+            ...(changes.context === undefined
+              ? {}
+              : { context: normalizeText(changes.context).slice(0, 800) }),
+            ...(requestedSurface === undefined
+              ? {}
+              : {
+                  surfaceText: requestedSurface,
+                  normalizedSurfaceText: normalizeIdentityText(requestedSurface),
+                }),
           });
         }
       },
@@ -282,13 +403,13 @@ export class CaptureRepository {
 
     const occurrences = await this.database.occurrences
       .where("lexicalUnitId")
-      .equals(id)
+      .equals(resultId)
       .sortBy("capturedAt");
 
     return { lexicalUnit, occurrences };
   }
 
-  async previewRestore(backup: BackupDocumentV1): Promise<RestorePreview> {
+  async previewRestore(backup: BackupDocument): Promise<RestorePreview> {
     const [localUnits, localOccurrences] = await Promise.all([
       this.database.lexicalUnits.toArray(),
       this.database.occurrences.toArray(),
@@ -296,7 +417,7 @@ export class CaptureRepository {
     return buildRestorePlan(backup, localUnits, localOccurrences).preview;
   }
 
-  async restoreBackup(backup: BackupDocumentV1): Promise<RestorePreview> {
+  async restoreBackup(backup: BackupDocument): Promise<RestorePreview> {
     let completedPreview!: RestorePreview;
 
     await this.database.transaction(

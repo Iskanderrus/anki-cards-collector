@@ -20,8 +20,8 @@ export interface CaptureDraft {
 export interface LexicalUnit {
   id: string;
   contentKey: string;
-  displayText: string;
-  normalizedText: string;
+  canonicalText: string;
+  normalizedCanonicalText: string;
   language: string;
   note: string;
   status: ReviewStatus;
@@ -33,6 +33,8 @@ export interface LexicalUnit {
 export interface Occurrence {
   id: string;
   lexicalUnitId: string;
+  surfaceText: string;
+  normalizedSurfaceText: string;
   context: string;
   source: CaptureSource;
   capturedAt: string;

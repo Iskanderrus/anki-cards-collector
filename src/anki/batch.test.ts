@@ -7,8 +7,8 @@ function item(id: string, text: string): CollectedItem {
     lexicalUnit: {
       id,
       contentKey: `es::${text.toLowerCase()}`,
-      displayText: text,
-      normalizedText: text.toLowerCase(),
+      canonicalText: text,
+      normalizedCanonicalText: text.toLowerCase(),
       language: "es",
       note: "",
       status: "ready",
@@ -64,6 +64,7 @@ describe("exportBatch", () => {
       "failed",
       "exported",
     ]);
+    expect(progress.at(-1)?.currentText).toBe("tres");
     expect(progress.at(-1)?.completed).toBe(3);
     expect(progress.at(-1)?.total).toBe(3);
   });
@@ -93,6 +94,7 @@ describe("exportBatch", () => {
     expect(report.results[0]).toMatchObject({
       kind: "exported_untracked",
       noteId: 4242,
+      canonicalText: "uno",
     });
   });
 

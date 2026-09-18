@@ -3,13 +3,16 @@ import type { CollectedItem } from "../core/types";
 import { classifyLearningUnit, proposeLearningCard } from "./policy";
 
 function item(
-  expression: string,
+  canonicalText: string,
+  surfaceText: string,
   context: string,
   options: { note?: string; occurrences?: number } = {},
 ): CollectedItem {
   const occurrences = Array.from({ length: options.occurrences ?? 1 }, (_, index) => ({
     id: `occ-${index + 1}`,
     lexicalUnitId: "unit-1",
+    surfaceText,
+    normalizedSurfaceText: surfaceText.toLocaleLowerCase(),
     context,
     source: {
       kind: "web" as const,
@@ -23,9 +26,9 @@ function item(
   return {
     lexicalUnit: {
       id: "unit-1",
-      contentKey: `es::${expression.toLocaleLowerCase()}`,
-      displayText: expression,
-      normalizedText: expression.toLocaleLowerCase(),
+      contentKey: `es::${canonicalText.toLocaleLowerCase()}`,
+      canonicalText,
+      normalizedCanonicalText: canonicalText.toLocaleLowerCase(),
       language: "es",
       note: options.note ?? "",
       status: "inbox",
@@ -37,39 +40,39 @@ function item(
 }
 
 describe("learning-card policy", () => {
-  it("classifies words, chunks, and sentences deterministically", () => {
+  it("classifies the canonical learning target", () => {
     expect(classifyLearningUnit("aunque")).toBe("word");
-    expect(classifyLearningUnit("tengo ganas de")).toBe("chunk");
+    expect(classifyLearningUnit("tener ganas de")).toBe("chunk");
     expect(classifyLearningUnit("Aunque llueva, voy a caminar porque necesito aire.")).toBe("sentence");
   });
 
-  it("prefers contextual production for a captured multi-word surface form", () => {
+  it("clozes the observed surface form while retaining the canonical form", () => {
     const proposal = proposeLearningCard(
-      item("tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
+      item("tener ganas de", "tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
     );
 
     expect(proposal).toMatchObject({
       unitKind: "chunk",
       cardKind: "context-production",
       prompt: "Hoy […] salir a caminar por el centro.",
-      answer: "tengo ganas de",
       recommended: true,
     });
+    expect(proposal.answer).toBe("tengo ganas de\n\nCanonical: tener ganas de");
   });
 
-  it("does not guess morphology when an edited expression no longer occurs in context", () => {
+  it("keeps the canonical form visible for an inflected single-word observation", () => {
     const proposal = proposeLearningCard(
-      item("tener ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
+      item("tener", "tengo", "Hoy tengo mucho trabajo."),
     );
 
-    expect(proposal.cardKind).toBe("context-recognition");
-    expect(proposal.recommended).toBe(false);
-    expect(proposal.warning).toContain("context");
+    expect(proposal.prompt).toBe("tengo");
+    expect(proposal.answer).toContain("Canonical: tener");
+    expect(proposal.answer).toContain("Hoy tengo mucho trabajo.");
   });
 
   it("does not invent a meaning for a word without a learner note", () => {
     const proposal = proposeLearningCard(
-      item("aunque", "Aunque llueva, voy a caminar."),
+      item("aunque", "aunque", "Aunque llueva, voy a caminar."),
     );
 
     expect(proposal.cardKind).toBe("context-recognition");
@@ -77,9 +80,9 @@ describe("learning-card policy", () => {
     expect(proposal.reason).toContain("No meaning is generated automatically");
   });
 
-  it("uses a learner note as the explicit review target for a single word", () => {
+  it("uses a learner note as the explicit review target", () => {
     const proposal = proposeLearningCard(
-      item("aunque", "Aunque llueva, voy a caminar.", { note: "although / even though" }),
+      item("aunque", "aunque", "Aunque llueva, voy a caminar.", { note: "although / even though" }),
     );
 
     expect(proposal.answer).toContain("although / even though");
@@ -89,24 +92,29 @@ describe("learning-card policy", () => {
 
   it("blocks a sentence that has no broader context and no learner note", () => {
     const sentence = "Aunque llueva, voy a caminar porque necesito un poco de aire fresco.";
-    const proposal = proposeLearningCard(item(sentence, sentence));
+    const proposal = proposeLearningCard(item(sentence, sentence, sentence));
 
     expect(proposal.unitKind).toBe("sentence");
     expect(proposal.recommended).toBe(false);
     expect(proposal.warning).toContain("learner note");
   });
 
-  it("blocks captures that are too broad for one retrieval target", () => {
-    const expression = Array.from({ length: 26 }, (_, index) => `palabra${index}`).join(" ");
-    const proposal = proposeLearningCard(item(expression, expression, { note: "Long passage" }));
+  it("blocks canonical targets that are too broad", () => {
+    const canonical = Array.from({ length: 26 }, (_, index) => `palabra${index}`).join(" ");
+    const proposal = proposeLearningCard(item(canonical, canonical, canonical, { note: "Long passage" }));
 
     expect(proposal.recommended).toBe(false);
     expect(proposal.reason).toContain("too broad");
   });
 
-  it("uses repeated encounters as evidence without proposing another card", () => {
+  it("uses repeated occurrences as evidence without proposing another card", () => {
     const proposal = proposeLearningCard(
-      item("tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro.", { occurrences: 3 }),
+      item(
+        "tener ganas de",
+        "tengo ganas de",
+        "Hoy tengo ganas de salir a caminar por el centro.",
+        { occurrences: 3 },
+      ),
     );
 
     expect(proposal.reason).toContain("Seen 3 times");

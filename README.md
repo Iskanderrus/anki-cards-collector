@@ -12,7 +12,8 @@ This repository contains the public implementation: deliberately small, local-fi
 - keeps the surrounding visible context and a privacy-filtered source URL;
 - works on arbitrary web pages, not only one learning platform;
 - has a small Duolingo adapter for visible DOM context, without private APIs or network interception;
-- deduplicates lexical units while preserving repeated occurrences;
+- separates a canonical lexical unit from the surface forms actually observed on pages;
+- deduplicates lexical units while preserving repeated occurrences and their observed forms;
 - gives every item an inbox / ready / archived review state;
 - supports keyboard-first review with J/K or arrow navigation and E/R/I/A actions;
 - lets you correct the expression, language, context, and learner note before export;
@@ -42,12 +43,14 @@ If Anki is not available, download the ready items as TSV. JSON backup preserves
 
 A phrase and an encounter with that phrase are not the same thing.
 
-If I collect `tener ganas de` today and meet it again next week in a different sentence, I want one lexical item and two pieces of evidence. The model therefore separates:
+The learning target and the text that appeared on a page are not always identical. I may observe `tengo ganas de`, but decide that the canonical unit I want to keep is `tener ganas de`.
 
-- **LexicalUnit** — the thing I may want to learn;
-- **Occurrence** — where and how I met it.
+The model therefore separates:
 
-That distinction makes deduplication useful without throwing away the context in which an expression appeared.
+- **LexicalUnit** — the canonical thing I may want to learn;
+- **Occurrence** — one observed surface form, its context, and its source.
+
+If `tengo ganas de`, `tenía ganas de`, and `tener ganas de` are consolidated under the same canonical unit, those forms remain separate occurrences rather than being flattened away. A later capture of an already-observed surface form routes back to that canonical unit.
 
 ## Architecture
 
@@ -80,6 +83,7 @@ This project is intentionally not a feature catalogue.
 - **Captured evidence is not automatically a card.** Review derives one bounded proposal and requires explicit approval.
 - **No invented semantics.** If the corpus does not contain a meaning or usable retrieval cue, the policy asks for review instead of fabricating one.
 - **Partial failure isolation.** One rejected Anki note does not hide or stop the rest of a ready batch.
+- **Observed forms survive canonicalization.** Inflected or contextual surface forms live on occurrences instead of being overwritten by the canonical learning target.
 - **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
 - **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
 - **Dry-run restore.** Backup parsing, merge planning, and transactional restore share the same invariants.
