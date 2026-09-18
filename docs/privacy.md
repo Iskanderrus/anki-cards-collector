@@ -10,6 +10,8 @@ Settings live in `chrome.storage.local`.
 
 The extension has no application server, analytics SDK, telemetry endpoint, or account system.
 
+JSON backup and restore are local operations. A backup file is created in the browser, and a selected restore file is parsed, validated, previewed, and merged inside the extension. It is not uploaded anywhere.
+
 ## Page access
 
 The manifest does not install a persistent content script across every site.

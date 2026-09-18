@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { BackupDocumentV1 } from "../backup/format";
+import { parseBackup, serializeBackup } from "../backup/format";
 import type { CollectedItem, CollectorSettings, ReviewStatus } from "../core/types";
+import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
 import { AnkiClient } from "../anki/client";
@@ -36,6 +39,8 @@ function App(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [pendingBackup, setPendingBackup] = useState<BackupDocumentV1 | null>(null);
+  const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
 
   const load = useCallback(async () => {
     setItems(await repository.list());
@@ -171,9 +176,72 @@ function App(): React.ReactElement {
   function backupJson(): void {
     downloadText(
       "anki-cards-collector-backup.json",
-      JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), items }, null, 2),
+      serializeBackup(items),
       "application/json;charset=utf-8",
     );
+  }
+
+  async function previewBackupFile(file: File | undefined): Promise<void> {
+    if (!file) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setPendingBackup(null);
+    setRestorePreview(null);
+
+    try {
+      const backup = parseBackup(await file.text());
+      const preview = await repository.previewRestore(backup);
+      setPendingBackup(backup);
+      setRestorePreview(preview);
+
+      if (preview.conflicts.length > 0) {
+        setError(
+          `Backup has ${preview.conflicts.length} conflict${preview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
+        );
+      } else {
+        setNotice("Backup validated. Review the dry-run counts before restoring.");
+      }
+    } catch (backupError) {
+      setError(backupError instanceof Error ? backupError.message : "Could not read backup.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function clearRestorePreview(): void {
+    setPendingBackup(null);
+    setRestorePreview(null);
+  }
+
+  async function restorePendingBackup(): Promise<void> {
+    if (!pendingBackup || !restorePreview || restorePreview.conflicts.length > 0) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const result = await repository.restoreBackup(pendingBackup);
+      clearRestorePreview();
+      await load();
+
+      const changed =
+        result.lexicalUnitsAdded +
+        result.lexicalUnitsUpdated +
+        result.occurrencesAdded +
+        result.occurrencesUpdated;
+      setNotice(
+        changed === 0
+          ? "Backup is already fully represented in the local corpus."
+          : `Backup restored: ${result.lexicalUnitsAdded} items added, ${result.lexicalUnitsUpdated} updated, ${result.occurrencesAdded} occurrences added.`,
+      );
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "Backup restore failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -227,9 +295,54 @@ function App(): React.ReactElement {
             />
           </label>
           <div className="toolbar">
-            <button className="ghost" onClick={exportTsv}>Download ready as TSV</button>
-            <button className="ghost" onClick={backupJson}>Backup JSON</button>
+            <button className="ghost" disabled={busy} onClick={exportTsv}>Download ready as TSV</button>
+            <button className="ghost" disabled={busy} onClick={backupJson}>Backup JSON</button>
           </div>
+
+          <label>
+            Restore JSON backup
+            <input
+              type="file"
+              accept=".json,application/json"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                void previewBackupFile(file);
+              }}
+            />
+          </label>
+
+          {restorePreview && (
+            <div className="restore-preview">
+              <strong>Restore preview</strong>
+              <div className="restore-stats">
+                <span>{restorePreview.lexicalUnitsAdded} items to add</span>
+                <span>{restorePreview.lexicalUnitsUpdated} items to update</span>
+                <span>{restorePreview.lexicalUnitsSkipped} items unchanged</span>
+                <span>{restorePreview.occurrencesAdded} occurrences to add</span>
+                <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
+                <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
+              </div>
+
+              {restorePreview.conflicts.length > 0 && (
+                <ul className="conflict-list">
+                  {restorePreview.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
+                </ul>
+              )}
+
+              <div className="toolbar">
+                <button
+                  className="primary"
+                  disabled={busy || restorePreview.conflicts.length > 0}
+                  onClick={() => void restorePendingBackup()}
+                >
+                  Restore backup
+                </button>
+                <button className="ghost" disabled={busy} onClick={clearRestorePreview}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       </details>
 
