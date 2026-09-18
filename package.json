@@ -19,9 +19,9 @@
     "@types/chrome": "^0.0.326",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "esbuild": "^0.25.5",
+    "esbuild": "0.28.2",
     "fake-indexeddb": "^6.0.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.1"
   }
 }
