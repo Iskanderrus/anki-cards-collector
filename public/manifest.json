@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Anki Cards Collector",
+  "version": "0.1.0",
+  "description": "Collect words and phrases from the web, review them locally, then send the useful ones to Anki.",
+  "permissions": ["activeTab", "contextMenus", "scripting", "sidePanel", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Anki Cards Collector"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
