@@ -1,0 +1,19 @@
+import { describe, expect, it } from "vitest";
+import { makeContentKey, normalizeText } from "./normalize";
+
+describe("normalizeText", () => {
+  it("collapses whitespace without changing meaningful punctuation", () => {
+    expect(normalizeText("  ¿Qué   tal?\n")).toBe("¿Qué tal?");
+  });
+
+  it("normalizes unicode compatibility forms", () => {
+    expect(normalizeText("ＡＢＣ")).toBe("ABC");
+  });
+});
+
+describe("makeContentKey", () => {
+  it("deduplicates case and whitespace for the same language", () => {
+    expect(makeContentKey("  Hola   mundo ", "ES"))
+      .toBe(makeContentKey("hola mundo", "es"));
+  });
+});
