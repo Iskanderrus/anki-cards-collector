@@ -1,6 +1,7 @@
-import { repository } from "./storage/repository";
+import { sanitizeSourceUrl } from "./capture/source-url";
+import type { CaptureDraft, SourceUrlMode } from "./core/types";
 import { loadSettings } from "./settings";
-import type { CaptureDraft } from "./core/types";
+import { repository } from "./storage/repository";
 
 type CaptureResponse = { ok: true; draft: CaptureDraft | null } | { ok: false; error: string };
 
@@ -8,7 +9,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Capture failed.";
 }
 
-async function collectFromTab(tabId: number, language: string): Promise<void> {
+async function collectFromTab(
+  tabId: number,
+  language: string,
+  sourceUrlMode: SourceUrlMode,
+): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ["content.js"],
@@ -21,7 +26,14 @@ async function collectFromTab(tabId: number, language: string): Promise<void> {
   if (!response?.ok) throw new Error(response?.error ?? "Could not read the current selection.");
   if (!response.draft) throw new Error("Select a word, phrase, or sentence first.");
 
-  await repository.capture({ ...response.draft, language });
+  await repository.capture({
+    ...response.draft,
+    language,
+    source: {
+      ...response.draft.source,
+      url: sanitizeSourceUrl(response.draft.source.url, sourceUrlMode),
+    },
+  });
   chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
 }
 
@@ -44,7 +56,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
     try {
       const settings = await loadSettings();
-      await collectFromTab(tabId, settings.defaultLanguage);
+      await collectFromTab(tabId, settings.defaultLanguage, settings.sourceUrlMode);
     } catch (error) {
       chrome.runtime.sendMessage({
         type: "CAPTURE_ERROR",
@@ -63,7 +75,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (tab?.id === undefined) throw new Error("No active browser tab.");
 
       const settings = await loadSettings();
-      await collectFromTab(tab.id, message.language ?? settings.defaultLanguage);
+      await collectFromTab(
+        tab.id,
+        message.language ?? settings.defaultLanguage,
+        settings.sourceUrlMode,
+      );
       sendResponse({ ok: true });
     } catch (error) {
       sendResponse({ ok: false, error: errorMessage(error) });

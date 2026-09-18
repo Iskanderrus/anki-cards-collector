@@ -9,7 +9,7 @@ This repository contains the public implementation: deliberately small, local-fi
 ## What it does
 
 - captures an explicit text selection from the current page;
-- keeps the surrounding visible context and source URL;
+- keeps the surrounding visible context and a privacy-filtered source URL;
 - works on arbitrary web pages, not only one learning platform;
 - has a small Duolingo adapter for visible DOM context, without private APIs or network interception;
 - deduplicates lexical units while preserving repeated occurrences;
@@ -19,6 +19,7 @@ This repository contains the public implementation: deliberately small, local-fi
 - updates previously exported notes instead of blindly creating duplicates;
 - provides TSV fallback plus versioned JSON backup and restore;
 - validates and previews a JSON restore before writing anything;
+- lets source URL retention be set to origin+path, non-tracking query parameters, or no URL;
 - stores the collection locally in IndexedDB.
 
 The extension does **not** continuously watch browsing, scrape credentials, read cookies, call Duolingo private APIs, or send study data to a server.
@@ -75,6 +76,7 @@ This project is intentionally not a feature catalogue.
 - **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
 - **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
 - **Dry-run restore.** Backup parsing, merge planning, and transactional restore share the same invariants.
+- **Privacy-filtered sources.** Raw page URLs are reduced before persistence; credentials/fragments never reach the local corpus.
 - **Plain fallbacks.** TSV and JSON keep the user's data useful even if AnkiConnect is unavailable.
 
 The decisions and their consequences are recorded in the ADRs instead of being hidden in code comments.
@@ -111,7 +113,7 @@ npm run build
 
 `npm run check` runs all three. GitHub Actions runs the same check for pull requests.
 
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, and portable export formatting.
+Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, and portable export formatting.
 
 ## Scope
 
@@ -123,7 +125,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog includes URL sanitisation, browser-level integration tests, accessibility work, and release packaging.
+The current hardening backlog includes browser-level integration tests, accessibility work, and release packaging.
 
 ## Disclaimer
 

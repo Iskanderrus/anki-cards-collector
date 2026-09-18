@@ -4,6 +4,7 @@ export const DEFAULT_SETTINGS: CollectorSettings = {
   defaultLanguage: "und",
   deckName: "Collector Inbox",
   modelName: "Collector Basic",
+  sourceUrlMode: "sanitized",
 };
 
 export async function loadSettings(): Promise<CollectorSettings> {

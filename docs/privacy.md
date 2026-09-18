@@ -39,11 +39,20 @@ The only declared host permission is AnkiConnect on localhost:
 
 That connection is used only when the user starts an Anki export.
 
-## What a captured URL can reveal
+## Source URL retention
 
-A source URL is useful study context, but URLs can contain private identifiers or query parameters on some sites. The current implementation stores the source URL as-is.
+A source URL is useful study context, but URLs can contain credentials, private identifiers, query parameters, fragments, and tracking data.
 
-URL sanitisation is tracked as a public hardening item before packaging the extension for broader distribution.
+The default retention mode stores only the URL origin and path. Query parameters and fragments are removed.
+
+The settings panel exposes two explicit alternatives:
+
+- keep non-tracking query parameters when they are genuinely useful study context;
+- do not store the source URL at all.
+
+Credentials and fragments are never retained. Known tracking parameters such as `utm_*`, `gclid`, `fbclid`, and similar identifiers are removed even when useful query parameters are enabled.
+
+This policy applies before a capture is written to IndexedDB, so JSON backups and later Anki exports inherit the same retained URL rather than receiving the raw page URL.
 
 ## Public repository vs personal data
 

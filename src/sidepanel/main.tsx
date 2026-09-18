@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocumentV1 } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
-import type { CollectedItem, CollectorSettings, ReviewStatus } from "../core/types";
+import type { CollectedItem, CollectorSettings, ReviewStatus, SourceUrlMode } from "../core/types";
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
@@ -293,6 +293,23 @@ function App(): React.ReactElement {
               value={settings.modelName}
               onChange={(event) => void persistSettings({ ...settings, modelName: event.target.value })}
             />
+          </label>
+          <label>
+            Source URL retention
+            <select
+              value={settings.sourceUrlMode}
+              onChange={(event) => void persistSettings({
+                ...settings,
+                sourceUrlMode: event.target.value as SourceUrlMode,
+              })}
+            >
+              <option value="sanitized">Origin + path only (default)</option>
+              <option value="query">Keep non-tracking query parameters</option>
+              <option value="none">Do not store source URL</option>
+            </select>
+            <span className="setting-help">
+              Credentials and fragments are never stored. Tracking parameters are removed in every retained mode.
+            </span>
           </label>
           <div className="toolbar">
             <button className="ghost" disabled={busy} onClick={exportTsv}>Download ready as TSV</button>

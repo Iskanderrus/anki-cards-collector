@@ -1,5 +1,6 @@
 export type ReviewStatus = "inbox" | "ready" | "archived";
 export type SourceKind = "web" | "duolingo";
+export type SourceUrlMode = "sanitized" | "query" | "none";
 
 export interface CaptureSource {
   kind: SourceKind;
@@ -46,4 +47,5 @@ export interface CollectorSettings {
   defaultLanguage: string;
   deckName: string;
   modelName: string;
+  sourceUrlMode: SourceUrlMode;
 }
