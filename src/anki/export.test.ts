@@ -7,9 +7,9 @@ describe("toTsv", () => {
     const item: CollectedItem = {
       lexicalUnit: {
         id: "unit-1",
-        contentKey: "es::tener ganas de",
-        displayText: "tener ganas de",
-        normalizedText: "tener ganas de",
+        contentKey: "es::tengo ganas de",
+        displayText: "tengo ganas de",
+        normalizedText: "tengo ganas de",
         language: "es",
         note: "Want / feel like doing something.",
         status: "ready",
@@ -35,8 +35,8 @@ describe("toTsv", () => {
 
     expect(header).toBe("CollectorID\tCardKind\tPrompt\tAnswer\tWhy\tExpression\tContext\tNote\tSource");
     expect(row).toContain("unit-1\tcontext-production\tHoy […] salir a caminar por el centro.");
-    expect(row).toContain("\ttener ganas de Want / feel like doing something.\t");
-    expect(row).toContain("\ttener ganas de\tHoy tengo ganas de salir a caminar por el centro.");
+    expect(row).toContain("\ttengo ganas de Want / feel like doing something.\t");
+    expect(row).toContain("\ttengo ganas de\tHoy tengo ganas de salir a caminar por el centro.");
     expect(row).toContain("\thttps://example.com");
   });
 });

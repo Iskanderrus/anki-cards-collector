@@ -39,22 +39,32 @@ function item(
 describe("learning-card policy", () => {
   it("classifies words, chunks, and sentences deterministically", () => {
     expect(classifyLearningUnit("aunque")).toBe("word");
-    expect(classifyLearningUnit("tener ganas de")).toBe("chunk");
+    expect(classifyLearningUnit("tengo ganas de")).toBe("chunk");
     expect(classifyLearningUnit("Aunque llueva, voy a caminar porque necesito aire.")).toBe("sentence");
   });
 
-  it("prefers contextual production for a multi-word expression", () => {
+  it("prefers contextual production for a captured multi-word surface form", () => {
     const proposal = proposeLearningCard(
-      item("tener ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
+      item("tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
     );
 
     expect(proposal).toMatchObject({
       unitKind: "chunk",
       cardKind: "context-production",
       prompt: "Hoy […] salir a caminar por el centro.",
-      answer: "tener ganas de",
+      answer: "tengo ganas de",
       recommended: true,
     });
+  });
+
+  it("does not guess morphology when an edited expression no longer occurs in context", () => {
+    const proposal = proposeLearningCard(
+      item("tener ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
+    );
+
+    expect(proposal.cardKind).toBe("context-recognition");
+    expect(proposal.recommended).toBe(false);
+    expect(proposal.warning).toContain("context");
   });
 
   it("does not invent a meaning for a word without a learner note", () => {
@@ -96,7 +106,7 @@ describe("learning-card policy", () => {
 
   it("uses repeated encounters as evidence without proposing another card", () => {
     const proposal = proposeLearningCard(
-      item("tener ganas de", "Hoy tengo ganas de salir a caminar por el centro.", { occurrences: 3 }),
+      item("tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro.", { occurrences: 3 }),
     );
 
     expect(proposal.reason).toContain("Seen 3 times");
