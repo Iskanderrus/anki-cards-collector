@@ -16,7 +16,7 @@ This repository contains the public implementation: deliberately small, local-fi
 - gives every item an inbox / ready / archived review state;
 - supports keyboard-first review with J/K or arrow navigation and E/R/I/A actions;
 - lets you correct the expression, language, context, and learner note before export;
-- exports ready items through AnkiConnect;
+- exports ready items through AnkiConnect with live batch progress and per-item failure reporting;
 - updates previously exported notes instead of blindly creating duplicates;
 - provides TSV fallback plus versioned JSON backup and restore;
 - validates and previews a JSON restore before writing anything;
@@ -74,6 +74,7 @@ This project is intentionally not a feature catalogue.
 - **Manual capture over ambient scraping.** The extension wakes up because the user selected something.
 - **Generic web first.** A source-specific integration is an adapter, not the product boundary.
 - **Stable Collector IDs.** Export is an upsert workflow, not a repeated “add note” button.
+- **Partial failure isolation.** One rejected Anki note does not hide or stop the rest of a ready batch.
 - **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
 - **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
 - **Dry-run restore.** Backup parsing, merge planning, and transactional restore share the same invariants.
@@ -116,7 +117,7 @@ npm run build
 
 A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, keyboard review, and restricted-page failure. The same browser job runs axe against the rendered side panel to catch WCAG A/AA regressions. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
 
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts, portable export formatting, and browser permission/capture boundaries.
+Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts and partial failures, portable export formatting, and browser permission/capture boundaries.
 
 ## Scope
 
@@ -128,7 +129,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog includes export diagnostics, release packaging, and IndexedDB migration tests.
+The current hardening backlog includes release packaging and IndexedDB migration tests.
 
 ## Disclaimer
 

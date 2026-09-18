@@ -6,6 +6,7 @@ import type { CollectedItem, CollectorSettings, ReviewStatus, SourceUrlMode } fr
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
+import { exportReadyItems, type ExportFailure, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
 import { downloadText, toTsv } from "../anki/export";
 
@@ -42,6 +43,8 @@ function App(): React.ReactElement {
   const [pendingBackup, setPendingBackup] = useState<BackupDocumentV1 | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const [exportFailures, setExportFailures] = useState<ExportFailure[]>([]);
 
   const load = useCallback(async () => {
     const loadedItems = await repository.list();
@@ -144,20 +147,33 @@ function App(): React.ReactElement {
     setBusy(true);
     setError("");
     setNotice("");
+    setExportFailures([]);
+    setExportProgress(null);
 
     try {
       const client = new AnkiClient();
       await client.ping();
       await client.ensureDeckAndModel(settings);
 
-      let exported = 0;
-      for (const item of ready) {
-        const noteId = await client.upsert(item, settings);
-        await repository.setAnkiNoteId(item.lexicalUnit.id, noteId);
-        exported += 1;
+      const result = await exportReadyItems(
+        ready,
+        client,
+        settings,
+        (id, noteId) => repository.setAnkiNoteId(id, noteId),
+        setExportProgress,
+      );
+
+      setExportFailures(result.failures);
+
+      if (result.failures.length === 0) {
+        setNotice(`Sent ${result.succeeded} item${result.succeeded === 1 ? "" : "s"} to Anki.`);
+      } else {
+        setNotice(`Sent ${result.succeeded} of ${ready.length} ready items to Anki.`);
+        setError(
+          `${result.failures.length} item${result.failures.length === 1 ? "" : "s"} failed. Details are listed below.`,
+        );
       }
 
-      setNotice(`Sent ${exported} item${exported === 1 ? "" : "s"} to Anki.`);
       await load();
     } catch (ankiError) {
       setError(
@@ -166,6 +182,7 @@ function App(): React.ReactElement {
           : "Anki export failed.",
       );
     } finally {
+      setExportProgress(null);
       setBusy(false);
     }
   }
@@ -339,6 +356,36 @@ function App(): React.ReactElement {
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
+
+      {exportProgress && (
+        <div className="export-progress" role="status" aria-live="polite">
+          <progress
+            aria-label="Anki export progress"
+            value={exportProgress.completed}
+            max={exportProgress.total}
+          />
+          <span>
+            Sending {exportProgress.completed + 1}/{exportProgress.total}: {exportProgress.currentDisplayText}
+          </span>
+        </div>
+      )}
+
+      {exportFailures.length > 0 && (
+        <section className="export-errors" aria-label="Anki export failures">
+          <strong>Not sent</strong>
+          <ul>
+            {exportFailures.map((failure) => (
+              <li key={failure.id}>
+                <span>{failure.displayText}</span>
+                <span>{failure.message}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="setting-help">
+            Retry the ready batch after fixing the problem. Collector IDs make repeated export safe.
+          </p>
+        </section>
+      )}
 
       <div className="shortcuts" aria-label="Keyboard shortcuts">
         <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
