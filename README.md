@@ -119,6 +119,16 @@ A small Playwright suite loads the real unpacked Chromium extension and exercise
 
 Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts and partial failures, portable export formatting, a frozen IndexedDB v1 migration fixture, and browser permission/capture boundaries.
 
+## Release package
+
+```bash
+npm run package:store
+```
+
+This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
+
+The repository does not contain Chrome Web Store credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
+
 ## Scope
 
 The public repository is intentionally focused on the local capture → review → Anki workflow. Its roadmap covers maintenance and hardening of that implementation only.
@@ -129,7 +139,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog is focused on release packaging and browser-store readiness.
+Repository-side release packaging and store validation are implemented. First publication still requires the Chrome Web Store dashboard/account steps described in the release checklist.
 
 ## Disclaimer
 
