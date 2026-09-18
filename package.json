@@ -1,0 +1,27 @@
+{
+  "name": "anki-cards-collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first Chromium extension for collecting real language from the web and reviewing it before sending it to Anki.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.326",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "esbuild": "^0.25.5",
+    "fake-indexeddb": "^6.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
