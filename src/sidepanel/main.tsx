@@ -41,9 +41,16 @@ function App(): React.ReactElement {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [pendingBackup, setPendingBackup] = useState<BackupDocumentV1 | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setItems(await repository.list());
+    const loadedItems = await repository.list();
+    setItems(loadedItems);
+    setActiveId((current) => (
+      current && loadedItems.some((item) => item.lexicalUnit.id === current)
+        ? current
+        : loadedItems[0]?.lexicalUnit.id ?? null
+    ));
     setSettings(await loadSettings());
   }, []);
 
@@ -244,6 +251,70 @@ function App(): React.ReactElement {
     }
   }
 
+  useEffect(() => {
+    function isTypingTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+    }
+
+    function focusCard(id: string): void {
+      setActiveId(id);
+      requestAnimationFrame(() => {
+        const selector = `[data-card-id="${CSS.escape(id)}"]`;
+        const card = document.querySelector<HTMLElement>(selector);
+        card?.focus({ preventScroll: true });
+        card?.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    function onKeyDown(event: KeyboardEvent): void {
+      if (busy || editingId !== null || isTypingTarget(event.target) || items.length === 0) return;
+
+      const currentIndex = Math.max(
+        0,
+        items.findIndex((item) => item.lexicalUnit.id === activeId),
+      );
+      const key = event.key.toLowerCase();
+
+      if (key === "j" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const next = Math.min(items.length - 1, currentIndex + 1);
+        focusCard(items[next]!.lexicalUnit.id);
+        return;
+      }
+
+      if (key === "k" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const previous = Math.max(0, currentIndex - 1);
+        focusCard(items[previous]!.lexicalUnit.id);
+        return;
+      }
+
+      const activeItem = items[currentIndex];
+      if (!activeItem) return;
+
+      if (key === "e") {
+        event.preventDefault();
+        beginEdit(activeItem);
+        return;
+      }
+
+      const statusByKey: Partial<Record<string, ReviewStatus>> = {
+        r: "ready",
+        i: "inbox",
+        a: "archived",
+      };
+      const nextStatus = statusByKey[key];
+      if (nextStatus) {
+        event.preventDefault();
+        void changeStatus(activeItem.lexicalUnit.id, nextStatus);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeId, busy, editingId, items]);
+
   return (
     <main className="app">
       <header className="header">
@@ -266,8 +337,17 @@ function App(): React.ReactElement {
         <span>{items.length} unique total</span>
       </div>
 
-      {notice && <div className="notice">{notice}</div>}
-      {error && <div className="notice error">{error}</div>}
+      {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
+      {error && <div className="notice error" role="alert">{error}</div>}
+
+      <div className="shortcuts" aria-label="Keyboard shortcuts">
+        <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
+        <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
+        <span><kbd>E</kbd> edit</span>
+        <span><kbd>R</kbd> ready</span>
+        <span><kbd>I</kbd> inbox</span>
+        <span><kbd>A</kbd> archive</span>
+      </div>
 
       <details className="settings">
         <summary>Settings & fallback exports</summary>
@@ -373,9 +453,18 @@ function App(): React.ReactElement {
         {items.map((item) => {
           const unit = item.lexicalUnit;
           const editing = editingId === unit.id && editDraft !== null;
+          const active = activeId === unit.id;
 
           return (
-            <article className="card" key={unit.id}>
+            <article
+              className="card"
+              key={unit.id}
+              data-card-id={unit.id}
+              data-active={active ? "true" : "false"}
+              tabIndex={active ? 0 : -1}
+              aria-label={`Review ${unit.displayText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
+              onFocus={() => setActiveId(unit.id)}
+            >
               <div className="card-head">
                 <div>
                   <div className="term">{unit.displayText}</div>
@@ -437,15 +526,15 @@ function App(): React.ReactElement {
                   {unit.note && <p className="learner-note">{unit.note}</p>}
 
                   <div className="card-actions">
-                    <button disabled={busy} onClick={() => beginEdit(item)}>Edit</button>
+                    <button aria-keyshortcuts="E" disabled={busy} onClick={() => beginEdit(item)}>Edit</button>
                     {unit.status !== "ready" && (
-                      <button disabled={busy} onClick={() => void changeStatus(unit.id, "ready")}>Ready</button>
+                      <button aria-keyshortcuts="R" disabled={busy} onClick={() => void changeStatus(unit.id, "ready")}>Ready</button>
                     )}
                     {unit.status !== "inbox" && (
-                      <button disabled={busy} onClick={() => void changeStatus(unit.id, "inbox")}>Back to inbox</button>
+                      <button aria-keyshortcuts="I" disabled={busy} onClick={() => void changeStatus(unit.id, "inbox")}>Back to inbox</button>
                     )}
                     {unit.status !== "archived" && (
-                      <button className="ghost" disabled={busy} onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
+                      <button aria-keyshortcuts="A" className="ghost" disabled={busy} onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
                     )}
                     <button
                       className="ghost danger"

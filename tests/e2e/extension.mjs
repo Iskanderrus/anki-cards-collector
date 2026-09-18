@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -72,9 +73,14 @@ async function termCount(panel) {
   return panel.locator(".term").count();
 }
 
+async function cardForTerm(panel, term) {
+  return panel.locator(".card").filter({ has: panel.locator(".term", { hasText: term }) });
+}
+
 try {
   context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
+    colorScheme: "light",
     args: [
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,
@@ -118,6 +124,7 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
   await panel.locator(".notice.error").filter({ hasText: "Select a word, phrase, or sentence first." }).waitFor();
+  assert.equal(await panel.locator(".notice.error").getAttribute("role"), "alert");
   assert.equal(await termCount(panel), 1, "Empty selection must not add data.");
 
   // Chromium's native context-menu UI is not stable to automate. The E2E-only hook below
@@ -141,6 +148,49 @@ try {
   await panel.locator(".term", { hasText: "Context menu phrase" }).waitFor();
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
 
+  // Keyboard review: the first captured item remains active even though the newer item sorts above it.
+  await panel.bringToFront();
+  const firstCard = await cardForTerm(panel, "Aunque llueva");
+  await firstCard.focus();
+  assert.equal(await firstCard.getAttribute("data-active"), "true");
+
+  await panel.keyboard.press("k");
+  const secondCard = await cardForTerm(panel, "Context menu phrase");
+  await secondCard.waitFor();
+  assert.equal(await secondCard.getAttribute("data-active"), "true", "K should move to the previous visible card.");
+
+  await panel.keyboard.press("r");
+  await secondCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  await panel.keyboard.press("e");
+  await secondCard.locator(".editor").waitFor();
+  const noteField = secondCard.locator("textarea").last();
+  await noteField.focus();
+  await panel.keyboard.press("a");
+  assert.equal(
+    await secondCard.locator(".pill").innerText(),
+    "ready",
+    "Typing inside an editor must not trigger the Archive shortcut.",
+  );
+  await secondCard.getByRole("button", { name: "Cancel" }).click();
+
+  await secondCard.focus();
+  await panel.keyboard.press("ArrowDown");
+  assert.equal(
+    await firstCard.getAttribute("data-active"),
+    "true",
+    "ArrowDown should move to the next visible card.",
+  );
+
+  const accessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    accessibility.violations.length,
+    0,
+    `Accessibility violations:\n${JSON.stringify(accessibility.violations, null, 2)}`,
+  );
+
   // Restricted browser pages cannot be scripted. The user gets a visible error and no data write.
   const restrictedPage = await context.newPage();
   await restrictedPage.goto("chrome://version/");
@@ -159,7 +209,7 @@ try {
   );
   assert.equal(await termCount(panel), 2, "Restricted-page failure must not add data.");
 
-  console.log("Browser extension capture and permission checks passed.");
+  console.log("Browser extension capture, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
   await new Promise((resolveClose) => server.close(resolveClose));
