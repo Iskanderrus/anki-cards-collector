@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CollectedItem, CollectorSettings } from "../core/types";
-import { exportReadyItems } from "./batch";
+import { exportBatch, type AnkiExportClient, type ExportProgress } from "./batch";
 
-function item(id: string, displayText: string): CollectedItem {
+function item(id: string, text: string): CollectedItem {
   return {
     lexicalUnit: {
       id,
-      contentKey: `es::${displayText.toLowerCase()}`,
-      displayText,
-      normalizedText: displayText,
+      contentKey: `es::${text.toLowerCase()}`,
+      displayText: text,
+      normalizedText: text.toLowerCase(),
       language: "es",
       note: "",
       status: "ready",
-      createdAt: "2026-09-18T10:00:00Z",
-      updatedAt: "2026-09-18T10:00:00Z",
+      createdAt: "2026-09-19T00:00:00Z",
+      updatedAt: "2026-09-19T00:00:00Z",
     },
     occurrences: [],
   };
@@ -26,68 +26,93 @@ const settings: CollectorSettings = {
   sourceUrlMode: "sanitized",
 };
 
-describe("exportReadyItems", () => {
-  it("continues after an item failure and persists successful note IDs", async () => {
-    const items = [
-      item("unit-1", "aunque"),
-      item("unit-2", "porque"),
-      item("unit-3", "todavía"),
-    ];
+describe("exportBatch", () => {
+  it("continues after an item fails and persists successful note IDs", async () => {
     const upsert = vi.fn(async (current: CollectedItem) => {
-      if (current.lexicalUnit.id === "unit-2") {
-        throw new Error("Anki rejected this note.");
-      }
-      return current.lexicalUnit.id === "unit-1" ? 101 : 303;
+      if (current.lexicalUnit.id === "two") throw new Error("Rejected note");
+      return current.lexicalUnit.id === "one" ? 101 : 303;
     });
-    const persistNoteId = vi.fn(async () => undefined);
-    const progress = vi.fn();
 
-    const result = await exportReadyItems(
-      items,
-      { upsert },
+    const client: AnkiExportClient = {
+      ping: vi.fn(async () => 6),
+      ensureDeckAndModel: vi.fn(async () => undefined),
+      upsert,
+    };
+    const persisted: Array<[string, number]> = [];
+    const progress: ExportProgress[] = [];
+
+    const report = await exportBatch(
+      [item("one", "uno"), item("two", "dos"), item("three", "tres")],
       settings,
-      persistNoteId,
-      progress,
+      client,
+      async (id, noteId) => {
+        persisted.push([id, noteId]);
+      },
+      (value) => progress.push(value),
     );
 
-    expect(result).toEqual({
-      succeeded: 2,
-      failures: [{
-        id: "unit-2",
-        displayText: "porque",
-        message: "Anki rejected this note.",
-      }],
-    });
     expect(upsert).toHaveBeenCalledTimes(3);
-    expect(persistNoteId.mock.calls).toEqual([
-      ["unit-1", 101],
-      ["unit-3", 303],
+    expect(persisted).toEqual([["one", 101], ["three", 303]]);
+    expect(report).toMatchObject({
+      total: 3,
+      exported: 2,
+      failed: 1,
+      warnings: 0,
+    });
+    expect(report.results.map((result) => result.kind)).toEqual([
+      "exported",
+      "failed",
+      "exported",
     ]);
-    expect(progress.mock.calls.map(([value]) => value)).toEqual([
-      { completed: 0, total: 3, currentDisplayText: "aunque" },
-      { completed: 1, total: 3, currentDisplayText: "porque" },
-      { completed: 2, total: 3, currentDisplayText: "todavía" },
-    ]);
+    expect(progress.at(-1)?.completed).toBe(3);
+    expect(progress.at(-1)?.total).toBe(3);
   });
 
-  it("reports local note-id persistence failures so a safe retry can recover", async () => {
-    const current = item("unit-1", "aunque");
-    const persistNoteId = vi.fn(async () => {
-      throw new Error("IndexedDB write failed.");
-    });
+  it("reports a local persistence warning without calling the Anki export a failure", async () => {
+    const client: AnkiExportClient = {
+      ping: vi.fn(async () => 6),
+      ensureDeckAndModel: vi.fn(async () => undefined),
+      upsert: vi.fn(async () => 4242),
+    };
 
-    const result = await exportReadyItems(
-      [current],
-      { upsert: vi.fn(async () => 101) },
+    const report = await exportBatch(
+      [item("one", "uno")],
       settings,
-      persistNoteId,
+      client,
+      async () => {
+        throw new Error("IndexedDB unavailable");
+      },
     );
 
-    expect(result.succeeded).toBe(0);
-    expect(result.failures).toEqual([{
-      id: "unit-1",
-      displayText: "aunque",
-      message: "IndexedDB write failed.",
-    }]);
+    expect(report).toMatchObject({
+      total: 1,
+      exported: 1,
+      failed: 0,
+      warnings: 1,
+    });
+    expect(report.results[0]).toMatchObject({
+      kind: "exported_untracked",
+      noteId: 4242,
+    });
+  });
+
+  it("stops before item processing when Anki setup fails", async () => {
+    const upsert = vi.fn(async () => 1);
+    const client: AnkiExportClient = {
+      ping: vi.fn(async () => {
+        throw new Error("Anki is offline");
+      }),
+      ensureDeckAndModel: vi.fn(async () => undefined),
+      upsert,
+    };
+
+    await expect(exportBatch(
+      [item("one", "uno")],
+      settings,
+      client,
+      async () => undefined,
+    )).rejects.toThrow("Anki is offline");
+
+    expect(upsert).not.toHaveBeenCalled();
   });
 });

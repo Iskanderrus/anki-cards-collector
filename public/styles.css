@@ -68,39 +68,6 @@ kbd {
   font-size: 13px;
 }
 .notice.error { border: 1px solid #d92d20; }
-.export-progress {
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-  color: color-mix(in srgb, CanvasText 76%, transparent);
-}
-.export-progress progress {
-  width: 100%;
-}
-.export-errors {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #d92d20;
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-.export-errors strong { font-size: 13px; }
-.export-errors ul {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding-left: 18px;
-}
-.export-errors li {
-  display: grid;
-  gap: 2px;
-  font-size: 12px;
-}
-.export-errors li span:first-child { font-weight: 650; }
-.export-errors li span:last-child {
-  color: color-mix(in srgb, CanvasText 72%, transparent);
-  overflow-wrap: anywhere;
-}
 .settings {
   border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
   border-radius: 12px;
@@ -202,3 +169,21 @@ summary:focus-visible {
   font-size: 11px;
   background: color-mix(in srgb, CanvasText 8%, transparent);
 }
+
+.export-progress {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, CanvasText 74%, transparent);
+}
+.export-progress progress { width: 100%; }
+.item-export-result {
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.35;
+  background: color-mix(in srgb, CanvasText 6%, transparent);
+}
+.item-export-result.error { border: 1px solid #d92d20; }
+.item-export-result.warning { border: 1px solid #b54708; }
+.item-export-result.success { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); }
