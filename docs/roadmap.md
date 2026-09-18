@@ -3,7 +3,6 @@
 This public roadmap tracks maintenance and hardening of the current extension.
 
 - add extension icons, screenshots, release packaging, and a signed browser-store build;
-- add migration tests as the IndexedDB schema evolves.
 
 ## Explicit non-goals for this repository
 
