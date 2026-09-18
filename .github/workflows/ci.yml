@@ -18,6 +18,13 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run check
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-release-package
+          path: release/*.zip
+          if-no-files-found: error
+          retention-days: 7
 
   browser:
     needs: check
@@ -31,3 +38,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build:e2e
       - run: xvfb-run -a npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sidepanel-store-preview
+          path: artifacts/sidepanel-store-preview.png
+          if-no-files-found: error
+          retention-days: 7

@@ -2,9 +2,16 @@ import { build } from "esbuild";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 const e2e = process.env.COLLECTOR_E2E === "1";
+const release = process.env.COLLECTOR_RELEASE === "1";
+
+if (e2e && release) {
+  throw new Error("E2E and release build modes are mutually exclusive.");
+}
 
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
+
+const sourcemap = !release;
 
 await Promise.all([
   build({
@@ -14,7 +21,7 @@ await Promise.all([
     format: "esm",
     platform: "browser",
     target: "chrome120",
-    sourcemap: true,
+    sourcemap,
     minifySyntax: true,
     define: {
       __COLLECTOR_E2E__: JSON.stringify(e2e),
@@ -27,7 +34,7 @@ await Promise.all([
     format: "iife",
     platform: "browser",
     target: "chrome120",
-    sourcemap: true,
+    sourcemap,
   }),
   build({
     entryPoints: ["src/sidepanel/main.tsx"],
@@ -36,7 +43,7 @@ await Promise.all([
     format: "iife",
     platform: "browser",
     target: "chrome120",
-    sourcemap: true,
+    sourcemap,
   }),
 ]);
 
@@ -51,5 +58,6 @@ await writeFile("dist/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
 
 await cp("public/sidepanel.html", "dist/sidepanel.html");
 await cp("public/styles.css", "dist/styles.css");
+await cp("public/icons", "dist/icons", { recursive: true });
 
-console.log(`Built ${e2e ? "E2E" : "production"} extension into dist/`);
+console.log(`Built ${release ? "release" : e2e ? "E2E" : "development"} extension into dist/`);

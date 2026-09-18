@@ -2,7 +2,7 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-- add extension icons, screenshots, release packaging, and a signed browser-store build;
+Repository-side release packaging is implemented. The remaining release step is external: submit the validated ZIP through the browser-store publisher account and complete that store's review/signing flow.
 
 ## Explicit non-goals for this repository
 

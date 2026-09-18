@@ -64,7 +64,7 @@ flowchart LR
 
 There is no application backend. The background service worker coordinates user-triggered capture; the side panel owns review and export; Dexie keeps persistence behind a repository boundary.
 
-More detail: [architecture](docs/architecture.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
+More detail: [architecture](docs/architecture.md) · [privacy](docs/privacy.md) · [release checklist](docs/release.md) · [ADRs](docs/decisions/)
 
 ## Design choices worth discussing
 
@@ -111,9 +111,10 @@ The extension only requests localhost host access for AnkiConnect. Page access i
 npm run typecheck
 npm test
 npm run build
+npm run package
 ```
 
-`npm run check` runs all three and also asserts that the production manifest has no persistent all-sites content script or broad host permission.
+`npm run check` runs type checking, unit tests, the normal production build, and permission-boundary assertions. `npm run package` creates the source-map-free browser-store ZIP after validating its version, permissions, icons, and contents.
 
 A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, keyboard review, and restricted-page failure. The same browser job runs axe against the rendered side panel to catch WCAG A/AA regressions. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
 
@@ -129,7 +130,7 @@ See the [maintenance roadmap](docs/roadmap.md).
 
 **Working public release.**
 
-The current hardening backlog is focused on release packaging and browser-store readiness.
+Repository-side release packaging is implemented. Browser-store upload, review, and signing remain an external publisher-account step; see the [release checklist](docs/release.md).
 
 ## Disclaimer
 

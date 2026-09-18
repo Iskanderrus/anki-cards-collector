@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
@@ -95,6 +95,7 @@ try {
   await contentPage.goto(fixtureUrl);
 
   const panel = await context.newPage();
+  await panel.setViewportSize({ width: 420, height: 900 });
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await panel.locator("h1").waitFor();
   assert.equal(await termCount(panel), 0);
@@ -190,6 +191,12 @@ try {
     0,
     `Accessibility violations:\n${JSON.stringify(accessibility.violations, null, 2)}`,
   );
+
+  await mkdir("artifacts", { recursive: true });
+  await panel.screenshot({
+    path: "artifacts/sidepanel-store-preview.png",
+    fullPage: true,
+  });
 
   // Restricted browser pages cannot be scripted. The user gets a visible error and no data write.
   const restrictedPage = await context.newPage();
