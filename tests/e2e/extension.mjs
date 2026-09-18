@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
@@ -190,6 +190,18 @@ try {
     0,
     `Accessibility violations:\n${JSON.stringify(accessibility.violations, null, 2)}`,
   );
+
+  // Produce a store-listing screenshot from the same synthetic corpus used by the E2E checks.
+  // Reloading clears transient error/notice UI while keeping IndexedDB state.
+  await panel.reload();
+  await panel.locator(".term", { hasText: "Aunque llueva" }).waitFor();
+  await panel.locator(".term", { hasText: "Context menu phrase" }).waitFor();
+  await panel.setViewportSize({ width: 640, height: 400 });
+  await mkdir("artifacts/store", { recursive: true });
+  await panel.screenshot({
+    path: "artifacts/store/screenshot-1.png",
+    fullPage: false,
+  });
 
   // Restricted browser pages cannot be scripted. The user gets a visible error and no data write.
   const restrictedPage = await context.newPage();

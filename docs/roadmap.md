@@ -2,7 +2,18 @@
 
 This public roadmap tracks maintenance and hardening of the current extension.
 
-- add extension icons, screenshots, release packaging, and a signed browser-store build;
+Repository-side hardening for the current release is complete: capture/review/export, backup/restore, privacy filtering, browser-level tests, accessibility checks, migration coverage, and validated store packaging are all in place.
+
+## External release step
+
+The remaining release work is operational rather than application code:
+
+- upload the validated ZIP and listing assets to the Chrome Web Store Developer Dashboard;
+- complete the Store listing and Privacy tabs;
+- resolve any store pre-submission validation findings;
+- submit the item for review.
+
+See [release checklist](release.md).
 
 ## Explicit non-goals for this repository
 

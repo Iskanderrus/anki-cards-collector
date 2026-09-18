@@ -7,10 +7,13 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:e2e": "COLLECTOR_E2E=1 node scripts/build.mjs",
+    "build:release": "COLLECTOR_RELEASE=1 node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "node tests/e2e/extension.mjs",
-    "check": "npm run typecheck && npm test && npm run build && node scripts/check-built.mjs"
+    "check": "npm run typecheck && npm test && npm run build && node scripts/check-built.mjs",
+    "check:store": "node scripts/check-store-package.mjs",
+    "package:store": "npm run build:release && npm run check:store && node scripts/package-release.mjs"
   },
   "dependencies": {
     "dexie": "^4.0.11",
@@ -18,6 +21,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@types/chrome": "^0.0.326",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
@@ -25,7 +29,6 @@
     "fake-indexeddb": "^6.0.0",
     "playwright": "^1.55.0",
     "typescript": "^5.8.3",
-    "vitest": "5.0.1",
-    "@axe-core/playwright": "4.13.0"
+    "vitest": "5.0.1"
   }
 }
