@@ -36,14 +36,15 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== "collect-selection" || tab.id === undefined) return;
+  const tabId = tab?.id;
+  if (info.menuItemId !== "collect-selection" || tabId === undefined) return;
 
   void (async () => {
-    await chrome.sidePanel.open({ tabId: tab.id! }).catch(() => undefined);
+    await chrome.sidePanel.open({ tabId }).catch(() => undefined);
 
     try {
       const settings = await loadSettings();
-      await collectFromTab(tab.id!, settings.defaultLanguage);
+      await collectFromTab(tabId, settings.defaultLanguage);
     } catch (error) {
       chrome.runtime.sendMessage({
         type: "CAPTURE_ERROR",
