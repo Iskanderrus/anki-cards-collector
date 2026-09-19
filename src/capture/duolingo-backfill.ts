@@ -6,10 +6,16 @@ export const DUOLINGO_BACKFILL_ADAPTER_ID = "duolingo-visible-backfill";
 
 const CANDIDATE_SELECTORS = [
   "[data-test*='challenge'] [lang]",
+  "[data-test='hint-sentence']",
+  "[data-test='hint-token']",
   "[data-test*='sentence']",
-  "[data-test*='tap-token']",
+  "[data-test='challenge-tap-token']",
+  "[data-test='challenge-tap-token-text']",
   "[data-test*='word-bank'] [data-test*='token']",
   "[data-test*='challenge'] [data-test*='word']",
+  "[data-test='stories-phrase']",
+  "[data-test='stories-selectable-phrase']",
+  "[data-test='stories-token']",
 ];
 
 const CONTEXT_SELECTORS = [
@@ -59,6 +65,20 @@ function isUsefulCandidate(text: string): boolean {
   return /\p{L}/u.test(text);
 }
 
+
+function matchesConfiguredLanguage(element: Element, language: string): boolean {
+  const configured = language.trim().toLowerCase();
+  if (!configured || configured === "und") return true;
+
+  const languageOwner = element.closest("[lang]");
+  const declared = languageOwner?.getAttribute("lang")?.trim().toLowerCase();
+  if (!declared) return true;
+
+  const configuredBase = configured.split("-")[0];
+  const declaredBase = declared.split("-")[0];
+  return configuredBase === declaredBase;
+}
+
 function nearestContext(element: Element): string {
   for (const selector of CONTEXT_SELECTORS) {
     const container = element.parentElement?.closest(selector);
@@ -106,6 +126,7 @@ export function collectVisibleDuolingoEvidence(
   for (const selector of CANDIDATE_SELECTORS) {
     for (const element of document.querySelectorAll(selector)) {
       if (!isVisible(element)) continue;
+      if (!matchesConfiguredLanguage(element, language)) continue;
 
       const surfaceText = candidateText(element);
       if (!isUsefulCandidate(surfaceText)) continue;
