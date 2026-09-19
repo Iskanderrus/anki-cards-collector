@@ -61,7 +61,7 @@ function isUsefulCandidate(text: string): boolean {
 
 function nearestContext(element: Element): string {
   for (const selector of CONTEXT_SELECTORS) {
-    const container = element.closest(selector);
+    const container = element.parentElement?.closest(selector);
     if (!container) continue;
 
     const context = normalizeText(container.textContent ?? "").slice(0, 800);
