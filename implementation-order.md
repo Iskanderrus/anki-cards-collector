@@ -9,33 +9,20 @@ It is intentionally stricter than issue-number order. Some work can run in paral
 The following work is already part of the current baseline:
 
 - **ACCP-001** — canonical lexical units vs observed forms, including real v1 -> v2 migration acceptance;
+- **ACCP-002** — deterministic best-occurrence selection with review/TSV/Anki parity;
 - **ACCP-008** — correct browser fetch binding for real AnkiConnect export;
 - **ACCP-009** — stale/deleted Anki note recovery using real AnkiConnect behavior;
-- **ACCP-015** — UX/export planning baseline and repository implementation order.
+- **ACCP-010** — final extension brand/icon asset system;
+- **ACCP-015** — UX/export planning baseline and repository implementation order;
+- **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata.
 
 ---
 
-## Gate A — low-coupling groundwork
-
-### ACCP-010 — brand assets
-
-Can merge independently.
-
-### ACCP-016 — read-only live Anki catalog
-
-Creates the normalized read-only Anki discovery boundary.
-
-Real-Anki acceptance verifies decks/models/fields/templates without mutating the collection.
-
-### ACCP-002 — best occurrence selection
-
-Remains domain logic independent from React and Anki.
+## Gate A — remaining low-coupling groundwork
 
 ### ACCP-019 — staged batch-capture pipeline
 
 Creates the source-agnostic candidate/staging/commit boundary.
-
-Can be developed in parallel with ACCP-016 and ACCP-002.
 
 It must land before Duolingo batch extraction so source-specific code never writes directly to the corpus.
 
@@ -45,13 +32,13 @@ It must land before Duolingo batch extraction so source-specific code never writ
 
 ### ACCP-013 — export profiles / multi-deck routing
 
-Depends on ACCP-016.
+Depends on completed ACCP-016.
 
 Replaces the unsafe single-global-deck assumption and defines persisted routing/bindings.
 
 ### ACCP-017 — deck/model analysis and representative existing-card preview
 
-Depends on ACCP-016.
+Depends on completed ACCP-016.
 
 Can run in parallel with much of ACCP-013.
 
@@ -71,13 +58,13 @@ It can run in parallel with the Anki profile work because it only produces stage
 
 Depends on ACCP-013's profile/destination model.
 
-Consumes ACCP-002 selected-occurrence information.
+Consumes the completed ACCP-002 selected-occurrence information.
 
 Creates the compact queue + focused detail/settings structure used by normal review and staged-candidate review.
 
 ### ACCP-003 — canonicalization workflow
 
-Depends on ACCP-002 and should target the ACCP-011 detail view.
+Depends on completed ACCP-002 and should target the ACCP-011 detail view.
 
 ---
 
@@ -85,13 +72,13 @@ Depends on ACCP-002 and should target the ACCP-011 detail view.
 
 ### ACCP-014 — existing note type mapping
 
-Depends on ACCP-013 and ACCP-016.
+Depends on ACCP-013 and completed ACCP-016.
 
 Consumes ACCP-017 representative-card evidence.
 
 ### ACCP-018 — guided export-profile setup
 
-Depends on ACCP-016, ACCP-017, ACCP-013, ACCP-014, and the ACCP-011 settings shell.
+Depends on completed ACCP-016, ACCP-017, ACCP-013, ACCP-014, and the ACCP-011 settings shell.
 
 ### ACCP-021 — batch backfill review and import
 
@@ -117,7 +104,7 @@ Requires migration/backup coverage if canonical uniqueness assumptions change.
 
 ### ACCP-005 — learning-card policy v2
 
-Depends on ACCP-002 and ACCP-003.
+Depends on completed ACCP-002 and ACCP-003.
 
 Must preserve review/export parity.
 
@@ -131,33 +118,30 @@ Depends on ACCP-003 and ACCP-004.
 
 ### ACCP-007 — learning-value decision
 
-Depends on ACCP-002, ACCP-004, and ACCP-005.
+Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 ---
 
 ## Recommended linear merge sequence
 
-When one linear order is needed:
+From the current baseline, when one linear order is needed:
 
-1. ACCP-010 — brand assets
-2. ACCP-016 — live Anki catalog
-3. ACCP-002 — best occurrence selection
-4. ACCP-019 — staged batch-capture pipeline
-5. ACCP-013 — export profiles / multi-deck routing
-6. ACCP-017 — deck/model analysis + existing-card preview
-7. ACCP-020 — Duolingo visible lesson backfill
-8. ACCP-011 — sidebar redesign
-9. ACCP-003 — canonicalization workflow
-10. ACCP-014 — existing note type mapping
-11. ACCP-018 — guided export-profile setup
-12. ACCP-021 — batch backfill review/import
-13. ACCP-012 — onboarding/user journey
-14. ACCP-004 — explicit merge/split
-15. ACCP-005 — learning-card policy v2
-16. ACCP-006 — morphology assistance
-17. ACCP-007 — learning-value decision
+1. ACCP-019 — staged batch-capture pipeline
+2. ACCP-013 — export profiles / multi-deck routing
+3. ACCP-017 — deck/model analysis + existing-card preview
+4. ACCP-020 — Duolingo visible lesson backfill
+5. ACCP-011 — sidebar redesign
+6. ACCP-003 — canonicalization workflow
+7. ACCP-014 — existing note type mapping
+8. ACCP-018 — guided export-profile setup
+9. ACCP-021 — batch backfill review/import
+10. ACCP-012 — onboarding/user journey
+11. ACCP-004 — explicit merge/split
+12. ACCP-005 — learning-card policy v2
+13. ACCP-006 — morphology assistance
+14. ACCP-007 — learning-value decision
 
-ACCP-010, ACCP-016, ACCP-002, and ACCP-019 are safe to develop in parallel.
+ACCP-019 can start immediately.
 
 ACCP-017, ACCP-020, and much of ACCP-013 can overlap once their respective foundation contracts are stable.
 
