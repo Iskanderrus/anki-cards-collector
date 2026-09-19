@@ -266,6 +266,16 @@ try {
   );
 
   // Duolingo visible backfill is explicitly activated and remains staged.
+  await panel.locator(".settings").evaluate((details) => {
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  });
+  const languageInput = panel.locator("label").filter({ hasText: "Language code" }).locator("input");
+  await languageInput.fill("he");
+  await panel.waitForFunction(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings?.defaultLanguage === "he";
+  });
+
   const duolingoPage = await context.newPage();
   await duolingoPage.goto(`${fixtureUrl}duolingo`);
   await duolingoPage.bringToFront();
@@ -371,6 +381,11 @@ try {
   const pairsPage = await context.newPage();
   await pairsPage.goto(`${fixtureUrl}duolingo-pairs`);
   await pairsPage.bringToFront();
+  await panel.waitForFunction(() => {
+    const button = [...document.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent?.trim() === "Scan visible Duolingo");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
   await clickPanelButton(panel, "Scan visible Duolingo");
 
   const pairsBatch = await panel.evaluate(
