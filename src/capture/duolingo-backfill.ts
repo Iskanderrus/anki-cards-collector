@@ -12,7 +12,6 @@ const CANDIDATE_SELECTORS = [
   "[data-test='challenge-tap-token']",
   "[data-test='challenge-tap-token-text']",
   "[data-test*='word-bank'] [data-test*='token']",
-  "[data-test*='challenge'] [data-test*='word']",
   "[data-test='stories-phrase']",
   "[data-test='stories-selectable-phrase']",
   "[data-test='stories-token']",
