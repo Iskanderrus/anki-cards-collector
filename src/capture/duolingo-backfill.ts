@@ -18,6 +18,13 @@ const CANDIDATE_SELECTORS = [
   "[data-test='stories-token']",
 ];
 
+const SUPPORTED_STUDY_CONTEXT_SELECTORS = [
+  "[data-test^='challenge-']",
+  "[data-test^='review-']",
+  "[data-test^='lesson-']",
+  "[data-test^='stories-']",
+];
+
 const TARGET_SENTENCE_SELECTORS = [
   "[data-test='hint-sentence']",
   "[data-test*='sentence']",
@@ -39,15 +46,9 @@ function isDuolingoHostname(hostname: string): boolean {
 }
 
 function hasSupportedStudyContext(document: Document): boolean {
-  const selectors = [
-    ...CANDIDATE_SELECTORS,
-    "[data-test*='challenge'] [lang]",
-    "[data-test*='review'] [lang]",
-    "[data-test*='lesson'] [lang]",
-    "[data-test*='stories'] [lang]",
-  ];
-
-  return selectors.some((selector) => document.querySelector(selector) !== null);
+  return SUPPORTED_STUDY_CONTEXT_SELECTORS.some((selector) =>
+    [...document.querySelectorAll(selector)].some((element) => isVisible(element))
+  );
 }
 
 export function supportsDuolingoVisibleBackfill(
