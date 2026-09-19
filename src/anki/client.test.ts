@@ -58,6 +58,59 @@ describe("AnkiClient", () => {
     }
   });
 
+  it("recovers when the stored Anki note was deleted", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      if (request.action === "notesInfo") {
+        return new Response(JSON.stringify({
+          result: null,
+          error: "Note was not found: 4242",
+        }), { status: 200 });
+      }
+
+      const resultByAction: Record<string, unknown> = {
+        findNotes: [],
+        addNote: 9001,
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+
+    expect(noteId).toBe(9001);
+    expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
+  });
+
+  it("does not swallow unrelated notesInfo errors", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      return new Response(JSON.stringify({
+        result: null,
+        error: "Collection is not available",
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings()),
+    ).rejects.toThrow("Collection is not available");
+    expect(actions).toEqual(["notesInfo"]);
+  });
+
   it("updates the existing note with canonical and observed forms", async () => {
     const actions: Array<{ action: string; params: Record<string, unknown> }> = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
