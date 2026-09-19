@@ -29,6 +29,42 @@ type ModelUiState =
   | { kind: "loading"; detail: AnkiModelDetail | null }
   | AnkiModelInspectionResult;
 
+
+interface VisibleSessionStatus {
+  active: boolean;
+  sessionId?: string;
+  candidateCount: number;
+  startedAt?: string;
+}
+
+interface StagedBatchSummary {
+  batchId: string | null;
+  candidateCount: number;
+  dispositions: {
+    new: number;
+    "already-represented": number;
+    "repeated-evidence": number;
+    "needs-review": number;
+  };
+}
+
+interface BackfillUiState {
+  supported: boolean;
+  status: VisibleSessionStatus;
+  staged: StagedBatchSummary;
+}
+
+const EMPTY_STAGED_BATCH: StagedBatchSummary = {
+  batchId: null,
+  candidateCount: 0,
+  dispositions: {
+    new: 0,
+    "already-represented": 0,
+    "repeated-evidence": 0,
+    "needs-review": 0,
+  },
+};
+
 interface EditDraft {
   canonicalText: string;
   language: string;
@@ -67,6 +103,11 @@ function App(): React.ReactElement {
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
   const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
+  const [backfill, setBackfill] = useState<BackfillUiState>({
+    supported: false,
+    status: { active: false, candidateCount: 0 },
+    staged: EMPTY_STAGED_BATCH,
+  });
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -89,14 +130,32 @@ function App(): React.ReactElement {
 
   useEffect(() => {
     void load();
+    void refreshBackfillStatus();
     const listener = (message: unknown) => {
-      const event = message as { type?: string; error?: string };
+      const event = message as {
+        type?: string;
+        error?: string;
+        status?: VisibleSessionStatus;
+      };
       if (event.type === "DATA_CHANGED") void load();
       if (event.type === "CAPTURE_ERROR") setError(event.error ?? "Capture failed.");
+      if (event.type === "DUOLINGO_VISIBLE_SESSION_UPDATED" && event.status) {
+        setBackfill((current) => ({ ...current, supported: true, status: event.status! }));
+      }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, [load]);
+
+  useEffect(() => {
+    if (!backfill.status.active) return undefined;
+
+    const timer = window.setInterval(() => {
+      void refreshBackfillStatus();
+    }, 750);
+
+    return () => window.clearInterval(timer);
+  }, [backfill.status.active]);
 
   const counts = useMemo(() => ({
     inbox: items.filter((item) => item.lexicalUnit.status === "inbox").length,
@@ -119,6 +178,129 @@ function App(): React.ReactElement {
       await load();
     } catch (captureError) {
       setError(captureError instanceof Error ? captureError.message : "Capture failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshBackfillStatus(): Promise<void> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS",
+      }) as {
+        ok: boolean;
+        supported?: boolean;
+        status?: VisibleSessionStatus;
+        staged?: StagedBatchSummary;
+      };
+
+      if (!response.ok) return;
+      setBackfill({
+        supported: response.supported === true,
+        status: response.status ?? { active: false, candidateCount: 0 },
+        staged: response.staged ?? EMPTY_STAGED_BATCH,
+      });
+    } catch {
+      setBackfill((current) => ({
+        ...current,
+        supported: false,
+        status: { active: false, candidateCount: 0 },
+      }));
+    }
+  }
+
+  async function scanVisibleDuolingo(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DUOLINGO_SCAN_ACTIVE",
+      }) as {
+        ok: boolean;
+        error?: string;
+        foundCount?: number;
+        staged?: StagedBatchSummary;
+      };
+
+      if (!response.ok) throw new Error(response.error ?? "Duolingo scan failed.");
+      const staged = response.staged ?? EMPTY_STAGED_BATCH;
+      setBackfill((current) => ({
+        ...current,
+        supported: true,
+        staged,
+      }));
+      setNotice(
+        `Scanned ${response.foundCount ?? 0} visible candidate${response.foundCount === 1 ? "" : "s"}. ${staged.candidateCount} candidate${staged.candidateCount === 1 ? "" : "s"} staged for review; nothing was added to Anki.`,
+      );
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "Duolingo scan failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startDuolingoSession(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DUOLINGO_START_ACTIVE_SESSION",
+      }) as {
+        ok: boolean;
+        error?: string;
+        status?: VisibleSessionStatus;
+        staged?: StagedBatchSummary;
+      };
+
+      if (!response.ok || !response.status) {
+        throw new Error(response.error ?? "Could not start Duolingo backfill.");
+      }
+
+      setBackfill({
+        supported: true,
+        status: response.status,
+        staged: response.staged ?? backfill.staged,
+      });
+      setNotice("Duolingo backfill session started. Move through the lesson manually; Collector will only observe visible study material.");
+    } catch (sessionError) {
+      setError(sessionError instanceof Error ? sessionError.message : "Could not start Duolingo backfill.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopDuolingoSession(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DUOLINGO_STOP_ACTIVE_SESSION",
+      }) as {
+        ok: boolean;
+        error?: string;
+        foundCount?: number;
+        status?: VisibleSessionStatus;
+        staged?: StagedBatchSummary;
+      };
+
+      if (!response.ok) throw new Error(response.error ?? "Could not stop Duolingo backfill.");
+      const staged = response.staged ?? backfill.staged;
+      setBackfill({
+        supported: true,
+        status: response.status ?? { active: false, candidateCount: 0 },
+        staged,
+      });
+      setNotice(
+        `Backfill session stopped. ${response.foundCount ?? 0} session candidate${response.foundCount === 1 ? "" : "s"} observed; ${staged.candidateCount} candidate${staged.candidateCount === 1 ? "" : "s"} are staged for review.`,
+      );
+    } catch (sessionError) {
+      setError(sessionError instanceof Error ? sessionError.message : "Could not stop Duolingo backfill.");
     } finally {
       setBusy(false);
     }
@@ -447,6 +629,51 @@ function App(): React.ReactElement {
           Send ready to Anki
         </button>
       </div>
+
+      <section className="backfill-panel" aria-label="Duolingo visible backfill">
+        <div className="toolbar backfill-toolbar">
+          <button
+            disabled={busy || backfill.status.active}
+            onClick={() => void scanVisibleDuolingo()}
+          >
+            Scan visible Duolingo
+          </button>
+          {backfill.status.active ? (
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => void stopDuolingoSession()}
+            >
+              Stop & stage session
+            </button>
+          ) : (
+            <button
+              disabled={busy}
+              onClick={() => void startDuolingoSession()}
+            >
+              Start backfill session
+            </button>
+          )}
+        </div>
+        <div className="backfill-status" role="status" aria-live="polite">
+          {backfill.status.active ? (
+            <>
+              <strong>Backfill active</strong>
+              <span>
+                {backfill.status.candidateCount} visible candidate{backfill.status.candidateCount === 1 ? "" : "s"} observed.
+                Navigate manually; Collector does not answer or advance exercises.
+              </span>
+            </>
+          ) : backfill.staged.candidateCount > 0 ? (
+            <>
+              <strong>{backfill.staged.candidateCount} staged candidate{backfill.staged.candidateCount === 1 ? "" : "s"}</strong>
+              <span>Staged evidence is not yet in the corpus and cannot be sent to Anki until reviewed.</span>
+            </>
+          ) : (
+            <span>Backfill is opt-in and reads only study material currently rendered on a Duolingo page.</span>
+          )}
+        </div>
+      </section>
 
       <div className="summary">
         <span>{counts.inbox} to review</span>
