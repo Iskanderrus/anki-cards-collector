@@ -1,5 +1,4 @@
 import type { Occurrence } from "../core/types";
-import { normalizeIdentityText } from "../core/normalize";
 
 export interface OccurrenceQualityBreakdown {
   targetPresence: number;
@@ -58,10 +57,10 @@ export function buildContextualPrompt(
 
   const before = cleanContext.slice(0, index);
   const after = cleanContext.slice(index + cleanSurface.length);
-  const residual = \`\${before} \${after}\`;
+  const residual = `${before} ${after}`;
   if (wordTokens(residual).length < minResidualWords) return null;
 
-  return \`\${before}[…]\${after}\`.replace(/\s+/g, " ").trim();
+  return `${before}[…]${after}`.replace(/\s+/g, " ").trim();
 }
 
 function contextLengthScore(contextWords: number): number {
@@ -199,7 +198,7 @@ function qualityReason(
   if (breakdown.contextWords > 80) {
     parts.push("context is very long");
   } else if (breakdown.contextWords > 0) {
-    parts.push(\`\${breakdown.contextWords}-word context\`);
+    parts.push(`${breakdown.contextWords}-word context`);
   } else {
     parts.push("empty context");
   }
@@ -214,7 +213,7 @@ function qualityReason(
     parts.push("quality tied, so the newer capture won the tie");
   }
 
-  return \`Score \${breakdown.total}: \${parts.join("; ")}.\`;
+  return `Score ${breakdown.total}: ${parts.join("; ")}.`;
 }
 
 export function selectBestOccurrence(
@@ -271,6 +270,3 @@ export function selectBestOccurrence(
   };
 }
 
-export function sameObservedForm(left: Occurrence, right: Occurrence): boolean {
-  return normalizeIdentityText(left.surfaceText) === normalizeIdentityText(right.surfaceText);
-}

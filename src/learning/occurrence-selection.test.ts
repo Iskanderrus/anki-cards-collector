@@ -20,7 +20,7 @@ function occurrence(
     source: {
       kind: "web",
       adapter: "generic-web",
-      url: \`https://example.com/\${id}\`,
+      url: `https://example.com/${id}`,
       title: id,
     },
     capturedAt,
