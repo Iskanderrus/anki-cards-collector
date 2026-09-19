@@ -56,10 +56,9 @@ function notifySessionStatus(): void {
   }).catch(() => undefined);
 }
 
-function accumulateVisibleEvidence(session: ActiveVisibleSession): void {
+function accumulateVisibleEvidence(session: ActiveVisibleSession): boolean {
   if (!supportsDuolingoVisibleBackfill(window.location, session.allowFixture)) {
-    stopVisibleSession();
-    return;
+    return false;
   }
 
   const before = session.evidence.size;
@@ -77,13 +76,20 @@ function accumulateVisibleEvidence(session: ActiveVisibleSession): void {
   }
 
   if (session.evidence.size !== before) notifySessionStatus();
+  return true;
 }
 
 function scheduleSessionScan(session: ActiveVisibleSession): void {
   if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
   session.scanTimer = window.setTimeout(() => {
     session.scanTimer = null;
-    if (visibleSession === session) accumulateVisibleEvidence(session);
+    if (visibleSession !== session) return;
+
+    if (!accumulateVisibleEvidence(session)) {
+      session.observer.disconnect();
+      visibleSession = null;
+      notifySessionStatus();
+    }
   }, 80);
 }
 
@@ -122,7 +128,7 @@ function stopVisibleSession(): { status: VisibleSessionStatus; evidence: BatchCa
 
   session.observer.disconnect();
   if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
-  accumulateVisibleEvidence(session);
+  void accumulateVisibleEvidence(session);
 
   const evidence = [...session.evidence.values()];
   const sessionId = session.id;
