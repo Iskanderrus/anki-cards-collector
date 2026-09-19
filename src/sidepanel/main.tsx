@@ -54,6 +54,23 @@ interface BackfillUiState {
   staged: StagedBatchSummary;
 }
 
+const DUOLINGO_OPTIONAL_ORIGINS = [
+  "https://duolingo.com/*",
+  "https://*.duolingo.com/*",
+];
+
+async function ensureDuolingoPageAccess(): Promise<void> {
+  const granted = await chrome.permissions.request({
+    origins: DUOLINGO_OPTIONAL_ORIGINS,
+  });
+
+  if (!granted) {
+    throw new Error(
+      "Duolingo page access was not granted. Collector needs this optional permission to scan visible lesson content.",
+    );
+  }
+}
+
 const EMPTY_STAGED_BATCH: StagedBatchSummary = {
   batchId: null,
   candidateCount: 0,
@@ -215,6 +232,8 @@ function App(): React.ReactElement {
     setNotice("");
 
     try {
+      await ensureDuolingoPageAccess();
+
       const response = await chrome.runtime.sendMessage({
         type: "DUOLINGO_SCAN_ACTIVE",
       }) as {
@@ -247,6 +266,8 @@ function App(): React.ReactElement {
     setNotice("");
 
     try {
+      await ensureDuolingoPageAccess();
+
       const response = await chrome.runtime.sendMessage({
         type: "DUOLINGO_START_ACTIVE_SESSION",
       }) as {
@@ -670,7 +691,7 @@ function App(): React.ReactElement {
               <span>Staged evidence is not yet in the corpus and cannot be sent to Anki until reviewed.</span>
             </>
           ) : (
-            <span>Backfill is opt-in and reads only study material currently rendered on a Duolingo page.</span>
+            <span>Backfill is opt-in. On first use Chrome asks for Duolingo page access; collection still runs only when you scan or start a session.</span>
           )}
         </div>
       </section>
