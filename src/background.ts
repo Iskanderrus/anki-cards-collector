@@ -26,6 +26,7 @@ type VisibleContentResponse =
   | { ok: false; error: string };
 
 const batchPipeline = new BatchCapturePipeline(repository);
+let visibleSessionTabId: number | null = null;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Capture failed.";
@@ -170,6 +171,22 @@ async function startVisibleDuolingoSession(): Promise<{
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
 }> {
+  if (visibleSessionTabId !== null) {
+    try {
+      const existing = await chrome.tabs.sendMessage(visibleSessionTabId, {
+        type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+      }) as VisibleContentResponse;
+      if (existing?.ok && existing.status?.active) {
+        return {
+          status: existing.status,
+          staged: stagedSummary(batchPipeline.getActiveBatch()),
+        };
+      }
+    } catch {
+      visibleSessionTabId = null;
+    }
+  }
+
   const tabId = await activeTabId();
   const settings = await loadSettings();
   await injectContentScript(tabId);
@@ -183,6 +200,7 @@ async function startVisibleDuolingoSession(): Promise<{
     throw new Error(response?.ok ? "Could not start Duolingo backfill." : response?.error);
   }
 
+  visibleSessionTabId = tabId;
   return {
     status: response.status,
     staged: stagedSummary(batchPipeline.getActiveBatch()),
@@ -194,6 +212,25 @@ async function visibleDuolingoSessionStatus(): Promise<{
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
 }> {
+  if (visibleSessionTabId !== null) {
+    try {
+      const response = await chrome.tabs.sendMessage(visibleSessionTabId, {
+        type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+      }) as VisibleContentResponse;
+
+      if (response?.ok && response.status?.active) {
+        return {
+          supported: true,
+          status: response.status,
+          staged: stagedSummary(batchPipeline.getActiveBatch()),
+        };
+      }
+    } catch {
+      // The originating tab navigated, closed, or destroyed the injected content context.
+    }
+    visibleSessionTabId = null;
+  }
+
   const tabId = await activeTabId();
 
   try {
@@ -209,6 +246,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
       };
     }
 
+    if (response.status.active) visibleSessionTabId = tabId;
     return {
       supported: response.supported === true,
       status: response.status,
@@ -228,7 +266,7 @@ async function stopVisibleDuolingoSession(): Promise<{
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
 }> {
-  const tabId = await activeTabId();
+  const tabId = visibleSessionTabId ?? await activeTabId();
   const settings = await loadSettings();
 
   const response = await chrome.tabs.sendMessage(tabId, {
@@ -236,6 +274,8 @@ async function stopVisibleDuolingoSession(): Promise<{
   }) as VisibleContentResponse;
 
   if (!response?.ok) throw new Error(response?.error ?? "Could not stop Duolingo backfill.");
+  visibleSessionTabId = null;
+
   const evidence = response.evidence ?? [];
   const staged = await stageVisibleEvidence(
     evidence,
