@@ -16,10 +16,11 @@ Run this check with a real Duolingo account after loading the extension build fr
 3. Click **Scan visible Duolingo**.
 4. On first use, approve Chrome's Duolingo page-access prompt.
 5. Confirm the side panel reports a non-negative visible candidate count.
-6. Confirm visible target-language words/phrases/sentences are represented in the staged count.
-7. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
-8. Confirm the normal corpus count did not increase.
-9. Confirm no Anki note was created or updated.
+6. Open **Preview staged evidence** and confirm the actual target-language text and nearby context are visible there.
+7. Confirm visible target-language words/phrases/sentences are represented in the staged preview/count.
+8. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
+9. Confirm the normal corpus count did not increase.
+10. Confirm no Anki note was created or updated.
 
 ## Explicit session
 
