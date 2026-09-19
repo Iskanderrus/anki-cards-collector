@@ -1,67 +1,61 @@
 # Collector brand assets
 
-## Decision
+## Status
 
-Collector will use the maintainer-supplied tray-and-card artwork as its visual identity.
+Implemented by ACCP-010.
 
-- **Primary mark:** the multi-card tray artwork.
-- **Small-size fallback:** the simpler single-card tray artwork when it reads more clearly at tiny sizes.
-- **Favicon:** prefer the single-card mark unless size tests show the multi-card mark remains legible.
+Collector uses the maintainer-supplied tray-and-card artwork as its visual identity.
 
-The implementation issue is ACCP-010.
+## Size-aware icon decision
 
-## Why
+Two related marks are retained because a browser toolbar icon has very different constraints from a store/documentation image.
 
-The current placeholder icon does not communicate the product well. The supplied artwork already conveys the three ideas that matter most: collecting, cards, and selecting something worth keeping.
+- **Primary mark:** multi-card tray.
+- **Small-size mark:** single-card tray.
+- **16px / 32px:** single-card mark.
+- **48px / 128px:** multi-card mark.
+- **Future favicon:** use the single-card mark at favicon sizes.
 
-A browser toolbar icon has different constraints from a README hero image or store artwork. The icon system therefore needs size-specific validation instead of assuming one source image works everywhere.
+Side-by-side inspection at 16, 32, 48, and 128 pixels showed that the stacked-card detail adds visual noise at the smallest sizes while becoming useful brand information from 48px upward.
 
-## Asset policy
-
-Source artwork and generated derivatives should be kept separate.
-
-Recommended repository layout:
+## Repository layout
 
 ```text
 assets/brand/source/
-assets/brand/generated/
-public/icons/
+  collector-multi.png
+  collector-single.png
+
+scripts/generate-brand-icons.mjs
+dist/icons/                       # generated during build
 ```
 
-Source artwork should remain lossless. Generated manifest icons should be reproducible from the source files.
+The repository keeps normalized 128×128 PNG source marks for extension-scale generation. Runtime/store-package derivatives are generated during every build and are not maintained as a second hand-edited source set.
 
-The implementation should generate and validate at least the common extension sizes used by Chromium manifests:
+## Generation
+
+```bash
+npm run icons:generate
+```
+
+Normal `npm run build`, E2E builds, and release builds generate the same icon variants automatically.
+
+The generator is dependency-free Node.js and performs deterministic PNG decoding, alpha-aware bilinear resizing, and PNG encoding.
+
+Generated sizes:
 
 - 16×16
 - 32×32
 - 48×48
 - 128×128
 
-Store-listing artwork can use a larger derivative without replacing the source.
+## Validation
 
-## Small-size test
+`npm run check` verifies the generated production icons exist and match the dimensions declared in the manifest.
 
-Before choosing which mark is used at 16px/32px, compare both artworks at actual toolbar scale.
-
-The test should answer:
-
-- does the tray silhouette remain visible?
-- is the star still recognizable?
-- do the stacked cards become visual noise?
-- does the icon remain distinct in both light and dark browser chrome?
-
-The simpler single-card mark is the default fallback if the multi-card version loses clarity.
+`npm run package:store` applies the same dimensional checks to the release package.
 
 ## Accessibility and consistency
 
-The brand asset must not carry information that is unavailable elsewhere in the UI. It is identification, not status.
+The icon is product identification, not status; no user-visible state is conveyed only through the mark.
 
-The same primary mark should be used consistently in:
-
-- extension management UI;
-- toolbar;
-- documentation;
-- store listing;
-- any future product page.
-
-No implementation change is included in this document.
+The same multi-card identity should be used for larger documentation/store surfaces. Store screenshots themselves should be refreshed after the sidebar redesign so ACCP-010 does not publish screenshots of an obsolete UI.
