@@ -1,0 +1,69 @@
+# Manual acceptance: Duolingo visible backfill
+
+Run this check with a real Duolingo account after loading the extension build from the ACCP-020 branch.
+
+## Preconditions
+
+- use a completed lesson, review, practice, or other page where previously learned target-language material is visibly rendered;
+- set Collector's language code to the target language before scanning;
+- keep DevTools Network closed or available only for observation; the extension should not require any Duolingo API request;
+- note the current number of normal Collector corpus items before starting.
+
+## One-shot scan
+
+1. Open the Duolingo lesson/review material.
+2. Open the Collector side panel.
+3. Click **Scan visible Duolingo**.
+4. Confirm the side panel reports a non-negative visible candidate count.
+5. Confirm visible target-language words/phrases/sentences are represented in the staged count.
+6. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
+7. Confirm the normal corpus count did not increase.
+8. Confirm no Anki note was created or updated.
+
+## Explicit session
+
+1. Click **Start backfill session**.
+2. Confirm the side panel visibly says **Backfill active**.
+3. Manually advance through several review/lesson screens yourself.
+4. Confirm the visible candidate count can grow as new target-language material is rendered.
+5. Confirm Collector never clicks, answers, submits, or advances an exercise.
+6. Click **Stop & stage session**.
+7. Confirm the active indicator disappears and a staged candidate count remains.
+8. Confirm the normal corpus count still did not increase.
+
+## Navigation and teardown
+
+1. Start another session.
+2. Navigate away from the lesson/review page or close/reload the tab.
+3. Confirm the old session no longer reports as active.
+4. Confirm no persistent observer appears on unrelated pages.
+
+## Privacy / permission check
+
+Confirm the extension manifest still has no persistent content script and no Duolingo host permission.
+
+During scan/session use, verify Collector does not:
+
+- read cookies, credentials, or tokens;
+- make or intercept Duolingo private API calls;
+- capture hidden application state;
+- run collection before explicit activation.
+
+## Regression
+
+Select a normal word or phrase on an ordinary web page and use **Collect selection**.
+
+Confirm the existing manual capture path still creates the expected normal corpus item.
+
+## Record
+
+Record:
+
+- date;
+- browser version;
+- Duolingo page type;
+- target language;
+- one-shot visible/staged counts;
+- session visible/staged counts;
+- any obvious false-positive UI labels;
+- pass/fail for no automation, no private API use, and manual capture regression.
