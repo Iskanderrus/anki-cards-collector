@@ -64,20 +64,15 @@ function sourceFingerprint(source: CaptureSource): string {
   return [source.kind, source.adapter, source.url, source.title].join("\u0000");
 }
 
-function metadataFingerprint(metadata: BatchAdapterMetadata | undefined): string {
-  if (!metadata) return "";
-  return JSON.stringify(
-    Object.fromEntries(Object.entries(metadata).sort(([left], [right]) => left.localeCompare(right))),
-  );
-}
-
 function duplicateFingerprint(candidate: BatchCaptureEvidence): string {
+  // Adapter metadata is intentionally excluded from persisted-evidence identity.
+  // Occurrences cannot store it, so metadata-only differences must not survive
+  // staging as separate candidates that would become identical persisted rows.
   return [
     normalizedLanguage(candidate.language),
     normalizeIdentityText(candidate.surfaceText),
     normalizeText(candidate.context),
     sourceFingerprint(candidate.source),
-    metadataFingerprint(candidate.adapterMetadata),
   ].join("\u0000");
 }
 
@@ -323,10 +318,12 @@ export class BatchCapturePipeline {
       const matchingLexicalUnitIds = [...matchingIds].sort();
       let disposition: CandidateDisposition;
 
-      if (matchingLexicalUnitIds.length > 1 || exactEvidenceOwners.size > 1) {
-        disposition = "needs-review";
-      } else if (exactEvidenceOwners.size === 1) {
+      if (exactEvidenceOwners.size === 1) {
+        // A unique exact occurrence match is stronger evidence than an ambiguous
+        // surface-form match. Re-accepting it must remain a no-op.
         disposition = "already-represented";
+      } else if (exactEvidenceOwners.size > 1 || matchingLexicalUnitIds.length > 1) {
+        disposition = "needs-review";
       } else if (matchingLexicalUnitIds.length === 1) {
         disposition = "repeated-evidence";
       } else {

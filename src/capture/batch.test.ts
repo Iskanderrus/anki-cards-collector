@@ -107,6 +107,100 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list())[0]?.occurrences).toHaveLength(2);
   });
 
+  it("treats a unique exact occurrence as already represented despite surface ambiguity", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב מכתב.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+    });
+    await repository.update(first.lexicalUnit.id, {
+      canonicalText: "לכתוב",
+      language: "he",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+    });
+
+    const second = await repository.capture({
+      text: "כתיבה",
+      context: "כתיבה היא מיומנות.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתיבה", "כתיבה היא מיומנות.").source,
+    });
+    await repository.update(second.lexicalUnit.id, {
+      canonicalText: "כתיבה",
+      language: "he",
+      note: "",
+      occurrenceId: second.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "זה כתב ברור.",
+    });
+
+    const before = await repository.list();
+    const firstBefore = before.find((item) => item.lexicalUnit.id === first.lexicalUnit.id)!;
+    const secondBefore = before.find((item) => item.lexicalUnit.id === second.lexicalUnit.id)!;
+
+    const staged = await pipeline.stageBatch("exact-ambiguous", [
+      evidence("כתב", "הוא כתב מכתב."),
+    ]);
+    const candidate = staged.candidates[0]!;
+
+    expect(candidate.matchingLexicalUnitIds).toHaveLength(2);
+    expect(candidate.disposition).toBe("already-represented");
+
+    const result = await pipeline.commit({ candidateIds: [candidate.id] });
+
+    expect(result.committed).toEqual([]);
+    expect(result.unchangedCandidateIds).toEqual(["exact-ambiguous:0001"]);
+
+    const after = await repository.list();
+    expect(
+      after.find((item) => item.lexicalUnit.id === first.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(firstBefore.occurrences.length);
+    expect(
+      after.find((item) => item.lexicalUnit.id === second.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(secondBefore.occurrences.length);
+  });
+
+  it("collapses candidates that differ only by adapter metadata before commit", async () => {
+    const base = evidence("שלום", "שלום, דנה.");
+
+    const staged = await pipeline.stageBatch("metadata-dedupe", [
+      {
+        ...base,
+        adapterMetadata: {
+          selector: "[data-test='hint-token']",
+          confidence: 1,
+        },
+      },
+      {
+        ...base,
+        capturedAt: "2026-09-19T12:01:00.000Z",
+        adapterMetadata: {
+          selector: "[lang]",
+          confidence: 0.8,
+        },
+      },
+    ]);
+
+    expect(staged.receivedCount).toBe(2);
+    expect(staged.duplicatesCollapsed).toBe(1);
+    expect(staged.candidates).toHaveLength(1);
+    expect(staged.candidates[0]?.duplicateCount).toBe(2);
+
+    await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(1);
+  });
+
   it("requires an explicit resolution when an observed form has multiple owners", async () => {
     const first = await repository.capture({
       text: "כתב",

@@ -46,9 +46,9 @@ That is deliberate: the extension should not depend on one external site's priva
 
 `BatchCapturePipeline` is the source-agnostic boundary for opt-in backfill and other multi-item imports.
 
-A batch source adapter returns visible evidence only. The pipeline normalizes and deduplicates that evidence in memory, compares it with the current corpus, and classifies each candidate as new, already represented, repeated evidence, or needing review. Staged candidates are not IndexedDB entities and are not included in backups.
+A batch source adapter returns visible evidence only. The pipeline normalizes and deduplicates that evidence in memory, compares it with the current corpus, and classifies each candidate as new, already represented, repeated evidence, or needing review. Persisted evidence identity is based on language + normalized surface + normalized context + source; adapter-only metadata does not split candidates because the current occurrence model does not persist it. Staged candidates are not IndexedDB entities and are not included in backups.
 
-Only an explicit commit crosses the persistence boundary. Selected candidates are converted back into normal capture drafts and passed to `CaptureRepository.captureBatch()`, which applies the same lexical-unit/occurrence rules inside one Dexie transaction. Ambiguous candidates require an explicit existing lexical-unit target before commit. A batch commit never marks a unit `ready`.
+Only an explicit commit crosses the persistence boundary. Selected candidates are converted back into normal capture drafts and passed to `CaptureRepository.captureBatch()`, which applies the same lexical-unit/occurrence rules inside one Dexie transaction. A unique exact persisted occurrence is already represented even when the same surface form is owned elsewhere; unresolved surface ambiguity still requires an explicit existing lexical-unit target before commit. A batch commit never marks a unit `ready`.
 
 Manual single-selection capture remains independent from this staging path.
 
