@@ -198,31 +198,55 @@ describe("BatchCapturePipeline", () => {
     expect(pipeline.getActiveBatch()?.candidates[0]?.disposition).toBe("repeated-evidence");
   });
 
-  it("rolls back the whole repository batch if the corpus changes after staging", async () => {
-    const existing = await repository.capture({
+  it("revalidates a staged candidate against corpus changes before commit", async () => {
+    const staged = await pipeline.stageBatch("stale", [
+      evidence("מים", "אני שותה מים."),
+    ]);
+
+    expect(staged.candidates[0]?.disposition).toBe("new");
+
+    await repository.capture({
       text: "מים",
       context: "אני שותה מים.",
       language: "he",
-      capturedAt: "2026-09-19T08:00:00.000Z",
+      capturedAt: "2026-09-19T12:01:00.000Z",
       source: evidence("מים", "אני שותה מים.").source,
     });
 
-    const staged = await pipeline.stageBatch("rollback", [
-      evidence("לחם", "יש לחם על השולחן."),
-      evidence("מים", "המים קרים."),
-    ]);
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
 
-    expect(staged.candidates[1]?.disposition).toBe("repeated-evidence");
+    expect(result.committed).toEqual([]);
+    expect(result.unchangedCandidateIds).toEqual(["stale:0001"]);
+    expect((await repository.list())[0]?.occurrences).toHaveLength(1);
+  });
 
-    await repository.remove(existing.lexicalUnit.id);
-
+  it("rolls back the whole repository batch on a commit failure", async () => {
     await expect(
-      pipeline.commit({
-        candidateIds: staged.candidates.map((candidate) => candidate.id),
-      }),
+      repository.captureBatch([
+        {
+          draft: {
+            text: "לחם",
+            context: "יש לחם על השולחן.",
+            language: "he",
+            capturedAt: "2026-09-19T13:00:00.000Z",
+            source: evidence("לחם", "יש לחם על השולחן.").source,
+          },
+        },
+        {
+          draft: {
+            text: "מים",
+            context: "המים קרים.",
+            language: "he",
+            capturedAt: "2026-09-19T13:01:00.000Z",
+            source: evidence("מים", "המים קרים.").source,
+          },
+          targetLexicalUnitId: "missing-unit",
+        },
+      ]),
     ).rejects.toThrow("Target lexical unit no longer exists");
 
     expect(await repository.list()).toEqual([]);
-    expect(pipeline.getActiveBatch()?.candidates).toHaveLength(2);
   });
 });
