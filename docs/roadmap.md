@@ -15,22 +15,19 @@ Implemented hardening includes:
 
 ## Active planned work
 
-The next work focuses on daily usability, safe multilingual routing, compatibility with existing Anki setups, and better evidence-driven learning proposals.
+The next work focuses on daily usability, safe multilingual routing, live Anki discovery, compatibility with existing Anki setups, and better evidence-driven learning proposals.
 
 ### Product and UX
 
-- ACCP-010 — adopt the final icon/brand asset system;
-- ACCP-011 — replace the repeated full-card sidebar with a compact queue and focused detail view;
-- ACCP-012 — improve first-run onboarding and the capture/review/export journey.
-
-See:
-
-- [brand assets](design/brand-assets.md)
-- [sidebar UX audit](design/sidebar-ux-audit.md)
-- [user journey](product/user-journey.md)
+- ACCP-010 — final icon/brand asset system;
+- ACCP-011 — compact queue and focused detail sidebar;
+- ACCP-012 — first-run onboarding and capture/review/export journey;
+- ACCP-018 — guided export-profile setup from live Anki metadata.
 
 ### Anki integration
 
+- ACCP-016 — read-only live catalog of decks, models, fields, templates, and styling;
+- ACCP-017 — bounded deck/model usage analysis and representative existing-card preview;
 - ACCP-013 — export profiles and language-aware multi-deck routing;
 - ACCP-014 — existing note type integration through explicit field mapping without mutating user-owned models.
 
@@ -39,6 +36,7 @@ See:
 - [Anki export strategy](product/anki-export-strategy.md)
 - [ADR 0008](decisions/0008-export-profiles-and-routing.md)
 - [ADR 0009](decisions/0009-user-owned-anki-models.md)
+- [ADR 0010](decisions/0010-live-anki-discovery.md)
 
 ### Learning/corpus work
 
@@ -73,4 +71,5 @@ See [release checklist](release.md).
 - credential or token collection;
 - automated completion of learning-platform exercises;
 - silent mutation of user-owned Anki note types;
-- silent cross-deck moves caused by changing a default route.
+- silent cross-deck moves caused by changing a default route;
+- silently choosing a target note type from deck popularity.

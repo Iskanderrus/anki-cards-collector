@@ -7,6 +7,7 @@ Support several Anki decks/models safely in one Collector corpus and one Ready b
 ## Dependencies
 
 - ACCP-001/008/009 foundations complete.
+- ACCP-016 supplies live read-only deck/model choices.
 
 ## Storage model
 
@@ -18,8 +19,8 @@ Configuration stored with extension settings:
 
 - id;
 - name;
-- deckName;
-- modelName;
+- deckName and, where useful, deck ID;
+- modelName and, where useful, model ID;
 - mode: Collector-managed or mapped user model;
 - optional mapping/profile metadata.
 
@@ -49,21 +50,22 @@ Resolve:
 
 Once exported, changing a language default does not silently move the existing note.
 
-## Anki discovery
+## Live choices
 
-Use AnkiConnect to discover live:
+ACCP-013 consumes ACCP-016 catalog data instead of implementing Anki discovery ad hoc.
 
-- deck names;
-- model names.
+Existing destination choices should come from real Anki deck/model data whenever Anki is available.
 
-Deck selection should use discovered choices. Creating a new deck, if supported, is an explicit action rather than an accidental free-text typo.
+Creating a new deck, if supported, is a separate explicit action.
+
+ACCP-017 may show which note types are used in a deck, but profile routing does not infer a model from that distribution.
 
 ## Batch export
 
 1. Resolve effective profile for every Ready item.
 2. Block items without a valid route.
 3. Group by profile.
-4. Ensure each destination/model as required.
+4. Validate each destination/model.
 5. Export with existing per-item isolation.
 6. Persist binding/note ID after each successful item.
 
@@ -91,4 +93,9 @@ Backups must preserve the information necessary to restore safe routing/bindings
 - route change does not move existing note;
 - intentional move;
 - stale Anki note recovery still works;
+- live catalog choice validation;
 - backup/migration.
+
+## Manual acceptance
+
+Use at least two real destination decks in one Ready batch and verify each item reaches the intended deck without changing the user's note-type schema.

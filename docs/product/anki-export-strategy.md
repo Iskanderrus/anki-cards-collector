@@ -2,25 +2,38 @@
 
 ## Principle
 
-Collector should separate three concerns:
+Collector separates four concerns:
 
 1. **Learning content** — what the learner captured and what the card policy proposes.
 2. **Destination** — which Anki deck/profile receives the item.
 3. **Presentation** — which Anki note type/template renders it.
+4. **Discovery evidence** — what currently exists in the user's live Anki collection.
 
-Today those concerns are too tightly coupled through one global deck name and one Collector-managed model.
+Those concerns must not collapse into one global deck/model setting.
 
-ACCP-013 and ACCP-014 split them deliberately.
+## Live Anki discovery
 
-## Current behavior and limitation
+ACCP-016 provides a read-only catalog of real decks and models.
 
-Current settings contain one global language, one deck name, and one note type.
+Existing deck/model choices should come from live Anki whenever it is available rather than relying on free-text entry.
 
-That means all Ready items in one batch use the same destination settings. A multilingual queue can therefore be routed incorrectly if the user forgets to change the global deck.
+Discovery is advisory and refreshable.
 
-Existing exported notes also do not move just because the global deck string changes; updating fields and moving a card are different Anki operations.
+A saved export profile remains the configured intent even if Anki is temporarily unavailable.
 
-The current client may add Collector fields to a selected model. That behavior is acceptable only for a Collector-owned model. It is not safe for arbitrary user-owned note types.
+## Decks do not define card layout
+
+A deck can contain several note types.
+
+Therefore choosing a deck does not answer:
+
+> "Which card layout should Collector use?"
+
+ACCP-017 samples existing cards from the selected deck, aggregates their model names, and shows representative rendered cards.
+
+That evidence helps the user choose the intended note type explicitly.
+
+Collector never silently selects the most common model.
 
 ## Export profiles
 
@@ -54,7 +67,21 @@ Spanish
   model: existing Spanish model
 ```
 
-Profiles are discovered/configured against real Anki decks and models, not entered as unvalidated free text.
+## Guided setup
+
+ACCP-018 combines discovery and mapping:
+
+```text
+connect Anki
+  -> choose live deck
+  -> inspect note types used in deck
+  -> choose target note type explicitly
+  -> preview representative existing card
+  -> map Collector semantic fields
+  -> preview outgoing payload
+  -> save export profile
+  -> optionally assign language route
+```
 
 ## Routing order
 
@@ -72,7 +99,7 @@ Once an item has an export binding, later global configuration changes do not re
 
 Destination state is not part of lexical identity.
 
-A separate export binding should track the effective relationship between a lexical unit and Anki.
+A separate export binding tracks the effective relationship between a lexical unit and Anki.
 
 Conceptually:
 
@@ -85,19 +112,17 @@ ExportBinding
   ankiNoteId
 ```
 
-This keeps language content independent from where it is currently studied.
-
 An explicit destination change can update the binding after user confirmation.
 
 ## Batch behavior
 
 A batch may contain several profiles.
 
-Collector should group Ready items by effective profile and prepare each destination independently.
+Collector groups Ready items by effective profile and prepares each destination independently.
 
 One failing profile must not prevent unrelated profile groups from exporting.
 
-Progress should identify both item and destination.
+Progress identifies both item and destination.
 
 ## Collector-managed model
 
@@ -118,11 +143,14 @@ An existing user model is read-only from Collector's perspective.
 
 Collector may inspect:
 
-- model name;
+- model name/ID;
 - fields;
+- fields used on templates;
 - templates;
+- styling;
+- representative rendered cards.
 
-but must not add/remove/reorder fields or rewrite template/CSS simply because the user selected it.
+But it must not add/remove/reorder fields or rewrite template/CSS simply because the user selected it.
 
 Integration happens through explicit field mapping.
 
@@ -142,32 +170,31 @@ A profile maps those values into fields that already exist on the target model.
 
 Mappings are validated before the profile can be used for export.
 
+## Existing-card preview vs outgoing payload preview
+
+These are distinct:
+
+- **existing-card preview** shows a real Anki card so the user recognizes the target style/model;
+- **outgoing payload preview** shows what Collector values will be written to which fields.
+
+Collector does not need to clone the user's CSS. By exporting through the existing note type, Anki uses its existing templates/CSS.
+
 ## Stable identity
 
-Collector must preserve idempotent export even when using a user-owned model.
+Collector preserves idempotent export even when using a user-owned model.
 
 For Collector Basic, the existing CollectorID field remains valid.
 
-For user-owned models, the preferred identity fallback is a reserved Collector tag containing the stable lexical-unit ID. This avoids requiring Collector to add a hidden field to the user's model.
+For user-owned models, the preferred identity fallback is a reserved Collector tag containing the stable lexical-unit ID.
 
-The local Anki note ID remains the fastest update path. If it becomes stale, Collector can search by its reserved identity tag before creating a replacement.
-
-## Preview
-
-Before saving a custom profile, Collector should show:
-
-- deck;
-- model;
-- field mapping;
-- identity strategy;
-- representative payload values.
-
-The preview is about data placement, not trying to reproduce the entire Anki renderer inside the browser.
+The local Anki note ID remains the fastest update path. If it becomes stale, Collector searches by reserved identity tag before creating a replacement.
 
 ## Safety rules
 
 - never silently mutate a user-owned note type;
+- never infer a target note type solely from deck membership or popularity;
 - never send every Ready item to the currently selected deck when per-item routes differ;
 - never silently move an already-exported card because a default route changed;
 - never create a replacement note before stable identity lookup;
-- never claim a mapping is valid until required fields are checked against the live model.
+- never claim a mapping is valid until required fields are checked against the live model;
+- never discard a saved profile merely because Anki is temporarily offline.

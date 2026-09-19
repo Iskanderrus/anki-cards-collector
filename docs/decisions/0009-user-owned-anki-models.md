@@ -19,13 +19,9 @@ Collector distinguishes between:
 
 A user-owned model is integrated through explicit field mapping from Collector semantic values into fields that already exist on the model.
 
-Collector may inspect live Anki metadata such as:
+Collector may inspect live Anki metadata and representative existing cards through the read-only discovery boundary defined by ADR 0010.
 
-- model names;
-- model field names;
-- templates;
-
-but selecting a user-owned model never authorizes Collector to add fields or rewrite templates/CSS.
+Selecting a user-owned model never authorizes Collector to add fields or rewrite templates/CSS.
 
 Field mappings are validated before export.
 
@@ -38,6 +34,10 @@ For user-owned models, the preferred fallback identity is a reserved Collector t
 ## Consequences
 
 Users can keep their existing visual card layout and template behavior.
+
+Collector does not need to copy or recreate arbitrary user CSS. It writes mapped values into the existing note type and lets Anki render the resulting card normally.
+
+Representative cards can be shown during setup to help the user recognize the intended note type, but those samples do not authorize automatic model selection.
 
 Collector Basic remains the safe default for users who do not want custom mapping.
 
