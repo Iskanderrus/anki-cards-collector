@@ -119,4 +119,25 @@ describe("learning-card policy", () => {
 
     expect(proposal.reason).toContain("Seen 3 times");
   });
+  it("uses the selected stronger occurrence instead of the newest occurrence", () => {
+    const value = item(
+      "tener ganas de",
+      "tengo ganas de",
+      "Hoy tengo ganas de salir a caminar por el centro.",
+    );
+    value.occurrences.push({
+      ...value.occurrences[0]!,
+      id: "occ-newer",
+      context: "tengo ganas de",
+      capturedAt: "2026-09-19T11:00:00Z",
+    });
+
+    const proposal = proposeLearningCard(value);
+
+    expect(proposal.prompt).toBe("Hoy […] salir a caminar por el centro.");
+    expect(proposal.occurrenceSelection?.occurrence.id).toBe("occ-1");
+    expect(proposal.occurrenceSelection?.selectedNumber).toBe(1);
+    expect(proposal.occurrenceSelection?.reason).toContain("Score");
+  });
+
 });

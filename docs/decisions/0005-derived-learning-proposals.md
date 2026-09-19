@@ -17,18 +17,23 @@ The review layer derives at most one deterministic learning-card proposal from e
 The policy:
 
 - classifies the captured material;
-- prefers contextual retrieval when the source context supports it;
+- selects the strongest available occurrence with a local, deterministic quality scorer;
+- prefers contextual retrieval when the selected source context supports it;
+- uses recency only as a tie-break when occurrence quality is equal;
+- exposes the occurrence-selection reason to review;
 - never generates a translation or meaning that was not supplied by the learner;
 - can refuse readiness when the capture is too broad or underspecified;
 - treats `ready` as explicit human approval;
-- sends the same derived proposal to Anki and TSV;
+- sends the same derived proposal and selected occurrence to Anki and TSV;
 - keeps `LexicalUnit.id` as the stable synchronization identity.
 
-The proposal itself is not persisted.
+The proposal and occurrence selection are not persisted.
 
 ## Consequences
 
-Editing the expression, context, or learner note immediately changes the proposed card without a database migration.
+Editing a canonical form, observed form, context, or learner note immediately changes the proposed card without a database migration.
+
+A newly captured weak occurrence cannot automatically replace an older stronger example merely because it is newer.
 
 Backups remain a representation of the observed corpus rather than generated study output.
 
