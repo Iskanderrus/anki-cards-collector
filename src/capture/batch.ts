@@ -196,11 +196,11 @@ export class BatchCapturePipeline {
     const candidatesById = new Map(
       this.activeBatch.candidates.map((candidate) => [candidate.id, candidate]),
     );
-    const selected = requestedIds.map((candidateId) => {
+    const selected = await this.classify(requestedIds.map((candidateId) => {
       const candidate = candidatesById.get(candidateId);
       if (!candidate) throw new Error(`Unknown staged candidate: ${candidateId}`);
       return candidate;
-    });
+    }));
 
     const unchangedCandidateIds: string[] = [];
     const entries: CaptureBatchEntry[] = [];
