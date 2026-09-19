@@ -4,32 +4,25 @@
 
 Implemented by ACCP-010.
 
-Collector uses the maintainer-supplied tray-and-card artwork as its visual identity.
+Collector uses the maintainer-supplied multi-card tray artwork as the canonical extension mark.
 
-## Size-aware icon decision
+## Icon decision
 
-Two related marks are retained because a browser toolbar icon has very different constraints from a store/documentation image.
+The extension package uses the same multi-card mark at 16, 32, 48, and 128 pixels.
 
-- **Primary mark:** multi-card tray.
-- **Small-size mark:** single-card tray.
-- **16px / 32px:** single-card mark.
-- **48px / 128px:** multi-card mark.
-- **Future favicon:** use the single-card mark at favicon sizes.
-
-Side-by-side inspection at 16, 32, 48, and 128 pixels showed that the stacked-card detail adds visual noise at the smallest sizes while becoming useful brand information from 48px upward.
+Both supplied concepts were reviewed at small sizes. The single-card version is visually simpler and remains a good candidate for a future favicon or similarly constrained surface, but the current Chromium extension keeps one canonical source mark so the toolbar, extension-management view, and larger package surfaces remain unmistakably the same product.
 
 ## Repository layout
 
 ```text
 assets/brand/source/
   collector-multi.png
-  collector-single.png
 
 scripts/generate-brand-icons.mjs
 dist/icons/                       # generated during build
 ```
 
-The repository keeps normalized 128×128 PNG source marks for extension-scale generation. Runtime/store-package derivatives are generated during every build and are not maintained as a second hand-edited source set.
+The repository keeps a normalized 128×128 PNG source mark for extension-scale generation. Runtime/store-package derivatives are generated during every build rather than maintained as hand-edited copies.
 
 ## Generation
 
@@ -58,4 +51,4 @@ Generated sizes:
 
 The icon is product identification, not status; no user-visible state is conveyed only through the mark.
 
-The same multi-card identity should be used for larger documentation/store surfaces. Store screenshots themselves should be refreshed after the sidebar redesign so ACCP-010 does not publish screenshots of an obsolete UI.
+Store screenshots should be refreshed after the sidebar redesign so ACCP-010 does not publish screenshots of an obsolete UI.

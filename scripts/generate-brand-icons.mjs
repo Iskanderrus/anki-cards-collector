@@ -9,12 +9,12 @@ const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const VARIANTS = [
   {
     size: 16,
-    source: "assets/brand/source/collector-single.png",
+    source: "assets/brand/source/collector-multi.png",
     output: "icon16.png",
   },
   {
     size: 32,
-    source: "assets/brand/source/collector-single.png",
+    source: "assets/brand/source/collector-multi.png",
     output: "icon32.png",
   },
   {
