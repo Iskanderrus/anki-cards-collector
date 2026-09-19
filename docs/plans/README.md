@@ -1,8 +1,8 @@
 # Implementation plans
 
-These documents describe the intended implementation boundaries for open ACCP work items.
+These documents describe intended implementation boundaries for open ACCP work items.
 
-They are plans, not claims about current behavior. Current behavior remains documented in the architecture and feature docs.
+They are plans, not claims about current behavior.
 
 Open planned work:
 
@@ -17,5 +17,8 @@ Open planned work:
 - [ACCP-012 — user journey](ACCP-012-user-journey.md)
 - [ACCP-013 — export profiles](ACCP-013-export-profiles.md)
 - [ACCP-014 — existing note type mapping](ACCP-014-existing-note-type-mapping.md)
+- [ACCP-016 — live Anki catalog](ACCP-016-anki-catalog.md)
+- [ACCP-017 — deck/model analysis and existing-card preview](ACCP-017-deck-model-analysis.md)
+- [ACCP-018 — guided export-profile setup](ACCP-018-guided-profile-setup.md)
 
 See the repository-level [implementation order](../../implementation-order.md) for dependencies and recommended sequencing.
