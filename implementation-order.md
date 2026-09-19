@@ -23,29 +23,31 @@ Can merge independently.
 
 ### ACCP-016 — read-only live Anki catalog
 
-Implement before profile routing/configuration UI.
-
-This creates the normalized, read-only discovery boundary used by later Anki work.
+Creates the normalized read-only Anki discovery boundary.
 
 Real-Anki acceptance verifies decks/models/fields/templates without mutating the collection.
 
 ### ACCP-002 — best occurrence selection
 
-Can run in parallel with ACCP-010/016.
+Remains domain logic independent from React and Anki.
 
-It remains domain logic independent from React and Anki.
+### ACCP-019 — staged batch-capture pipeline
+
+Creates the source-agnostic candidate/staging/commit boundary.
+
+Can be developed in parallel with ACCP-016 and ACCP-002.
+
+It must land before Duolingo batch extraction so source-specific code never writes directly to the corpus.
 
 ---
 
-## Gate B — export destination model and deck evidence
+## Gate B — destination routing, source adapters, and discovery evidence
 
 ### ACCP-013 — export profiles / multi-deck routing
 
-Depends on ACCP-016 for live destination/model choices.
+Depends on ACCP-016.
 
-This replaces the unsafe single-global-deck assumption and defines persisted routing/bindings.
-
-Manual acceptance uses at least two real decks in one batch.
+Replaces the unsafe single-global-deck assumption and defines persisted routing/bindings.
 
 ### ACCP-017 — deck/model analysis and representative existing-card preview
 
@@ -53,9 +55,13 @@ Depends on ACCP-016.
 
 Can run in parallel with much of ACCP-013.
 
-It samples cards read-only, reports note-type usage, and shows representative existing front/back content.
+### ACCP-020 — Duolingo visible lesson backfill
 
-It must not automatically select a model from popularity.
+Depends on ACCP-019.
+
+Implements one-shot visible scan plus explicitly started/stopped visible-DOM session capture.
+
+It can run in parallel with the Anki profile work because it only produces staged source evidence.
 
 ---
 
@@ -67,7 +73,7 @@ Depends on ACCP-013's profile/destination model.
 
 Consumes ACCP-002 selected-occurrence information.
 
-Creates the compact queue + focused detail/settings structure for later configuration UX.
+Creates the compact queue + focused detail/settings structure used by normal review and staged-candidate review.
 
 ### ACCP-003 — canonicalization workflow
 
@@ -75,7 +81,7 @@ Depends on ACCP-002 and should target the ACCP-011 detail view.
 
 ---
 
-## Gate D — existing Anki models and guided setup
+## Gate D — existing Anki models, guided setup, and backfill review
 
 ### ACCP-014 — existing note type mapping
 
@@ -83,25 +89,21 @@ Depends on ACCP-013 and ACCP-016.
 
 Consumes ACCP-017 representative-card evidence.
 
-Proves Collector can write mapped values into a user-owned note type without mutating its fields/templates/CSS.
-
 ### ACCP-018 — guided export-profile setup
 
 Depends on ACCP-016, ACCP-017, ACCP-013, ACCP-014, and the ACCP-011 settings shell.
 
-Combines:
+### ACCP-021 — batch backfill review and import
 
-- live deck selection;
-- model distribution;
-- representative existing-card preview;
-- explicit note-type choice;
-- field mapping;
-- payload preview;
-- profile save/revalidation.
+Depends on ACCP-019, ACCP-020, and ACCP-011.
+
+Builds the staged-candidate UI and commits selected evidence into the normal corpus.
+
+Its full original-workflow acceptance should run after ACCP-018 so accepted Hebrew/Serbian/etc. material can be exported through a real existing user note type and deck.
 
 ### ACCP-012 — onboarding and user journey
 
-Land after the real profile-setup flow is stable so onboarding teaches the final workflow rather than temporary configuration behavior.
+Land after guided profile setup and backfill review are stable so onboarding teaches the final workflows rather than temporary configuration.
 
 ---
 
@@ -140,21 +142,54 @@ When one linear order is needed:
 1. ACCP-010 — brand assets
 2. ACCP-016 — live Anki catalog
 3. ACCP-002 — best occurrence selection
-4. ACCP-013 — export profiles / multi-deck routing
-5. ACCP-017 — deck/model analysis + existing-card preview
-6. ACCP-011 — sidebar redesign
-7. ACCP-003 — canonicalization workflow
-8. ACCP-014 — existing note type mapping
-9. ACCP-018 — guided export-profile setup
-10. ACCP-012 — onboarding/user journey
-11. ACCP-004 — explicit merge/split
-12. ACCP-005 — learning-card policy v2
-13. ACCP-006 — morphology assistance
-14. ACCP-007 — learning-value decision
+4. ACCP-019 — staged batch-capture pipeline
+5. ACCP-013 — export profiles / multi-deck routing
+6. ACCP-017 — deck/model analysis + existing-card preview
+7. ACCP-020 — Duolingo visible lesson backfill
+8. ACCP-011 — sidebar redesign
+9. ACCP-003 — canonicalization workflow
+10. ACCP-014 — existing note type mapping
+11. ACCP-018 — guided export-profile setup
+12. ACCP-021 — batch backfill review/import
+13. ACCP-012 — onboarding/user journey
+14. ACCP-004 — explicit merge/split
+15. ACCP-005 — learning-card policy v2
+16. ACCP-006 — morphology assistance
+17. ACCP-007 — learning-value decision
 
-ACCP-016, ACCP-002, and ACCP-010 are safe to develop in parallel.
+ACCP-010, ACCP-016, ACCP-002, and ACCP-019 are safe to develop in parallel.
 
-ACCP-017 and much of ACCP-013 can overlap once the ACCP-016 catalog contract is stable.
+ACCP-017, ACCP-020, and much of ACCP-013 can overlap once their respective foundation contracts are stable.
+
+---
+
+## Original Duolingo-to-Anki acceptance path
+
+The end-to-end motivating workflow is considered complete only when the following chain has passed real acceptance:
+
+```text
+ACCP-019 staged batch pipeline
+    ↓
+ACCP-020 visible Duolingo backfill
+    ↓
+ACCP-021 staged review/import
+    ↓
+normal lexical/card review
+    ↓
+ACCP-013/014/016/017/018 export profile
+    ↓
+existing Anki deck + existing user note type
+```
+
+The acceptance run should prove:
+
+- only user-visible Duolingo material is collected;
+- no private API/network interception is used;
+- duplicates are not silently multiplied;
+- imported candidates do not become Ready automatically;
+- chosen material reaches the intended language deck/profile;
+- the user's existing note type/templates/CSS remain unchanged;
+- Anki note identity remains idempotent.
 
 ---
 
@@ -170,13 +205,13 @@ UI changes keep Chromium E2E and accessibility checks green.
 
 Storage/backup changes require:
 
-- frozen migration fixture;
+- frozen migration fixture where schema changes;
 - deterministic backup migration/validation;
 - round-trip tests.
 
 Anki discovery/routing/model work requires real-Anki manual acceptance in addition to mocks.
 
-Discovery acceptance must prove read-only behavior.
+Backfill/source-session work requires browser-level privacy/permission tests in addition to DOM fixtures.
 
 No item may silently:
 
@@ -184,4 +219,5 @@ No item may silently:
 - move an exported card to a different deck;
 - mutate a user-owned Anki model;
 - infer a target model solely from deck popularity;
+- turn staged source candidates directly into Ready cards;
 - rewrite lexical identity from an unapproved suggestion.

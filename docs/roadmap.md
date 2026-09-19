@@ -15,14 +15,15 @@ Implemented hardening includes:
 
 ## Active planned work
 
-The next work focuses on daily usability, safe multilingual routing, live Anki discovery, compatibility with existing Anki setups, and better evidence-driven learning proposals.
+The next work focuses on daily usability, safe multilingual routing, live Anki discovery, compatibility with existing Anki setups, source backfill, and better evidence-driven learning proposals.
 
 ### Product and UX
 
 - ACCP-010 — final icon/brand asset system;
 - ACCP-011 — compact queue and focused detail sidebar;
 - ACCP-012 — first-run onboarding and capture/review/export journey;
-- ACCP-018 — guided export-profile setup from live Anki metadata.
+- ACCP-018 — guided export-profile setup from live Anki metadata;
+- ACCP-021 — staged backfill review/import workflow.
 
 ### Anki integration
 
@@ -31,12 +32,17 @@ The next work focuses on daily usability, safe multilingual routing, live Anki d
 - ACCP-013 — export profiles and language-aware multi-deck routing;
 - ACCP-014 — existing note type integration through explicit field mapping without mutating user-owned models.
 
+### Capture and source backfill
+
+- ACCP-019 — generic staged batch-capture pipeline;
+- ACCP-020 — opt-in Duolingo visible lesson/review backfill;
+- ACCP-021 — review/select/commit staged candidates before normal card review.
+
 See:
 
-- [Anki export strategy](product/anki-export-strategy.md)
-- [ADR 0008](decisions/0008-export-profiles-and-routing.md)
-- [ADR 0009](decisions/0009-user-owned-anki-models.md)
-- [ADR 0010](decisions/0010-live-anki-discovery.md)
+- [Duolingo visible-material backfill](product/duolingo-backfill.md)
+- [ADR 0002](decisions/0002-source-adapters.md)
+- [ADR 0011](decisions/0011-staged-source-backfill.md)
 
 ### Learning/corpus work
 
