@@ -253,6 +253,9 @@ try {
     `;
   });
 
+  // Switch away from the originating tab before stopping. The service worker must
+  // still address the Duolingo tab that owns the explicit session.
+  await contentPage.bringToFront();
   await clickPanelButton(panel, "Stop & stage session");
   await panel.locator(".backfill-status", { hasText: "6 staged candidates" }).waitFor();
   assert.equal(
