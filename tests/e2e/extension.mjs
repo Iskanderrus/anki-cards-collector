@@ -12,6 +12,19 @@ const manifest = JSON.parse(await readFile(join(extensionPath, "manifest.json"),
 assert.equal(manifest.content_scripts, undefined, "E2E manifest must not add persistent content scripts.");
 assert.ok(manifest.permissions.includes("activeTab"));
 assert.ok(manifest.permissions.includes("scripting"));
+assert.equal(
+  manifest.host_permissions.some((pattern) => /duolingo\.com/.test(pattern)),
+  false,
+  "Duolingo access must not be a required host permission.",
+);
+assert.ok(
+  manifest.optional_host_permissions?.includes("https://duolingo.com/*"),
+  "Apex Duolingo access must be optional.",
+);
+assert.ok(
+  manifest.optional_host_permissions?.includes("https://*.duolingo.com/*"),
+  "Duolingo subdomain access must be optional.",
+);
 
 const server = createServer((request, response) => {
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
