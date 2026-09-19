@@ -122,6 +122,8 @@ function startVisibleSession(language: string): VisibleSessionStatus {
     childList: true,
     subtree: true,
     characterData: true,
+    attributes: true,
+    attributeFilter: ["hidden", "aria-hidden", "class", "style", "data-test"],
   });
   notifySessionStatus();
   return sessionStatus();
