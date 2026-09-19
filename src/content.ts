@@ -62,7 +62,7 @@ function notifySessionStatus(): void {
 }
 
 function accumulateVisibleEvidence(session: ActiveVisibleSession): boolean {
-  if (!supportsDuolingoVisibleBackfill(window.location, session.allowFixture)) {
+  if (!supportsDuolingoVisibleBackfill(document, window.location, session.allowFixture)) {
     return false;
   }
 
@@ -102,7 +102,7 @@ function startVisibleSession(language: string): VisibleSessionStatus {
   if (visibleSession) return sessionStatus();
 
   const allowFixture = allowDuolingoFixture();
-  if (!supportsDuolingoVisibleBackfill(window.location, allowFixture)) {
+  if (!supportsDuolingoVisibleBackfill(document, window.location, allowFixture)) {
     throw new Error("Open a Duolingo lesson or review page first.");
   }
 
@@ -171,7 +171,7 @@ if (!window.__ankiCardsCollectorLoaded) {
 
       if (message?.type === "DUOLINGO_SCAN_VISIBLE") {
         const allowFixture = allowDuolingoFixture();
-        if (!supportsDuolingoVisibleBackfill(window.location, allowFixture)) {
+        if (!supportsDuolingoVisibleBackfill(document, window.location, allowFixture)) {
           sendResponse({ ok: false, error: "Open a Duolingo lesson or review page first." });
           return false;
         }
@@ -200,7 +200,7 @@ if (!window.__ankiCardsCollectorLoaded) {
       if (message?.type === "DUOLINGO_GET_VISIBLE_SESSION_STATUS") {
         sendResponse({
           ok: true,
-          supported: supportsDuolingoVisibleBackfill(window.location, allowDuolingoFixture()),
+          supported: supportsDuolingoVisibleBackfill(document, window.location, allowDuolingoFixture()),
           status: sessionStatus(),
           evidence: sessionEvidence(),
         });
