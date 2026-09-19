@@ -8,8 +8,25 @@ import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
+import {
+  AnkiCatalogService,
+  type AnkiCatalogRefreshResult,
+  type AnkiCatalogSnapshot,
+  type AnkiModelDetail,
+  type AnkiModelInspectionResult,
+} from "../anki/catalog";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
+
+type CatalogUiState =
+  | { kind: "idle" }
+  | { kind: "loading"; snapshot: AnkiCatalogSnapshot | null }
+  | AnkiCatalogRefreshResult;
+
+type ModelUiState =
+  | { kind: "idle" }
+  | { kind: "loading"; detail: AnkiModelDetail | null }
+  | AnkiModelInspectionResult;
 
 interface EditDraft {
   canonicalText: string;
@@ -51,6 +68,9 @@ function App(): React.ReactElement {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
+  const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
+  const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
+  const catalogService = useMemo(() => new AnkiCatalogService(new AnkiClient()), []);
 
   const load = useCallback(async () => {
     const loadedItems = await repository.list();
@@ -223,6 +243,46 @@ function App(): React.ReactElement {
   async function persistSettings(next: CollectorSettings): Promise<void> {
     setSettings(next);
     await saveSettings(next);
+  }
+
+  function currentCatalogSnapshot(): AnkiCatalogSnapshot | null {
+    if (catalogState.kind === "idle" || catalogState.kind === "unavailable") return null;
+    return catalogState.snapshot;
+  }
+
+  async function inspectAnkiModel(modelName: string): Promise<void> {
+    if (!modelName) {
+      setModelState({ kind: "idle" });
+      return;
+    }
+
+    const previousDetail =
+      modelState.kind === "idle" || modelState.kind === "unavailable"
+        ? null
+        : modelState.detail;
+    setModelState({ kind: "loading", detail: previousDetail });
+
+    const result = await catalogService.inspectModel(modelName);
+    setModelState(result);
+  }
+
+  async function refreshAnkiCatalog(): Promise<void> {
+    setCatalogState({
+      kind: "loading",
+      snapshot: catalogService.currentSnapshot(),
+    });
+
+    const result = await catalogService.refresh();
+    setCatalogState(result);
+
+    if (
+      (result.kind === "live" || result.kind === "stale")
+      && result.snapshot.models.some((model) => model.name === settings.modelName)
+    ) {
+      await inspectAnkiModel(settings.modelName);
+    } else {
+      setModelState({ kind: "idle" });
+    }
   }
 
   function exportTsv(): void {
@@ -425,20 +485,108 @@ function App(): React.ReactElement {
               onChange={(event) => void persistSettings({ ...settings, defaultLanguage: event.target.value || "und" })}
             />
           </label>
+          <div className="anki-catalog">
+            <div className="anki-catalog-head">
+              <div>
+                <strong>Live Anki catalog</strong>
+                <div className="setting-help">
+                  Read-only discovery. Refreshing does not create decks, change note types, or update cards.
+                </div>
+              </div>
+              <button
+                className="ghost"
+                type="button"
+                disabled={catalogState.kind === "loading"}
+                onClick={() => void refreshAnkiCatalog()}
+              >
+                {catalogState.kind === "loading" ? "Refreshing…" : "Refresh from Anki"}
+              </button>
+            </div>
+
+            <div className="anki-catalog-status" role="status" aria-live="polite">
+              {catalogState.kind === "idle" && "Not checked yet."}
+              {catalogState.kind === "loading" && "Reading decks and note types from Anki…"}
+              {catalogState.kind === "live" && (
+                <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"} · {catalogState.snapshot.models.length} note type{catalogState.snapshot.models.length === 1 ? "" : "s"}</>
+              )}
+              {catalogState.kind === "stale" && (
+                <>Showing the last successful catalog. Refresh failed: {catalogState.error}</>
+              )}
+              {catalogState.kind === "unavailable" && (
+                <>Anki catalog unavailable: {catalogState.error}</>
+              )}
+            </div>
+          </div>
+
           <label>
             Anki deck
-            <input
+            <select
               value={settings.deckName}
               onChange={(event) => void persistSettings({ ...settings, deckName: event.target.value })}
-            />
+            >
+              {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === settings.deckName) && (
+                <option value={settings.deckName}>
+                  {settings.deckName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
+                </option>
+              )}
+              {currentCatalogSnapshot()?.decks.map((deck) => (
+                <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+              ))}
+            </select>
           </label>
+
           <label>
             Anki note type
-            <input
+            <select
               value={settings.modelName}
-              onChange={(event) => void persistSettings({ ...settings, modelName: event.target.value })}
-            />
+              onChange={(event) => {
+                const modelName = event.target.value;
+                void persistSettings({ ...settings, modelName });
+                if (currentCatalogSnapshot()?.models.some((model) => model.name === modelName)) {
+                  void inspectAnkiModel(modelName);
+                } else {
+                  setModelState({ kind: "idle" });
+                }
+              }}
+            >
+              {!currentCatalogSnapshot()?.models.some((model) => model.name === settings.modelName) && (
+                <option value={settings.modelName}>
+                  {settings.modelName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
+                </option>
+              )}
+              {currentCatalogSnapshot()?.models.map((model) => (
+                <option key={String(model.id)} value={model.name}>{model.name}</option>
+              ))}
+            </select>
           </label>
+
+          {modelState.kind !== "idle" && (
+            <div className="anki-model-inspector" aria-live="polite">
+              {modelState.kind === "loading" && <span>Inspecting note type…</span>}
+              {modelState.kind === "unavailable" && (
+                <span>Could not inspect this note type: {modelState.error}</span>
+              )}
+              {(modelState.kind === "live" || modelState.kind === "stale") && (
+                <>
+                  <strong>{modelState.detail.name}</strong>
+                  {modelState.kind === "stale" && (
+                    <span className="setting-help">Showing cached metadata: {modelState.error}</span>
+                  )}
+                  <span><strong>Fields:</strong> {modelState.detail.fields.join(", ") || "none"}</span>
+                  <span>
+                    <strong>Templates:</strong>{" "}
+                    {modelState.detail.templates.map((template) => template.name).join(", ") || "none"}
+                  </span>
+                  <span>
+                    <strong>Styling:</strong>{" "}
+                    {modelState.detail.css.length > 0
+                      ? `${modelState.detail.css.length} CSS characters detected`
+                      : "no CSS returned"}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
           <label>
             Source URL retention
             <select
