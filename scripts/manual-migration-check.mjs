@@ -147,6 +147,14 @@ function schedulingFingerprint(card) {
   };
 }
 
+function requireExistingAnkiNote(notes, noteId, label = "Anki note") {
+  const note = (notes ?? []).find((candidate) => candidate?.noteId === noteId);
+  if (!note) {
+    fail(label + " " + noteId + " does not exist or notesInfo returned no matching note object.");
+  }
+  return note;
+}
+
 function findItem(document, version, collectorId, label) {
   requireVersion(document, version, label);
   const item = (document.items ?? []).find((candidate) => candidate?.lexicalUnit?.id === collectorId);
@@ -176,10 +184,14 @@ async function snapshot(beforePath, collectorId, outputPath, endpoint = DEFAULT_
   if (noteId === undefined) fail("Collector ID " + collectorId + " has no ankiNoteId.");
 
   await invokeAnki(endpoint, "version");
-  const [note] = await invokeAnki(endpoint, "notesInfo", { notes: [noteId] });
-  if (!note) fail("Anki note " + noteId + " does not exist.");
+  const notes = await invokeAnki(endpoint, "notesInfo", { notes: [noteId] });
+  const note = requireExistingAnkiNote(notes, noteId);
 
-  const cards = await invokeAnki(endpoint, "cardsInfo", { cards: note.cards ?? [] });
+  if (!Array.isArray(note.cards) || note.cards.length === 0) {
+    fail("Anki note " + noteId + " has no card IDs; refusing to write an invalid migration snapshot.");
+  }
+
+  const cards = await invokeAnki(endpoint, "cardsInfo", { cards: note.cards });
   const snapshotDocument = {
     collectorId,
     noteId: note.noteId,
@@ -210,8 +222,8 @@ async function verify(beforePath, afterPath, snapshotPath, endpoint = DEFAULT_EN
   }
 
   await invokeAnki(endpoint, "version");
-  const [note] = await invokeAnki(endpoint, "notesInfo", { notes: [snapshotDocument.noteId] });
-  if (!note) fail("Anki note " + snapshotDocument.noteId + " no longer exists.");
+  const notes = await invokeAnki(endpoint, "notesInfo", { notes: [snapshotDocument.noteId] });
+  const note = requireExistingAnkiNote(notes, snapshotDocument.noteId);
 
   if (!equalJson(note.cards ?? [], snapshotDocument.cardIds ?? [])) {
     fail("Anki card IDs changed.");
@@ -302,6 +314,18 @@ function selfTest() {
 
   const result = verifyCorpusMigration(before, after);
   if (result.lexicalUnits !== 1 || result.occurrences !== 1) fail("Self-test result is incorrect.");
+
+  const validNote = requireExistingAnkiNote([{ noteId: 42, cards: [101] }], 42);
+  if (validNote.noteId !== 42) fail("Anki note validation self-test is incorrect.");
+
+  let rejectedEmptyNote = false;
+  try {
+    requireExistingAnkiNote([{}], 42);
+  } catch {
+    rejectedEmptyNote = true;
+  }
+  if (!rejectedEmptyNote) fail("Deleted-note notesInfo shape was not rejected.");
+
   console.log("manual-migration-check self-test passed.");
 }
 
