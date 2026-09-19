@@ -11,6 +11,8 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - one-shot scan injects the existing on-demand content script, reads only rendered lesson/review nodes, and immediately hands the evidence to ACCP-019 staging;
 - session mode starts only after the user clicks **Start backfill session**;
 - the session uses a temporary `MutationObserver` in that tab to accumulate newly rendered visible evidence while the user navigates manually;
+- observation is supported only while recognizable lesson/review/challenge study DOM is present, not merely while the tab remains on a Duolingo hostname;
+- same-document SPA navigation that removes the supported study context terminates the observer;
 - stopping the session disconnects the observer and sends the accumulated evidence to ACCP-019 staging;
 - page teardown destroys the content-script session automatically;
 - no persistent manifest content script or required Duolingo host permission is added;
@@ -66,6 +68,12 @@ Each candidate should include:
 - capture/session timestamp.
 
 Filter obvious UI chrome where reliable.
+
+Candidate safety rules:
+- normalize the full candidate text before enforcing the 240-character lexical-candidate limit;
+- reject over-limit candidate nodes rather than truncating aggregate wrappers into lexical items;
+- when a configured language is known, require matching `lang` metadata on the candidate or an ancestor; undeclared explicit-selector nodes are ignored rather than assumed to be target-language;
+- evidence keeps the language assigned when it was observed; later Settings changes must not relabel an active session's accumulated evidence.
 
 Context must remain target-language evidence, not a concatenation of the whole challenge UI:
 - sentence/phrase candidates use their own visible target text as context;
@@ -124,8 +132,11 @@ Use deterministic HTML/DOM fixtures for:
 - DOM replacement/re-render;
 - repeated text;
 - irrelevant navigation/UI labels;
+- undeclared source-language text beside declared target-language material;
+- over-limit target-language wrappers;
 - session start/stop;
-- navigation away;
+- same-document SPA navigation away from supported study context;
+- changing the configured language while a session is active;
 - no-candidate page.
 
 Browser E2E should verify the observer only runs after explicit activation.
