@@ -200,7 +200,7 @@ async function snapshot(beforePath, collectorId, outputPath, endpoint = DEFAULT_
     scheduling: cards.map(schedulingFingerprint),
   };
 
-  await writeFile(outputPath, JSON.stringify(snapshotDocument, null, 2) + "\\n", "utf8");
+  await writeFile(outputPath, JSON.stringify(snapshotDocument, null, 2) + "\n", "utf8");
   console.log("Saved Anki snapshot to " + outputPath + ".");
   console.table(snapshotDocument.scheduling);
 }
