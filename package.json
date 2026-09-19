@@ -11,9 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "node tests/e2e/extension.mjs",
-    "check": "npm run typecheck && npm test && npm run build && node scripts/check-built.mjs",
+    "check": "npm run typecheck && npm test && npm run check:manual-migration-helper && npm run build && node scripts/check-built.mjs",
     "check:store": "node scripts/check-store-package.mjs",
-    "package:store": "npm run build:release && npm run check:store && node scripts/package-release.mjs"
+    "package:store": "npm run build:release && npm run check:store && node scripts/package-release.mjs",
+    "check:manual-migration-helper": "node scripts/manual-migration-check.mjs self-test"
   },
   "dependencies": {
     "dexie": "^4.0.11",
