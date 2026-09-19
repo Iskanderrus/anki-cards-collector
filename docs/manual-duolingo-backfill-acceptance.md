@@ -14,11 +14,12 @@ Run this check with a real Duolingo account after loading the extension build fr
 1. Open the Duolingo lesson/review material.
 2. Open the Collector side panel.
 3. Click **Scan visible Duolingo**.
-4. Confirm the side panel reports a non-negative visible candidate count.
-5. Confirm visible target-language words/phrases/sentences are represented in the staged count.
-6. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
-7. Confirm the normal corpus count did not increase.
-8. Confirm no Anki note was created or updated.
+4. On first use, approve Chrome's Duolingo page-access prompt.
+5. Confirm the side panel reports a non-negative visible candidate count.
+6. Confirm visible target-language words/phrases/sentences are represented in the staged count.
+7. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
+8. Confirm the normal corpus count did not increase.
+9. Confirm no Anki note was created or updated.
 
 ## Explicit session
 
@@ -40,7 +41,7 @@ Run this check with a real Duolingo account after loading the extension build fr
 
 ## Privacy / permission check
 
-Confirm the extension manifest still has no persistent content script and no Duolingo host permission.
+Confirm the extension manifest still has no persistent content script and no required Duolingo entry in `host_permissions`. Duolingo access should appear only in `optional_host_permissions` and should be requested by Chrome after an explicit scan/session action.
 
 During scan/session use, verify Collector does not:
 
@@ -48,6 +49,8 @@ During scan/session use, verify Collector does not:
 - make or intercept Duolingo private API calls;
 - capture hidden application state;
 - run collection before explicit activation.
+
+Also confirm that granting the optional Duolingo page permission by itself does not start collection.
 
 ## Regression
 
