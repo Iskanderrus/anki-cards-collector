@@ -244,6 +244,12 @@ try {
 
   await clickPanelButton(panel, "Scan visible Duolingo");
   await panel.locator(".backfill-status", { hasText: "3 staged candidates" }).waitFor();
+  await panel.locator(".staged-candidate-text", { hasText: "שלום עולם" }).waitFor();
+  assert.equal(
+    await panel.locator(".staged-candidate").count(),
+    3,
+    "Staged Duolingo evidence should be inspectable without entering the corpus.",
+  );
   assert.equal(
     await termCount(panel),
     2,
