@@ -282,3 +282,21 @@ summary:focus-visible {
 .occurrence-selection strong {
   color: CanvasText;
 }
+
+
+.backfill-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.backfill-toolbar { align-items: center; }
+.backfill-status {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+}
+.backfill-status strong { color: CanvasText; }
