@@ -36,8 +36,6 @@ Expected:
 - the deck selector contains your real Anki decks;
 - the note-type selector contains your real note types.
 
-If Anki is stopped and you refresh again after a successful refresh, Collector should keep the last successful catalog visible as stale data and show the refresh error.
-
 ## 3. Inspect one existing note type
 
 Choose a note type you recognize.
@@ -51,17 +49,34 @@ Expected inspector output:
 
 Collector must not add Collector-specific fields to this note type merely because you inspected it.
 
-## 4. Verify no mutation
+## 4. Test persistent stale fallback
 
-Back in Anki, confirm:
+After a successful refresh/inspection:
+
+1. close Anki Desktop;
+2. close and reopen the Collector side panel (this deliberately remounts the UI);
+3. click **Refresh from Anki**.
+
+Expected:
+
+- Collector reports that it is showing the last successful catalog and the new refresh failed;
+- previously discovered decks/note types remain selectable from stale local metadata;
+- the inspected model can still show cached field/template/styling metadata;
+- saved Collector settings remain unchanged.
+
+This cache contains discovery metadata only; it does not persist sampled cards or note contents.
+
+## 5. Verify no mutation
+
+Reopen Anki and confirm:
 
 - no new deck appeared;
 - no deck was renamed or moved;
 - the inspected note type has the same fields;
 - its templates/CSS are unchanged;
-- no notes/cards were created or updated by the refresh/inspection.
+- no notes/cards were created or updated by refresh/inspection.
 
-## 5. Report
+## 6. Report
 
 Record:
 
@@ -72,6 +87,7 @@ Record:
 - inspected note-type name;
 - PASS/FAIL for deck discovery;
 - PASS/FAIL for model fields/templates;
+- PASS/FAIL for persistent stale fallback;
 - PASS/FAIL for no mutation.
 
 Do not publish card contents, private source URLs, or collection backups in a public issue comment.

@@ -15,6 +15,7 @@ import {
   type AnkiModelDetail,
   type AnkiModelInspectionResult,
 } from "../anki/catalog";
+import { ChromeAnkiCatalogCache } from "../anki/catalog-cache";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 
@@ -70,7 +71,14 @@ function App(): React.ReactElement {
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
   const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
-  const catalogService = useMemo(() => new AnkiCatalogService(new AnkiClient()), []);
+  const catalogService = useMemo(
+    () => new AnkiCatalogService(
+      new AnkiClient(),
+      () => new Date(),
+      new ChromeAnkiCatalogCache(),
+    ),
+    [],
+  );
 
   const load = useCallback(async () => {
     const loadedItems = await repository.list();
