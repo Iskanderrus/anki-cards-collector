@@ -10,11 +10,14 @@ The Collector started from a language-learning use case, including material enco
 
 Manual capture from an arbitrary page is the baseline capability.
 
-Source-specific behaviour implements a small `SourceAdapter` interface. A generic adapter is always available. The Duolingo adapter may improve context extraction from visible DOM, but it must not use private APIs, tokens, cookies, network interception, or exercise automation.
+Source-specific behaviour implements a small adapter boundary. A generic adapter is always available. The Duolingo adapter may improve context extraction from visible DOM, but it must not use private APIs, tokens, cookies, network interception, or exercise automation.
+
+Source-specific batch/backfill behavior follows ADR 0011: adapters may emit temporary visible-evidence candidates, but they do not mutate the main corpus or create Anki cards directly.
 
 ## Consequences
 
 - a broken specialised adapter degrades to generic capture instead of breaking the product;
 - testing can focus on the adapter contract;
 - adding another source does not change persistence or Anki export;
-- specialised “backfill” features must stay opt-in and respect the same privacy boundary.
+- specialised backfill features stay opt-in and respect the same privacy boundary;
+- manual single-selection capture remains first-class even when a source supports batch extraction.
