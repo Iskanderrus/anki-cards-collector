@@ -31,6 +31,7 @@ const server = createServer((request, response) => {
 
   const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
   if (pathname === "/duolingo") {
+    const longHebrew = "טקסט ארוך מאוד ".repeat(24);
     response.end(`<!doctype html>
       <html data-collector-duolingo-fixture="true">
         <head><title>Duolingo Visible Review Fixture</title></head>
@@ -39,6 +40,8 @@ const server = createServer((request, response) => {
           <main>
             <div id="challenge" data-test="challenge-translate">
               <p data-test="challenge-sentence" lang="he">שלום עולם</p>
+              <p data-test="challenge-sentence">Hello there</p>
+              <div lang="he">${longHebrew}</div>
               <div data-test="word-bank">
                 <button data-test="challenge-tap-token" lang="he">שלום</button>
                 <button data-test="challenge-tap-token" lang="he">עולם</button>
@@ -288,6 +291,25 @@ try {
     3,
     "Staged Duolingo evidence should be inspectable without entering the corpus.",
   );
+  const initialStagedBatch = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(initialStagedBatch?.ok, true);
+  assert.equal(
+    initialStagedBatch.batch.candidates.some((candidate) => candidate.surfaceText === "Hello there"),
+    false,
+    "An undeclared source-language sentence must not be stamped as Hebrew evidence.",
+  );
+  assert.equal(
+    initialStagedBatch.batch.candidates.some((candidate) => candidate.surfaceText.length > 240),
+    false,
+    "Long language-marked aggregate wrappers must not become lexical candidates.",
+  );
+  assert.equal(
+    initialStagedBatch.batch.candidates.some((candidate) => candidate.surfaceText.startsWith("טקסט ארוך מאוד")),
+    false,
+    "A >240-character target-language wrapper must be rejected rather than truncated.",
+  );
   assert.equal(
     await termCount(panel),
     2,
@@ -323,6 +345,14 @@ try {
     1,
     "Newly rendered sentence evidence should appear in the live session preview.",
   );
+
+  // Session evidence owns the language captured at session start. Changing the
+  // current setting must not relabel already observed Hebrew evidence.
+  await languageInput.fill("sr");
+  await panel.waitForFunction(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings?.defaultLanguage === "sr";
+  });
 
   // Switch away from the originating tab before stopping. The service worker must
   // still address the Duolingo tab that owns the explicit session.
@@ -375,6 +405,48 @@ try {
     true,
     "Word-bank tokens should inherit the nearest clean target-language sentence as context.",
   );
+  assert.equal(
+    stagedBatch.batch.candidates.every((candidate) => candidate.language === "he"),
+    true,
+    "Changing Settings mid-session must not relabel observed Hebrew evidence as Serbian.",
+  );
+
+  await languageInput.fill("he");
+  await panel.waitForFunction(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings?.defaultLanguage === "he";
+  });
+
+  // A same-document Duolingo SPA transition away from lesson/review content must
+  // stop the active observer even though the hostname and document stay the same.
+  await duolingoPage.bringToFront();
+  await clickPanelButton(panel, "Start backfill session");
+  await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
+
+  await duolingoPage.evaluate(() => {
+    history.pushState({}, "", "/home");
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Duolingo E2E main fixture is missing.");
+    main.innerHTML = `
+      <section data-test="home-feed">
+        <h1>Home</h1>
+        <p lang="he">טקסט שאינו חלק משיעור</p>
+      </section>
+    `;
+  });
+
+  await panel.getByRole("button", { name: "Start backfill session" }).waitFor();
+  assert.equal(
+    await panel.locator(".live-session-candidate").count(),
+    0,
+    "SPA navigation away from supported study context must terminate the live session.",
+  );
+  const awayStatus = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  );
+  assert.equal(awayStatus?.ok, true);
+  assert.equal(awayStatus?.status?.active, false);
+  assert.equal(awayStatus?.supported, false);
 
   // Matching-pairs challenges often put keyboard shortcut numbers in an outer
   // language-marked wrapper. Only the clean leaf target text should be staged.
