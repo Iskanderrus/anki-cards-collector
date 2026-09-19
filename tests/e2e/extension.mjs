@@ -22,6 +22,7 @@ const server = createServer((_request, response) => {
         <main>
           <p id="first">Aunque llueva, voy a caminar porque quiero practicar español.</p>
           <p id="second">Context menu phrase appears in a separate sentence for capture.</p>
+          <p id="repeat">Aunque llueva.</p>
         </main>
       </body>
     </html>`);
@@ -180,6 +181,24 @@ try {
     await firstCard.getAttribute("data-active"),
     "true",
     "ArrowDown should move to the next visible card.",
+  );
+
+  // Repeated evidence must enrich the existing lexical unit, not create another study target.
+  // The newer occurrence is deliberately weak so the older, stronger context should remain selected.
+  await selectText(contentPage, "#repeat", "Aunque llueva");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
+  assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
+  assert.match(
+    await firstCard.locator(".context").innerText(),
+    /Aunque llueva, voy a caminar porque quiero practicar español\./,
+    "The older stronger occurrence should remain the reviewed context.",
+  );
+  assert.match(
+    await firstCard.locator(".occurrence-selection").innerText(),
+    /Using occurrence 1 of 2/,
+    "Review should explain which occurrence drives the proposal.",
   );
 
   const accessibility = await new AxeBuilder({ page: panel })

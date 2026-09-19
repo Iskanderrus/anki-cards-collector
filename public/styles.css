@@ -267,3 +267,18 @@ summary:focus-visible {
   line-height: 1.35;
   border: 1px solid #b54708;
 }
+
+
+.occurrence-selection {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 3px solid color-mix(in srgb, CanvasText 22%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 68%, transparent);
+}
+.occurrence-selection strong {
+  color: CanvasText;
+}

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
-import type { CollectedItem, CollectorSettings, ReviewStatus, SourceUrlMode } from "../core/types";
+import type { CollectedItem, CollectorSettings, Occurrence, ReviewStatus, SourceUrlMode } from "../core/types";
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
@@ -42,12 +42,8 @@ function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
 }
 
-function latestContext(item: CollectedItem): string {
-  return latestOccurrence(item)?.context ?? "";
-}
-
-function sourceLabel(item: CollectedItem): string {
-  const source = item.occurrences.at(-1)?.source;
+function sourceLabel(occurrence: Occurrence | undefined): string {
+  const source = occurrence?.source;
   if (!source) return "unknown source";
   try {
     return new URL(source.url).hostname;
@@ -146,7 +142,8 @@ function App(): React.ReactElement {
   }
 
   function beginEdit(item: CollectedItem): void {
-    const occurrence = item.occurrences.at(-1);
+    const proposal = proposeLearningCard(item);
+    const occurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
     setEditingId(item.lexicalUnit.id);
     setEditDraft({
       canonicalText: item.lexicalUnit.canonicalText,
@@ -677,6 +674,7 @@ function App(): React.ReactElement {
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = proposeLearningCard(item);
+          const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
 
           return (
             <article
@@ -692,11 +690,11 @@ function App(): React.ReactElement {
                 <div>
                   <div className="term">{unit.canonicalText}</div>
                   <div className="meta">
-                    {unit.language} · {sourceLabel(item)} · {item.occurrences.length} occurrence{item.occurrences.length === 1 ? "" : "s"}
+                    {unit.language} · {sourceLabel(selectedOccurrence)} · {item.occurrences.length} occurrence{item.occurrences.length === 1 ? "" : "s"}
                   </div>
-                  {latestOccurrence(item)?.surfaceText &&
-                    latestOccurrence(item)?.surfaceText !== unit.canonicalText && (
-                      <div className="meta">Observed: {latestOccurrence(item)?.surfaceText}</div>
+                  {selectedOccurrence?.surfaceText &&
+                    selectedOccurrence.surfaceText !== unit.canonicalText && (
+                      <div className="meta">Observed: {selectedOccurrence.surfaceText}</div>
                     )}
                 </div>
                 <span className="pill">{unit.status}</span>
@@ -756,8 +754,17 @@ function App(): React.ReactElement {
                 </form>
               ) : (
                 <>
-                  {latestContext(item) && <p className="context">{latestContext(item)}</p>}
+                  {selectedOccurrence?.context && <p className="context">{selectedOccurrence.context}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
+
+                  {proposal.occurrenceSelection && item.occurrences.length > 1 && (
+                    <div className="occurrence-selection">
+                      <strong>
+                        Using occurrence {proposal.occurrenceSelection.selectedNumber} of {proposal.occurrenceSelection.occurrenceCount}
+                      </strong>
+                      <span>{proposal.occurrenceSelection.reason}</span>
+                    </div>
+                  )}
 
                   <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
                     <div className="proposal-head">

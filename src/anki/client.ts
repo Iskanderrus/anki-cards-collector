@@ -156,7 +156,7 @@ export class AnkiClient {
       throw new Error(proposal.warning ?? "This item needs review before export.");
     }
 
-    const occurrence = item.occurrences.at(-1);
+    const occurrence = proposal.occurrenceSelection?.occurrence;
     const fields = {
       CollectorID: item.lexicalUnit.id,
       Prompt: proposal.prompt,

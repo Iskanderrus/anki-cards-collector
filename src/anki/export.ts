@@ -7,8 +7,8 @@ function cleanCell(value: string): string {
 
 export function toTsv(items: CollectedItem[]): string {
   const rows = items.map((item) => {
-    const latest = item.occurrences.at(-1);
     const proposal = proposeLearningCard(item);
+    const selected = proposal.occurrenceSelection?.occurrence;
     return [
       item.lexicalUnit.id,
       proposal.cardKind,
@@ -16,10 +16,10 @@ export function toTsv(items: CollectedItem[]): string {
       proposal.answer,
       proposal.reason,
       item.lexicalUnit.canonicalText,
-      latest?.surfaceText ?? item.lexicalUnit.canonicalText,
-      latest?.context ?? "",
+      selected?.surfaceText ?? item.lexicalUnit.canonicalText,
+      selected?.context ?? "",
       item.lexicalUnit.note,
-      latest?.source.url ?? "",
+      selected?.source.url ?? "",
     ].map(cleanCell).join("\t");
   });
 

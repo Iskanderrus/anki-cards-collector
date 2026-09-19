@@ -317,4 +317,46 @@ describe("AnkiClient", () => {
     ].includes(action))).toBe(false);
   });
 
+  it("exports fields from the same best occurrence used by the proposal", async () => {
+    const value = item();
+    value.occurrences.push({
+      ...value.occurrences[0]!,
+      id: "occ-newer-weak",
+      context: "tengo ganas de",
+      capturedAt: "2026-09-19T11:00:00Z",
+      source: {
+        ...value.occurrences[0]!.source,
+        url: "https://example.com/weak",
+      },
+    });
+
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      const result = request.action === "notesInfo"
+        ? [{ noteId: 4242 }]
+        : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(value, settings());
+
+    const update = requests.find(({ action }) => action === "updateNoteFields");
+    expect(update?.params).toMatchObject({
+      note: {
+        id: 4242,
+        fields: {
+          Prompt: "Hoy […] salir a caminar por el centro.",
+          Observed: "tengo ganas de",
+          Context: "Hoy tengo ganas de salir a caminar por el centro.",
+          Source: "https://example.com",
+        },
+      },
+    });
+  });
+
 });
