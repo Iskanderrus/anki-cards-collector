@@ -71,6 +71,7 @@ assert.equal(manifest.content_scripts, undefined, "Store package must not instal
 
 const manifestIcons = {
   16: "icons/icon16.png",
+  32: "icons/icon32.png",
   48: "icons/icon48.png",
   128: "icons/icon128.png",
 };
@@ -83,8 +84,12 @@ const actionIcons = {
 };
 assert.deepEqual(manifest.action?.default_icon, actionIcons, "Action icons changed unexpectedly.");
 
+const iconEntries = new Map();
 for (const [sizeText, path] of Object.entries({ ...manifestIcons, ...actionIcons })) {
-  const size = Number(sizeText);
+  iconEntries.set(path, Number(sizeText));
+}
+
+for (const [path, size] of iconEntries) {
   const buffer = await readFile(join(dist, path));
   const dimensions = pngDimensions(buffer);
   assert.deepEqual(

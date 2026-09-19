@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { generateBrandIcons } from "./generate-brand-icons.mjs";
 
 const e2e = process.env.COLLECTOR_E2E === "1";
 const release = process.env.COLLECTOR_RELEASE === "1";
@@ -51,9 +52,11 @@ if (e2e) {
 }
 await writeFile("dist/manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
 
-await cp("public/sidepanel.html", "dist/sidepanel.html");
-await cp("public/styles.css", "dist/styles.css");
-await cp("public/icons", "dist/icons", { recursive: true });
+await Promise.all([
+  cp("public/sidepanel.html", "dist/sidepanel.html"),
+  cp("public/styles.css", "dist/styles.css"),
+  generateBrandIcons("dist/icons"),
+]);
 
 const mode = e2e ? "E2E" : release ? "release" : "production";
 console.log(`Built ${mode} extension into dist/`);

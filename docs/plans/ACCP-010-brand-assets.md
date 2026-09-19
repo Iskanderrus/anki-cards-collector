@@ -1,34 +1,27 @@
 # ACCP-010: Brand assets
 
+## Status
+
+Implemented.
+
 ## Goal
 
-Adopt the supplied Collector artwork as the extension identity without sacrificing tiny-icon readability.
+Adopt the supplied Collector artwork as the extension identity with deterministic, validated icon generation.
 
-## Dependencies
+## Implemented decisions
 
-None. This can be implemented independently.
+- use the supplied multi-card tray artwork as the canonical extension mark;
+- keep one normalized 128×128 PNG source master in the repository;
+- generate 16, 32, 48, and 128px manifest/action icons deterministically at build time;
+- keep source artwork separate from generated `dist/icons`;
+- validate icon dimensions in normal and store-package checks;
+- include 32px in the top-level manifest icon set for consistency.
 
-## Plan
-
-1. Add the two maintainer-supplied source artworks to a clearly named source-asset directory.
-2. Record which source is the multi-card primary mark and which is the single-card fallback.
-3. Create a deterministic resize/export script.
-4. Generate 16, 32, 48, and 128px manifest icons.
-5. Compare both marks at 16/32px in actual browser chrome.
-6. Use the multi-card mark by default; switch tiny sizes to the single-card mark if it is materially clearer.
-7. Update manifest/package/store references.
-8. Add lightweight validation that required icon files exist and have expected dimensions.
-9. Update documentation/store screenshots only after the sidebar redesign if screenshots would otherwise become stale.
-
-## Tests
-
-- packaging contains required icons;
-- manifest points to existing files;
-- generated dimensions are correct;
-- no source asset is overwritten by generated output.
+The supplied single-card concept remains a documented future favicon/small-surface alternative; no favicon surface exists in the current extension package.
 
 ## Non-goals
 
 - sidebar redesign;
+- store screenshot refresh before ACCP-011;
 - broad visual design system;
 - animation.
