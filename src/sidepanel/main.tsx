@@ -60,6 +60,12 @@ const DUOLINGO_OPTIONAL_ORIGINS = [
 ];
 
 async function ensureDuolingoPageAccess(): Promise<void> {
+  const manifest = chrome.runtime.getManifest();
+  if (manifest.host_permissions?.includes("http://127.0.0.1/*")) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url?.startsWith("http://127.0.0.1:")) return;
+  }
+
   const granted = await chrome.permissions.request({
     origins: DUOLINGO_OPTIONAL_ORIGINS,
   });
