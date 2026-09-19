@@ -304,6 +304,21 @@ try {
     "Navigation and generic UI chrome must not become backfill candidates.",
   );
 
+  assert.equal(
+    stagedBatch.batch.candidates.every(
+      (candidate) => !/Write this in English|Home|Shop|Profile|Continue|doesn't|create|boys/.test(candidate.context),
+    ),
+    true,
+    "Duolingo prompt text, answer choices, and UI chrome must not pollute candidate context.",
+  );
+  assert.equal(
+    stagedBatch.batch.candidates
+      .filter((candidate) => ["אני", "עברית"].includes(candidate.surfaceText))
+      .every((candidate) => candidate.context === "אני לומד עברית"),
+    true,
+    "Word-bank tokens should inherit the nearest clean target-language sentence as context.",
+  );
+
   const accessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
