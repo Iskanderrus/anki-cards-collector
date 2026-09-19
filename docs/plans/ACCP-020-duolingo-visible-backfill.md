@@ -19,7 +19,12 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - granting page access does not start background collection: extraction still runs only for a one-shot scan or an explicitly active session;
 - staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki.
 
-The side panel exposes the minimal ACCP-020 controls plus a read-only staged-evidence preview so real-page acceptance can verify what was extracted. The preview shows observed text, context, language, and disposition but cannot edit, accept, or commit candidates. Full staged-candidate review/edit/bulk import remains ACCP-021.
+The side panel exposes the minimal ACCP-020 controls plus two read-only evidence views for acceptance/debugging:
+
+- **Live session evidence** mirrors the active content-script buffer while a backfill session is running.
+- **Staged evidence** shows evidence already handed to ACCP-019.
+
+Stopping a session clears the live view and moves the accumulated evidence through ACCP-019 staging. Neither preview can edit, accept, or commit candidates. Full staged-candidate review/edit/bulk import remains ACCP-021.
 
 ## Dependencies
 
