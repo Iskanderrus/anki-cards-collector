@@ -54,6 +54,15 @@ interface BackfillUiState {
   staged: StagedBatchSummary;
 }
 
+interface StagedCandidatePreview {
+  id: string;
+  surfaceText: string;
+  context: string;
+  language: string;
+  disposition: "new" | "already-represented" | "repeated-evidence" | "needs-review";
+  duplicateCount: number;
+}
+
 const DUOLINGO_OPTIONAL_ORIGINS = [
   "https://duolingo.com/*",
   "https://*.duolingo.com/*",
@@ -131,6 +140,7 @@ function App(): React.ReactElement {
     status: { active: false, candidateCount: 0 },
     staged: EMPTY_STAGED_BATCH,
   });
+  const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -154,6 +164,7 @@ function App(): React.ReactElement {
   useEffect(() => {
     void load();
     void refreshBackfillStatus();
+    void refreshStagedCandidates();
     const listener = (message: unknown) => {
       const event = message as {
         type?: string;
@@ -203,6 +214,23 @@ function App(): React.ReactElement {
       setError(captureError instanceof Error ? captureError.message : "Capture failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshStagedCandidates(): Promise<void> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_STAGED_BATCH",
+      }) as {
+        ok: boolean;
+        batch?: { candidates?: StagedCandidatePreview[] } | null;
+      };
+
+      if (!response.ok) return;
+      setStagedCandidates(response.batch?.candidates ?? []);
+    } catch {
+      // Staging is ephemeral; an unavailable service-worker snapshot simply has no preview.
+      setStagedCandidates([]);
     }
   }
 
@@ -259,6 +287,7 @@ function App(): React.ReactElement {
       setNotice(
         `Scanned ${response.foundCount ?? 0} visible candidate${response.foundCount === 1 ? "" : "s"}. ${staged.candidateCount} candidate${staged.candidateCount === 1 ? "" : "s"} staged for review; nothing was added to Anki.`,
       );
+      await refreshStagedCandidates();
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Duolingo scan failed.");
     } finally {
@@ -326,6 +355,7 @@ function App(): React.ReactElement {
       setNotice(
         `Backfill session stopped. ${response.foundCount ?? 0} session candidate${response.foundCount === 1 ? "" : "s"} observed; ${staged.candidateCount} candidate${staged.candidateCount === 1 ? "" : "s"} are staged for review.`,
       );
+      await refreshStagedCandidates();
     } catch (sessionError) {
       setError(sessionError instanceof Error ? sessionError.message : "Could not stop Duolingo backfill.");
     } finally {
@@ -700,6 +730,31 @@ function App(): React.ReactElement {
             <span>Backfill is opt-in. On first use Chrome asks for Duolingo page access; collection still runs only when you scan or start a session.</span>
           )}
         </div>
+        {stagedCandidates.length > 0 && (
+          <details className="staged-preview" open={stagedCandidates.length <= 3}>
+            <summary>Preview staged evidence ({stagedCandidates.length})</summary>
+            <div className="staged-preview-list">
+              {stagedCandidates.map((candidate) => (
+                <article className="staged-candidate" key={candidate.id}>
+                  <div className="staged-candidate-head">
+                    <strong className="staged-candidate-text" dir="auto">{candidate.surfaceText}</strong>
+                    <span className="pill">{candidate.disposition}</span>
+                  </div>
+                  <div className="meta">
+                    {candidate.language}
+                    {candidate.duplicateCount > 1 ? ` · seen ${candidate.duplicateCount}× in this batch` : ""}
+                  </div>
+                  {candidate.context && candidate.context !== candidate.surfaceText && (
+                    <div className="staged-candidate-context" dir="auto">{candidate.context}</div>
+                  )}
+                </article>
+              ))}
+            </div>
+            <div className="setting-help">
+              Preview only. These items are still staged evidence, not corpus cards; review/import controls belong to ACCP-021.
+            </div>
+          </details>
+        )}
       </section>
 
       <div className="summary">
