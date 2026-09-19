@@ -51,6 +51,34 @@ const server = createServer((request, response) => {
     return;
   }
 
+  if (pathname === "/duolingo-pairs") {
+    response.end(`<!doctype html>
+      <html data-collector-duolingo-fixture="true">
+        <head><title>Duolingo Matching Pairs Fixture</title></head>
+        <body>
+          <main>
+            <div data-test="challenge-match">
+              <div class="pair-column">
+                <button lang="en">1<span>a fruit</span></button>
+                <button lang="en">2<span>soup</span></button>
+                <button lang="en">3<span>a lemon</span></button>
+                <button lang="en">4<span>pasta</span></button>
+                <button lang="en">5<span>sad</span></button>
+              </div>
+              <div class="pair-column">
+                <button lang="he">6<span lang="he">מרק</span></button>
+                <button lang="he">7<span lang="he">פרי</span></button>
+                <button lang="he">8<span lang="he">עצוב</span></button>
+                <button lang="he">9<span lang="he">לימון</span></button>
+                <button lang="he">0<span lang="he">פסטה</span></button>
+              </div>
+            </div>
+          </main>
+        </body>
+      </html>`);
+    return;
+  }
+
   response.end(`<!doctype html>
     <html>
       <head><title>Collector E2E Fixture</title></head>
@@ -317,6 +345,40 @@ try {
       .every((candidate) => candidate.context === "אני לומד עברית"),
     true,
     "Word-bank tokens should inherit the nearest clean target-language sentence as context.",
+  );
+
+  // Matching-pairs challenges often put keyboard shortcut numbers in an outer
+  // language-marked wrapper. Only the clean leaf target text should be staged.
+  const pairsPage = await context.newPage();
+  await pairsPage.goto(`${fixtureUrl}duolingo-pairs`);
+  await pairsPage.bringToFront();
+  await clickPanelButton(panel, "Scan visible Duolingo");
+
+  const pairsBatch = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(pairsBatch?.ok, true);
+  assert.equal(pairsBatch?.batch?.candidates?.length, 11);
+
+  const pairTexts = pairsBatch.batch.candidates
+    .map((candidate) => candidate.surfaceText)
+    .filter((text) => ["מרק", "פרי", "עצוב", "לימון", "פסטה"].includes(text));
+  assert.deepEqual(
+    [...pairTexts].sort(),
+    ["מרק", "פרי", "עצוב", "לימון", "פסטה"].sort(),
+    "Each Hebrew matching-pair term should be staged exactly once.",
+  );
+  assert.equal(
+    pairsBatch.batch.candidates.some((candidate) => /\d/.test(candidate.surfaceText)),
+    false,
+    "Keyboard shortcut digits from matching-pair wrappers must not enter lexical candidates.",
+  );
+  assert.equal(
+    pairsBatch.batch.candidates
+      .filter((candidate) => ["מרק", "פרי", "עצוב", "לימון", "פסטה"].includes(candidate.surfaceText))
+      .every((candidate) => candidate.context === candidate.surfaceText),
+    true,
+    "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
   const accessibility = await new AxeBuilder({ page: panel })
