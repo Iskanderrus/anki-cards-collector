@@ -4,6 +4,25 @@
 
 Add a source-agnostic pipeline for extracting many candidate items without immediately mutating the main corpus.
 
+## Implementation status
+
+Implemented in `src/capture/batch.ts` and the repository batch boundary.
+
+The initial staging lifetime is intentionally in-memory rather than persisted. This keeps staged evidence outside IndexedDB, backup/restore, and normal review state until the user explicitly commits it.
+
+Current classification semantics are:
+
+- **new** — no canonical or observed-form owner exists;
+- **already-represented** — the same normalized surface/context/source evidence already exists under one lexical unit; a unique exact-evidence owner takes precedence over broader surface-form ambiguity;
+- **repeated-evidence** — one existing lexical unit owns the canonical/observed form, but this persisted evidence is new;
+- **needs-review** — exact evidence itself is ambiguous or, absent an exact match, the candidate resolves to multiple possible lexical-unit owners.
+
+Candidate IDs are stable within a caller-supplied batch/session identity and first-seen order. Exact in-batch duplicates collapse while distinct contexts remain separate evidence.
+
+Persisted evidence identity is language + normalized surface + normalized context + source. `adapterMetadata` is descriptive staging metadata only and does not distinguish candidates for dedupe because the current `Occurrence` model does not persist it. If adapter metadata later needs to preserve separate evidence, that requires an explicit merge/persistence model first.
+
+Selected mutations are committed by `CaptureRepository.captureBatch()` in one Dexie transaction. An ambiguous candidate requires an explicit matching lexical-unit resolution; transaction failure leaves both the corpus mutation set and staged batch unchanged.
+
 ## Dependencies
 
 - Current lexical-unit / occurrence repository.
@@ -57,6 +76,7 @@ Use existing text normalization rules.
 Within one batch:
 
 - exact duplicate observed candidates collapse deterministically while preserving useful occurrence/context evidence;
+- metadata-only differences do not create separate candidates because adapter metadata is not part of persisted occurrence identity;
 - candidates are compared to existing observed-form indexes;
 - no morphology inference is performed here.
 

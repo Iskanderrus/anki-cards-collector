@@ -12,6 +12,11 @@ export interface EditLexicalUnitInput {
   context?: string;
 }
 
+export interface CaptureBatchEntry {
+  draft: CaptureDraft;
+  targetLexicalUnitId?: string;
+}
+
 export interface RestorePreview {
   lexicalUnitsAdded: number;
   lexicalUnitsUpdated: number;
@@ -188,7 +193,10 @@ export class CaptureRepository {
     return units.length === 1 ? units[0] : undefined;
   }
 
-  async capture(draft: CaptureDraft): Promise<CollectedItem> {
+  private async captureWithinTransaction(
+    draft: CaptureDraft,
+    targetLexicalUnitId?: string,
+  ): Promise<LexicalUnit> {
     const surfaceText = normalizeText(draft.text);
     if (!surfaceText) throw new Error("Nothing selected.");
 
@@ -196,6 +204,72 @@ export class CaptureRepository {
     const language = draft.language.trim().toLowerCase() || "und";
     const directContentKey = makeContentKey(surfaceText, language);
     const now = draft.capturedAt || new Date().toISOString();
+    let lexicalUnit: LexicalUnit;
+
+    if (targetLexicalUnitId) {
+      const target = await this.database.lexicalUnits.get(targetLexicalUnitId);
+      if (!target) throw new Error("Target lexical unit no longer exists.");
+      if (target.language !== language) {
+        throw new Error("Target lexical unit uses a different language.");
+      }
+
+      lexicalUnit = { ...target, updatedAt: now };
+      await this.database.lexicalUnits.put(lexicalUnit);
+    } else {
+      const direct = await this.database.lexicalUnits
+        .where("contentKey")
+        .equals(directContentKey)
+        .first();
+      const observedOwner = direct
+        ? undefined
+        : await this.findUniqueUnitByObservedSurface(normalizedSurfaceText, language);
+      const existing = direct ?? observedOwner;
+
+      if (existing) {
+        lexicalUnit = { ...existing, updatedAt: now };
+        await this.database.lexicalUnits.put(lexicalUnit);
+      } else {
+        lexicalUnit = {
+          id: crypto.randomUUID(),
+          contentKey: directContentKey,
+          canonicalText: surfaceText,
+          normalizedCanonicalText: normalizedSurfaceText,
+          language,
+          note: "",
+          status: "inbox",
+          createdAt: now,
+          updatedAt: now,
+        };
+        await this.database.lexicalUnits.add(lexicalUnit);
+      }
+    }
+
+    await this.database.occurrences.add({
+      id: crypto.randomUUID(),
+      lexicalUnitId: lexicalUnit.id,
+      surfaceText,
+      normalizedSurfaceText,
+      context: normalizeText(draft.context).slice(0, 800),
+      source: draft.source,
+      capturedAt: now,
+    });
+
+    return lexicalUnit;
+  }
+
+  private async collectedItem(id: string): Promise<CollectedItem> {
+    const lexicalUnit = await this.database.lexicalUnits.get(id);
+    if (!lexicalUnit) throw new Error("Collected item no longer exists.");
+
+    const occurrences = await this.database.occurrences
+      .where("lexicalUnitId")
+      .equals(id)
+      .sortBy("capturedAt");
+
+    return { lexicalUnit, occurrences };
+  }
+
+  async capture(draft: CaptureDraft): Promise<CollectedItem> {
     let lexicalUnit!: LexicalUnit;
 
     await this.database.transaction(
@@ -203,51 +277,34 @@ export class CaptureRepository {
       this.database.lexicalUnits,
       this.database.occurrences,
       async () => {
-        const direct = await this.database.lexicalUnits
-          .where("contentKey")
-          .equals(directContentKey)
-          .first();
-        const observedOwner = direct
-          ? undefined
-          : await this.findUniqueUnitByObservedSurface(normalizedSurfaceText, language);
-        const existing = direct ?? observedOwner;
-
-        if (existing) {
-          lexicalUnit = { ...existing, updatedAt: now };
-          await this.database.lexicalUnits.put(lexicalUnit);
-        } else {
-          lexicalUnit = {
-            id: crypto.randomUUID(),
-            contentKey: directContentKey,
-            canonicalText: surfaceText,
-            normalizedCanonicalText: normalizedSurfaceText,
-            language,
-            note: "",
-            status: "inbox",
-            createdAt: now,
-            updatedAt: now,
-          };
-          await this.database.lexicalUnits.add(lexicalUnit);
-        }
-
-        await this.database.occurrences.add({
-          id: crypto.randomUUID(),
-          lexicalUnitId: lexicalUnit.id,
-          surfaceText,
-          normalizedSurfaceText,
-          context: normalizeText(draft.context).slice(0, 800),
-          source: draft.source,
-          capturedAt: now,
-        });
+        lexicalUnit = await this.captureWithinTransaction(draft);
       },
     );
 
-    const occurrences = await this.database.occurrences
-      .where("lexicalUnitId")
-      .equals(lexicalUnit.id)
-      .sortBy("capturedAt");
+    return this.collectedItem(lexicalUnit.id);
+  }
 
-    return { lexicalUnit, occurrences };
+  async captureBatch(entries: readonly CaptureBatchEntry[]): Promise<CollectedItem[]> {
+    if (entries.length === 0) return [];
+
+    const lexicalUnitIds: string[] = [];
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      async () => {
+        for (const entry of entries) {
+          const lexicalUnit = await this.captureWithinTransaction(
+            entry.draft,
+            entry.targetLexicalUnitId,
+          );
+          lexicalUnitIds.push(lexicalUnit.id);
+        }
+      },
+    );
+
+    return Promise.all(lexicalUnitIds.map((id) => this.collectedItem(id)));
   }
 
   async list(status?: ReviewStatus): Promise<CollectedItem[]> {
