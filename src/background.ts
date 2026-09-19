@@ -264,6 +264,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
       supported: false,
       status: { active: false, candidateCount: 0 },
       staged: stagedSummary(batchPipeline.getActiveBatch()),
+      liveEvidence: [],
     };
   }
 }
