@@ -170,6 +170,7 @@ async function scanVisibleDuolingo(): Promise<{
 async function startVisibleDuolingoSession(): Promise<{
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
+  liveEvidence: BatchCaptureEvidence[];
 }> {
   if (visibleSessionTabId !== null) {
     try {
@@ -180,6 +181,7 @@ async function startVisibleDuolingoSession(): Promise<{
         return {
           status: existing.status,
           staged: stagedSummary(batchPipeline.getActiveBatch()),
+          liveEvidence: existing.evidence ?? [],
         };
       }
     } catch {
@@ -204,6 +206,7 @@ async function startVisibleDuolingoSession(): Promise<{
   return {
     status: response.status,
     staged: stagedSummary(batchPipeline.getActiveBatch()),
+    liveEvidence: response.evidence ?? [],
   };
 }
 
@@ -211,6 +214,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
   supported: boolean;
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
+  liveEvidence: BatchCaptureEvidence[];
 }> {
   if (visibleSessionTabId !== null) {
     try {
@@ -223,6 +227,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
           supported: true,
           status: response.status,
           staged: stagedSummary(batchPipeline.getActiveBatch()),
+          liveEvidence: response.evidence ?? [],
         };
       }
     } catch {
@@ -243,6 +248,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
         supported: false,
         status: { active: false, candidateCount: 0 },
         staged: stagedSummary(batchPipeline.getActiveBatch()),
+        liveEvidence: [],
       };
     }
 
@@ -251,6 +257,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
       supported: response.supported === true,
       status: response.status,
       staged: stagedSummary(batchPipeline.getActiveBatch()),
+      liveEvidence: response.status.active ? response.evidence ?? [] : [],
     };
   } catch {
     return {
