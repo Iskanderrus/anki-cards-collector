@@ -17,7 +17,15 @@ const CANDIDATE_SELECTORS = [
   "[data-test='stories-token']",
 ];
 
-const CONTEXT_SELECTORS = [
+const TARGET_SENTENCE_SELECTORS = [
+  "[data-test='hint-sentence']",
+  "[data-test*='sentence']",
+  "[data-test='stories-phrase']",
+  "[data-test='stories-selectable-phrase']",
+  "[lang]",
+];
+
+const STUDY_CONTAINER_SELECTORS = [
   "[data-test*='challenge']",
   "[data-test*='review']",
   "[data-test*='lesson']",
@@ -78,16 +86,49 @@ function matchesConfiguredLanguage(element: Element, language: string): boolean 
   return configuredBase === declaredBase;
 }
 
-function nearestContext(element: Element): string {
-  for (const selector of CONTEXT_SELECTORS) {
-    const container = element.parentElement?.closest(selector);
-    if (!container) continue;
+function isWordBankElement(element: Element): boolean {
+  return Boolean(
+    element.closest("[data-test*='word-bank']")
+    || element.matches("[data-test='challenge-tap-token'], [data-test='challenge-tap-token-text'], [data-test='hint-token'], [data-test='stories-token']"),
+  );
+}
 
-    const context = normalizeText(container.textContent ?? "").slice(0, 800);
-    if (context) return context;
+function studyContainer(element: Element): Element | null {
+  for (const selector of STUDY_CONTAINER_SELECTORS) {
+    const container = element.closest(selector);
+    if (container) return container;
+  }
+  return null;
+}
+
+function targetSentenceContext(
+  element: Element,
+  surfaceText: string,
+  language: string,
+): string {
+  // A non-word-bank target element is itself the cleanest evidence. This avoids
+  // concatenating Duolingo prompt text, answer choices, and control labels.
+  if (!isWordBankElement(element)) {
+    return surfaceText;
   }
 
-  return normalizeText(element.parentElement?.textContent ?? element.textContent ?? "").slice(0, 800);
+  const container = studyContainer(element);
+  if (!container) return surfaceText;
+
+  for (const selector of TARGET_SENTENCE_SELECTORS) {
+    for (const candidate of container.querySelectorAll(selector)) {
+      if (candidate === element || isWordBankElement(candidate)) continue;
+      if (!isVisible(candidate) || !matchesConfiguredLanguage(candidate, language)) continue;
+
+      const text = candidateText(candidate);
+      if (!isUsefulCandidate(text)) continue;
+      return text;
+    }
+  }
+
+  // A token with no reliably identifiable target sentence is still useful
+  // evidence. Keeping only the token is safer than storing the whole challenge UI.
+  return surfaceText;
 }
 
 function source(location: Location, title: string): CaptureSource {
@@ -132,7 +173,7 @@ export function collectVisibleDuolingoEvidence(
 
       const evidence: BatchCaptureEvidence = {
         surfaceText,
-        context: nearestContext(element),
+        context: targetSentenceContext(element, surfaceText, language),
         language: language.trim().toLowerCase() || "und",
         source: source(location, title),
         capturedAt,
