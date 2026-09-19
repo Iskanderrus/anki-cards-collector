@@ -14,17 +14,14 @@ The following work is already part of the current baseline:
 - **ACCP-009** — stale/deleted Anki note recovery using real AnkiConnect behavior;
 - **ACCP-010** — final extension brand/icon asset system;
 - **ACCP-015** — UX/export planning baseline and repository implementation order;
-- **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata.
+- **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata;
+- **ACCP-019** — source-agnostic staged batch capture, deterministic dedupe/classification, and transactional corpus commit.
 
 ---
 
-## Gate A — remaining low-coupling groundwork
+## Gate A — completed low-coupling groundwork
 
-### ACCP-019 — staged batch-capture pipeline
-
-Creates the source-agnostic candidate/staging/commit boundary.
-
-It must land before Duolingo batch extraction so source-specific code never writes directly to the corpus.
+ACCP-019 now provides the staged candidate/commit boundary required by source-specific backfill work. Source adapters can produce evidence without writing directly to the corpus.
 
 ---
 
@@ -126,24 +123,21 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-019 — staged batch-capture pipeline
-2. ACCP-013 — export profiles / multi-deck routing
-3. ACCP-017 — deck/model analysis + existing-card preview
-4. ACCP-020 — Duolingo visible lesson backfill
-5. ACCP-011 — sidebar redesign
-6. ACCP-003 — canonicalization workflow
-7. ACCP-014 — existing note type mapping
-8. ACCP-018 — guided export-profile setup
-9. ACCP-021 — batch backfill review/import
-10. ACCP-012 — onboarding/user journey
-11. ACCP-004 — explicit merge/split
-12. ACCP-005 — learning-card policy v2
-13. ACCP-006 — morphology assistance
-14. ACCP-007 — learning-value decision
+1. ACCP-013 — export profiles / multi-deck routing
+2. ACCP-017 — deck/model analysis + existing-card preview
+3. ACCP-020 — Duolingo visible lesson backfill
+4. ACCP-011 — sidebar redesign
+5. ACCP-003 — canonicalization workflow
+6. ACCP-014 — existing note type mapping
+7. ACCP-018 — guided export-profile setup
+8. ACCP-021 — batch backfill review/import
+9. ACCP-012 — onboarding/user journey
+10. ACCP-004 — explicit merge/split
+11. ACCP-005 — learning-card policy v2
+12. ACCP-006 — morphology assistance
+13. ACCP-007 — learning-value decision
 
-ACCP-019 can start immediately.
-
-ACCP-017, ACCP-020, and much of ACCP-013 can overlap once their respective foundation contracts are stable.
+ACCP-019 is now foundation work. ACCP-017, ACCP-020, and much of ACCP-013 can proceed in parallel once their respective contracts are stable.
 
 ---
 
