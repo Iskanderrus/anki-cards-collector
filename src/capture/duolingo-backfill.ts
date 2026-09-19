@@ -5,7 +5,6 @@ import type { CaptureSource } from "../core/types";
 export const DUOLINGO_BACKFILL_ADAPTER_ID = "duolingo-visible-backfill";
 
 const CANDIDATE_SELECTORS = [
-  "[data-test*='challenge'] [lang]",
   "[data-test='hint-sentence']",
   "[data-test='hint-token']",
   "[data-test*='sentence']",
@@ -131,6 +130,18 @@ function targetSentenceContext(
   return surfaceText;
 }
 
+function hasUsefulTargetLanguageDescendant(
+  element: Element,
+  language: string,
+): boolean {
+  for (const descendant of element.querySelectorAll("[lang]")) {
+    if (!isVisible(descendant) || !matchesConfiguredLanguage(descendant, language)) continue;
+    const text = candidateText(descendant);
+    if (isUsefulCandidate(text)) return true;
+  }
+  return false;
+}
+
 function source(location: Location, title: string): CaptureSource {
   return {
     kind: "duolingo",
@@ -162,32 +173,47 @@ export function collectVisibleDuolingoEvidence(
 
   const collected: BatchCaptureEvidence[] = [];
   const fingerprints = new Set<string>();
+  const explicitElements = new Set<Element>();
+
+  function collectElement(element: Element, selector: string): void {
+    if (!isVisible(element)) return;
+    if (!matchesConfiguredLanguage(element, language)) return;
+
+    const surfaceText = candidateText(element);
+    if (!isUsefulCandidate(surfaceText)) return;
+
+    const evidence: BatchCaptureEvidence = {
+      surfaceText,
+      context: targetSentenceContext(element, surfaceText, language),
+      language: language.trim().toLowerCase() || "und",
+      source: source(location, title),
+      capturedAt,
+      adapterMetadata: {
+        extractor: "visible-dom",
+        selector,
+      },
+    };
+    const fingerprint = duolingoEvidenceFingerprint(evidence);
+    if (fingerprints.has(fingerprint)) return;
+
+    fingerprints.add(fingerprint);
+    collected.push(evidence);
+  }
 
   for (const selector of CANDIDATE_SELECTORS) {
     for (const element of document.querySelectorAll(selector)) {
-      if (!isVisible(element)) continue;
-      if (!matchesConfiguredLanguage(element, language)) continue;
-
-      const surfaceText = candidateText(element);
-      if (!isUsefulCandidate(surfaceText)) continue;
-
-      const evidence: BatchCaptureEvidence = {
-        surfaceText,
-        context: targetSentenceContext(element, surfaceText, language),
-        language: language.trim().toLowerCase() || "und",
-        source: source(location, title),
-        capturedAt,
-        adapterMetadata: {
-          extractor: "visible-dom",
-          selector,
-        },
-      };
-      const fingerprint = duolingoEvidenceFingerprint(evidence);
-      if (fingerprints.has(fingerprint)) continue;
-
-      fingerprints.add(fingerprint);
-      collected.push(evidence);
+      explicitElements.add(element);
+      collectElement(element, selector);
     }
+  }
+
+  // Generic language-marked DOM is a fallback only. Prefer the leaf-most target
+  // element so wrappers containing keyboard shortcut numbers or other UI labels
+  // cannot become separate lexical candidates alongside their clean child text.
+  for (const element of document.querySelectorAll("[lang]")) {
+    if (explicitElements.has(element)) continue;
+    if (hasUsefulTargetLanguageDescendant(element, language)) continue;
+    collectElement(element, "leaf-[lang]");
   }
 
   return collected;
