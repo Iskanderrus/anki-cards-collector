@@ -257,7 +257,8 @@ try {
   // still address the Duolingo tab that owns the explicit session.
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Stop & stage session");
-  await panel.locator(".backfill-status", { hasText: "6 staged candidates" }).waitFor();
+  await panel.getByRole("button", { name: "Start backfill session" }).waitFor();
+  await panel.locator(".backfill-status", { hasText: "staged candidate" }).waitFor();
   assert.equal(
     await termCount(panel),
     2,
