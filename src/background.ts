@@ -115,14 +115,15 @@ function asEvidence(candidate: BatchCaptureResult["candidates"][number]): BatchC
 
 async function stageVisibleEvidence(
   evidence: readonly BatchCaptureEvidence[],
-  language: string,
   sourceUrlMode: SourceUrlMode,
   requestedBatchId: string,
 ) {
   const existing = batchPipeline.getActiveBatch();
   const prepared = evidence.map((candidate) => ({
     ...candidate,
-    language: language.trim().toLowerCase() || "und",
+    // Preserve the immutable language attached when the evidence was observed.
+    // Settings may change while a session is active.
+    language: candidate.language.trim().toLowerCase() || "und",
     source: {
       ...candidate.source,
       url: sanitizeSourceUrl(candidate.source.url, sourceUrlMode),
@@ -159,7 +160,6 @@ async function scanVisibleDuolingo(): Promise<{
   const evidence = response.evidence ?? [];
   const staged = await stageVisibleEvidence(
     evidence,
-    settings.defaultLanguage,
     settings.sourceUrlMode,
     `duolingo-visible-${crypto.randomUUID()}`,
   );
@@ -287,7 +287,6 @@ async function stopVisibleDuolingoSession(): Promise<{
   const evidence = response.evidence ?? [];
   const staged = await stageVisibleEvidence(
     evidence,
-    settings.defaultLanguage,
     settings.sourceUrlMode,
     response.sessionId ? `duolingo-session-${response.sessionId}` : `duolingo-session-${crypto.randomUUID()}`,
   );
