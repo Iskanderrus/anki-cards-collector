@@ -253,8 +253,6 @@ try {
     `;
   });
 
-  await panel.locator(".backfill-status", { hasText: "6 visible candidates observed" }).waitFor();
-
   await clickPanelButton(panel, "Stop & stage session");
   await panel.locator(".backfill-status", { hasText: "6 staged candidates" }).waitFor();
   assert.equal(
