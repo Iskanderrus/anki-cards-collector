@@ -86,6 +86,34 @@ label {
   line-height: 1.35;
   color: color-mix(in srgb, CanvasText 58%, transparent);
 }
+.anki-catalog,
+.anki-model-inspector {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+}
+.anki-catalog-head {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  justify-content: space-between;
+}
+.anki-catalog-head > div {
+  display: grid;
+  gap: 3px;
+}
+.anki-catalog-head strong,
+.anki-model-inspector strong {
+  font-size: 12px;
+}
+.anki-catalog-status,
+.anki-model-inspector {
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+}
 .restore-preview {
   display: grid;
   gap: 9px;

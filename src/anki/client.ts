@@ -13,6 +13,13 @@ interface AnkiTemplate {
 
 type AnkiTemplates = Record<string, AnkiTemplate>;
 
+export type RawAnkiObjectId = string | number;
+export type RawAnkiNamedIds = Record<string, RawAnkiObjectId>;
+export type RawAnkiFieldsOnTemplates = Record<string, [string[], string[]]>;
+export interface RawAnkiModelStyling {
+  css: string;
+}
+
 function isMissingNoteError(error: unknown, noteId: number): boolean {
   return error instanceof Error
     && error.message.trim().toLowerCase() === `note was not found: ${noteId}`.toLowerCase();
@@ -60,6 +67,30 @@ export class AnkiClient {
 
   async ping(): Promise<number> {
     return this.invoke<number>("version");
+  }
+
+  async deckNamesAndIds(): Promise<RawAnkiNamedIds> {
+    return this.invoke<RawAnkiNamedIds>("deckNamesAndIds");
+  }
+
+  async modelNamesAndIds(): Promise<RawAnkiNamedIds> {
+    return this.invoke<RawAnkiNamedIds>("modelNamesAndIds");
+  }
+
+  async modelFieldNames(modelName: string): Promise<string[]> {
+    return this.invoke<string[]>("modelFieldNames", { modelName });
+  }
+
+  async modelFieldsOnTemplates(modelName: string): Promise<RawAnkiFieldsOnTemplates> {
+    return this.invoke<RawAnkiFieldsOnTemplates>("modelFieldsOnTemplates", { modelName });
+  }
+
+  async modelTemplates(modelName: string): Promise<AnkiTemplates> {
+    return this.invoke<AnkiTemplates>("modelTemplates", { modelName });
+  }
+
+  async modelStyling(modelName: string): Promise<RawAnkiModelStyling> {
+    return this.invoke<RawAnkiModelStyling>("modelStyling", { modelName });
   }
 
   async ensureDeckAndModel(settings: CollectorSettings): Promise<void> {

@@ -248,4 +248,73 @@ describe("AnkiClient", () => {
     expect(actions).not.toContain("updateModelTemplates");
     expect(actions).not.toContain("updateModelStyling");
   });
+  it("uses only read-only AnkiConnect actions for catalog discovery", async () => {
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+
+      const resultByAction: Record<string, unknown> = {
+        version: 6,
+        deckNamesAndIds: { "Hebrew RU": 111 },
+        modelNamesAndIds: { "Hebrew Vocabulary": 222 },
+        modelFieldNames: ["Hebrew", "Russian"],
+        modelFieldsOnTemplates: {
+          Recognition: [["Hebrew"], ["Hebrew", "Russian"]],
+        },
+        modelTemplates: {
+          Recognition: {
+            Front: "{{Hebrew}}",
+            Back: "{{FrontSide}}<hr>{{Russian}}",
+          },
+        },
+        modelStyling: {
+          css: ".card { font-size: 22px; }",
+        },
+      };
+
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const client = new AnkiClient("http://127.0.0.1:8765", fetcher);
+    await client.ping();
+    await client.deckNamesAndIds();
+    await client.modelNamesAndIds();
+    await client.modelFieldNames("Hebrew Vocabulary");
+    await client.modelFieldsOnTemplates("Hebrew Vocabulary");
+    await client.modelTemplates("Hebrew Vocabulary");
+    await client.modelStyling("Hebrew Vocabulary");
+
+    expect(requests.map(({ action }) => action)).toEqual([
+      "version",
+      "deckNamesAndIds",
+      "modelNamesAndIds",
+      "modelFieldNames",
+      "modelFieldsOnTemplates",
+      "modelTemplates",
+      "modelStyling",
+    ]);
+    expect(requests.slice(3).map(({ params }) => params)).toEqual([
+      { modelName: "Hebrew Vocabulary" },
+      { modelName: "Hebrew Vocabulary" },
+      { modelName: "Hebrew Vocabulary" },
+      { modelName: "Hebrew Vocabulary" },
+    ]);
+    expect(requests.some(({ action }) => [
+      "createDeck",
+      "createModel",
+      "modelFieldAdd",
+      "updateModelTemplates",
+      "updateModelStyling",
+      "addNote",
+      "updateNoteFields",
+    ].includes(action))).toBe(false);
+  });
+
 });
