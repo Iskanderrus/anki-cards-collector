@@ -1,4 +1,5 @@
 import type { AnkiClient } from "./client";
+import type { AnkiCatalogCache } from "./catalog-cache";
 
 export type AnkiObjectId = string | number;
 
@@ -153,6 +154,7 @@ export class AnkiCatalogService {
   constructor(
     private readonly client: AnkiCatalogClient,
     private readonly now: () => Date = () => new Date(),
+    private readonly cache?: AnkiCatalogCache,
   ) {}
 
   currentSnapshot(): AnkiCatalogSnapshot | null {
@@ -175,9 +177,21 @@ export class AnkiCatalogService {
       };
 
       this.snapshot = snapshot;
+      try {
+        await this.cache?.saveSnapshot(snapshot);
+      } catch {
+        // Discovery remains live even if the optional stale-cache write fails.
+      }
       return { kind: "live", snapshot };
     } catch (error) {
       const message = errorMessage(error);
+      if (!this.snapshot && this.cache) {
+        try {
+          this.snapshot = await this.cache.loadSnapshot();
+        } catch {
+          // Ignore cache read errors and report live discovery failure below.
+        }
+      }
       if (this.snapshot) {
         return { kind: "stale", snapshot: this.snapshot, error: message };
       }
@@ -212,10 +226,23 @@ export class AnkiCatalogService {
       };
 
       this.modelDetails.set(modelName, detail);
+      try {
+        await this.cache?.saveModelDetail(detail);
+      } catch {
+        // Inspection remains live even if the optional stale-cache write fails.
+      }
       return { kind: "live", detail };
     } catch (error) {
       const message = errorMessage(error);
-      const cached = this.modelDetails.get(modelName);
+      let cached = this.modelDetails.get(modelName) ?? null;
+      if (!cached && this.cache) {
+        try {
+          cached = await this.cache.loadModelDetail(modelName);
+          if (cached) this.modelDetails.set(modelName, cached);
+        } catch {
+          // Ignore cache read errors and report live inspection failure below.
+        }
+      }
       if (cached) return { kind: "stale", detail: cached, error: message };
       return { kind: "unavailable", detail: null, error: message };
     }

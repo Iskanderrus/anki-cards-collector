@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AnkiCatalogService,
   type AnkiCatalogClient,
+  type AnkiCatalogSnapshot,
+  type AnkiModelDetail,
 } from "./catalog";
+import type { AnkiCatalogCache } from "./catalog-cache";
 
 function client(
   overrides: Partial<AnkiCatalogClient> = {},
@@ -34,6 +37,19 @@ function client(
     })),
     modelStyling: vi.fn(async () => ({ css: ".card { font-size: 22px; }" })),
     ...overrides,
+  };
+}
+
+
+function cache(
+  snapshot: AnkiCatalogSnapshot | null = null,
+  modelDetail: AnkiModelDetail | null = null,
+): AnkiCatalogCache {
+  return {
+    loadSnapshot: vi.fn(async () => snapshot),
+    saveSnapshot: vi.fn(async () => undefined),
+    loadModelDetail: vi.fn(async () => modelDetail),
+    saveModelDetail: vi.fn(async () => undefined),
   };
 }
 
@@ -191,4 +207,76 @@ describe("AnkiCatalogService", () => {
       },
     });
   });
+  it("restores the persisted catalog after a side-panel remount when Anki is offline", async () => {
+    const persisted: AnkiCatalogSnapshot = {
+      ankiConnectVersion: 6,
+      decks: [{ id: 111, name: "Serbian RU" }],
+      models: [{ id: 222, name: "Serbian RU — Latin Primary — Standalone v3" }],
+      refreshedAt: "2026-09-19T17:00:00.000Z",
+    };
+    const fakeCache = cache(persisted);
+    const service = new AnkiCatalogService(
+      client({
+        ping: vi.fn(async () => {
+          throw new Error("Failed to fetch");
+        }),
+      }),
+      () => new Date("2026-09-19T17:30:00.000Z"),
+      fakeCache,
+    );
+
+    const result = await service.refresh();
+
+    expect(result).toEqual({
+      kind: "stale",
+      snapshot: persisted,
+      error: "Failed to fetch",
+    });
+    expect(fakeCache.loadSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("restores persisted model details after a remount when Anki is offline", async () => {
+    const persistedDetail: AnkiModelDetail = {
+      id: 222,
+      name: "Serbian RU — Latin Primary — Standalone v3",
+      fields: ["Serbian", "Russian", "Cyrillic", "Note", "Lesson", "TTSText"],
+      templates: [{
+        name: "01 Russian → Serbian Latin",
+        front: "{{Russian}}",
+        back: "{{Serbian}}",
+        frontFields: ["Russian"],
+        backFields: ["Serbian"],
+      }],
+      css: ".card { font-size: 20px; }",
+      refreshedAt: "2026-09-19T17:00:00.000Z",
+    };
+    const fakeCache = cache(null, persistedDetail);
+    const service = new AnkiCatalogService(
+      client({
+        modelFieldNames: vi.fn(async () => {
+          throw new Error("Failed to fetch");
+        }),
+      }),
+      () => new Date(),
+      fakeCache,
+    );
+
+    const result = await service.inspectModel(persistedDetail.name);
+
+    expect(result).toEqual({
+      kind: "stale",
+      detail: persistedDetail,
+      error: "Failed to fetch",
+    });
+    expect(fakeCache.loadModelDetail).toHaveBeenCalledWith(persistedDetail.name);
+  });
+
+  it("does not downgrade live discovery when stale-cache persistence fails", async () => {
+    const fakeCache = cache();
+    vi.mocked(fakeCache.saveSnapshot).mockRejectedValueOnce(new Error("storage full"));
+    const service = new AnkiCatalogService(client(), () => new Date(), fakeCache);
+
+    await expect(service.refresh()).resolves.toMatchObject({ kind: "live" });
+  });
+
 });
