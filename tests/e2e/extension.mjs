@@ -386,7 +386,15 @@ try {
       .find((candidate) => candidate.textContent?.trim() === "Scan visible Duolingo");
     return button instanceof HTMLButtonElement && !button.disabled;
   });
-  await clickPanelButton(panel, "Scan visible Duolingo");
+  const pairScanResult = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_SCAN_ACTIVE" }),
+  );
+  assert.equal(pairScanResult?.ok, true, pairScanResult?.error);
+  assert.equal(
+    pairScanResult?.foundCount,
+    5,
+    `Matching-pairs extractor should return five Hebrew leaves, got ${JSON.stringify(pairScanResult)}`,
+  );
 
   const pairsBatch = await panel.evaluate(
     async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
