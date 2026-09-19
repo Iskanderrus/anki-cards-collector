@@ -4,6 +4,8 @@ import type { CaptureSource } from "../core/types";
 
 export const DUOLINGO_BACKFILL_ADAPTER_ID = "duolingo-visible-backfill";
 
+const MAX_CANDIDATE_LENGTH = 240;
+
 const CANDIDATE_SELECTORS = [
   "[data-test='hint-sentence']",
   "[data-test='hint-token']",
@@ -36,11 +38,25 @@ function isDuolingoHostname(hostname: string): boolean {
   return normalized === "duolingo.com" || normalized.endsWith(".duolingo.com");
 }
 
+function hasSupportedStudyContext(document: Document): boolean {
+  const selectors = [
+    ...CANDIDATE_SELECTORS,
+    "[data-test*='challenge'] [lang]",
+    "[data-test*='review'] [lang]",
+    "[data-test*='lesson'] [lang]",
+    "[data-test*='stories'] [lang]",
+  ];
+
+  return selectors.some((selector) => document.querySelector(selector) !== null);
+}
+
 export function supportsDuolingoVisibleBackfill(
+  document: Document,
   location: Pick<Location, "hostname">,
   allowFixture = false,
 ): boolean {
-  return isDuolingoHostname(location.hostname) || allowFixture;
+  const allowedOrigin = isDuolingoHostname(location.hostname) || allowFixture;
+  return allowedOrigin && hasSupportedStudyContext(document);
 }
 
 function isVisible(element: Element): boolean {
@@ -63,14 +79,13 @@ function isVisible(element: Element): boolean {
 }
 
 function candidateText(element: Element): string {
-  return normalizeText(element.textContent ?? "").slice(0, 240);
+  return normalizeText(element.textContent ?? "");
 }
 
 function isUsefulCandidate(text: string): boolean {
-  if (!text || text.length > 240) return false;
+  if (!text || text.length > MAX_CANDIDATE_LENGTH) return false;
   return /\p{L}/u.test(text);
 }
-
 
 function matchesConfiguredLanguage(element: Element, language: string): boolean {
   const configured = language.trim().toLowerCase();
@@ -78,7 +93,7 @@ function matchesConfiguredLanguage(element: Element, language: string): boolean 
 
   const languageOwner = element.closest("[lang]");
   const declared = languageOwner?.getAttribute("lang")?.trim().toLowerCase();
-  if (!declared) return true;
+  if (!declared) return false;
 
   const configuredBase = configured.split("-")[0];
   const declaredBase = declared.split("-")[0];
@@ -169,7 +184,7 @@ export function collectVisibleDuolingoEvidence(
   capturedAt = new Date().toISOString(),
   allowFixture = false,
 ): BatchCaptureEvidence[] {
-  if (!supportsDuolingoVisibleBackfill(location, allowFixture)) return [];
+  if (!supportsDuolingoVisibleBackfill(document, location, allowFixture)) return [];
 
   const collected: BatchCaptureEvidence[] = [];
   const fingerprints = new Set<string>();
