@@ -36,7 +36,7 @@ const COLLECTOR_CSS = ".card { font-family: sans-serif; font-size: 22px; text-al
 export class AnkiClient {
   constructor(
     private readonly endpoint = "http://127.0.0.1:8765",
-    private readonly fetcher: typeof fetch = fetch,
+    private readonly fetcher: typeof fetch = (...args) => globalThis.fetch(...args),
   ) {}
 
   private async invoke<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {

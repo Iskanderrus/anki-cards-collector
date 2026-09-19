@@ -43,6 +43,21 @@ function item(): CollectedItem {
 }
 
 describe("AnkiClient", () => {
+  it("invokes the default browser fetch with the global receiver", async () => {
+    const nativeLikeFetch = vi.fn(function (this: unknown, _input: RequestInfo | URL, _init?: RequestInit) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(new Response(JSON.stringify({ result: 6, error: null }), { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    vi.stubGlobal("fetch", nativeLikeFetch);
+    try {
+      await expect(new AnkiClient().ping()).resolves.toBe(6);
+      expect(nativeLikeFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("updates the existing note with canonical and observed forms", async () => {
     const actions: Array<{ action: string; params: Record<string, unknown> }> = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
