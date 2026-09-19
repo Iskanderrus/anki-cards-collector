@@ -13,8 +13,31 @@ assert.equal(manifest.content_scripts, undefined, "E2E manifest must not add per
 assert.ok(manifest.permissions.includes("activeTab"));
 assert.ok(manifest.permissions.includes("scripting"));
 
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+
+  const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  if (pathname === "/duolingo") {
+    response.end(`<!doctype html>
+      <html data-collector-duolingo-fixture="true">
+        <head><title>Duolingo Visible Review Fixture</title></head>
+        <body>
+          <nav>Home Shop Profile</nav>
+          <main>
+            <div id="challenge" data-test="challenge-translate">
+              <p data-test="challenge-sentence" lang="he">שלום עולם</p>
+              <div data-test="word-bank">
+                <button data-test="challenge-tap-token" lang="he">שלום</button>
+                <button data-test="challenge-tap-token" lang="he">עולם</button>
+              </div>
+              <button data-test="continue-button">Continue</button>
+            </div>
+          </main>
+        </body>
+      </html>`);
+    return;
+  }
+
   response.end(`<!doctype html>
     <html>
       <head><title>Collector E2E Fixture</title></head>
@@ -199,6 +222,65 @@ try {
     await firstCard.locator(".occurrence-selection").innerText(),
     /Using occurrence 1 of 2/,
     "Review should explain which occurrence drives the proposal.",
+  );
+
+  // Duolingo visible backfill is explicitly activated and remains staged.
+  const duolingoPage = await context.newPage();
+  await duolingoPage.goto(`${fixtureUrl}duolingo`);
+  await duolingoPage.bringToFront();
+
+  await clickPanelButton(panel, "Scan visible Duolingo");
+  await panel.locator(".backfill-status", { hasText: "3 staged candidates" }).waitFor();
+  assert.equal(
+    await termCount(panel),
+    2,
+    "One-shot visible backfill must stage evidence without mutating the normal corpus.",
+  );
+
+  await clickPanelButton(panel, "Start backfill session");
+  await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
+
+  await duolingoPage.evaluate(() => {
+    const challenge = document.querySelector("#challenge");
+    if (!challenge) throw new Error("Duolingo E2E challenge fixture is missing.");
+    challenge.innerHTML = `
+      <p data-test="challenge-sentence" lang="he">אני לומד עברית</p>
+      <div data-test="word-bank">
+        <button data-test="challenge-tap-token" lang="he">אני</button>
+        <button data-test="challenge-tap-token" lang="he">עברית</button>
+      </div>
+      <button data-test="continue-button">Continue</button>
+    `;
+  });
+
+  await panel.locator(".backfill-status", { hasText: "6 visible candidates observed" }).waitFor();
+
+  await clickPanelButton(panel, "Stop & stage session");
+  await panel.locator(".backfill-status", { hasText: "6 staged candidates" }).waitFor();
+  assert.equal(
+    await termCount(panel),
+    2,
+    "Stopping a Duolingo session must stage evidence without creating study items.",
+  );
+
+  const stagedBatch = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(stagedBatch?.ok, true);
+  assert.equal(stagedBatch?.batch?.candidates?.length, 6);
+  assert.equal(
+    stagedBatch.batch.candidates.every(
+      (candidate) =>
+        candidate.source?.adapter === "duolingo-visible-backfill"
+        && candidate.source?.kind === "duolingo",
+    ),
+    true,
+    "Staged candidates must preserve Duolingo visible-DOM provenance.",
+  );
+  assert.equal(
+    stagedBatch.batch.candidates.some((candidate) => /Home|Shop|Profile|Continue/.test(candidate.surfaceText)),
+    false,
+    "Navigation and generic UI chrome must not become backfill candidates.",
   );
 
   const accessibility = await new AxeBuilder({ page: panel })
