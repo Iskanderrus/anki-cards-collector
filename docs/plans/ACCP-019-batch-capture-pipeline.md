@@ -4,6 +4,23 @@
 
 Add a source-agnostic pipeline for extracting many candidate items without immediately mutating the main corpus.
 
+## Implementation status
+
+Implemented in `src/capture/batch.ts` and the repository batch boundary.
+
+The initial staging lifetime is intentionally in-memory rather than persisted. This keeps staged evidence outside IndexedDB, backup/restore, and normal review state until the user explicitly commits it.
+
+Current classification semantics are:
+
+- **new** — no canonical or observed-form owner exists;
+- **already-represented** — the same normalized surface/context/source evidence already exists;
+- **repeated-evidence** — one existing lexical unit owns the canonical/observed form, but this context is new;
+- **needs-review** — the candidate resolves to multiple possible lexical-unit owners.
+
+Candidate IDs are stable within a caller-supplied batch/session identity and first-seen order. Exact in-batch duplicates collapse while distinct contexts remain separate evidence.
+
+Selected mutations are committed by `CaptureRepository.captureBatch()` in one Dexie transaction. An ambiguous candidate requires an explicit matching lexical-unit resolution; transaction failure leaves both the corpus mutation set and staged batch unchanged.
+
 ## Dependencies
 
 - Current lexical-unit / occurrence repository.
