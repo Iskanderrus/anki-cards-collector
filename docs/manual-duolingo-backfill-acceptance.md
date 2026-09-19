@@ -19,8 +19,9 @@ Run this check with a real Duolingo account after loading the extension build fr
 6. Open **Preview staged evidence** and confirm the actual target-language text and nearby context are visible there.
 7. Confirm visible target-language words/phrases/sentences are represented in the staged preview/count.
 8. Confirm generic navigation labels such as Home/Shop/Profile/Continue are not being treated as study candidates.
-9. Confirm the normal corpus count did not increase.
-10. Confirm no Anki note was created or updated.
+9. Confirm staged context does not contain the English instruction, answer-bank words, or concatenated controls; sentence candidates should show clean target-language context.
+10. Confirm the normal corpus count did not increase.
+11. Confirm no Anki note was created or updated.
 
 ## Explicit session
 
