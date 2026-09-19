@@ -49,10 +49,15 @@ function sessionStatus(): VisibleSessionStatus {
   };
 }
 
+function sessionEvidence(): BatchCaptureEvidence[] {
+  return visibleSession ? [...visibleSession.evidence.values()] : [];
+}
+
 function notifySessionStatus(): void {
   chrome.runtime.sendMessage({
     type: "DUOLINGO_VISIBLE_SESSION_UPDATED",
     status: sessionStatus(),
+    evidence: sessionEvidence(),
   }).catch(() => undefined);
 }
 
@@ -187,6 +192,7 @@ if (!window.__ankiCardsCollectorLoaded) {
         sendResponse({
           ok: true,
           status: startVisibleSession(String(message.language ?? "und")),
+          evidence: sessionEvidence(),
         });
         return false;
       }
@@ -196,6 +202,7 @@ if (!window.__ankiCardsCollectorLoaded) {
           ok: true,
           supported: supportsDuolingoVisibleBackfill(window.location, allowDuolingoFixture()),
           status: sessionStatus(),
+          evidence: sessionEvidence(),
         });
         return false;
       }
