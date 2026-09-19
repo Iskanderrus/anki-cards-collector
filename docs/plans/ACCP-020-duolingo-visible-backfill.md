@@ -13,8 +13,10 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - the session uses a temporary `MutationObserver` in that tab to accumulate newly rendered visible evidence while the user navigates manually;
 - stopping the session disconnects the observer and sends the accumulated evidence to ACCP-019 staging;
 - page teardown destroys the content-script session automatically;
-- no persistent manifest content script or Duolingo host permission was added;
-- the existing `activeTab` + `scripting` permission model remains unchanged;
+- no persistent manifest content script or required Duolingo host permission is added;
+- Duolingo is declared only in `optional_host_permissions`;
+- the first explicit scan/session activation asks Chrome for Duolingo page access;
+- granting page access does not start background collection: extraction still runs only for a one-shot scan or an explicitly active session;
 - staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki.
 
 The side panel exposes the minimal ACCP-020 controls and status only. Full staged-candidate review/edit/bulk import remains ACCP-021.
@@ -91,6 +93,8 @@ Must not:
 - create persistent all-sites page observers.
 
 The session is explicit, local, temporary, and limited to visible content.
+
+The optional Duolingo origin permission may remain granted after the first approval, as Chrome permissions normally do. That permission only allows on-demand script injection; it does not install a persistent content script or start collection automatically.
 
 ## Tests
 
