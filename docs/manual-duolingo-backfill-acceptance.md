@@ -72,3 +72,14 @@ Record:
 - session visible/staged counts;
 - any obvious false-positive UI labels;
 - pass/fail for no automation, no private API use, and manual capture regression.
+
+
+## Matching-pairs acceptance
+
+On a Duolingo **Select the matching pairs** screen:
+
+1. Run **Scan visible Duolingo**.
+2. Confirm each target-language word appears only once in staged preview.
+3. Confirm keyboard shortcut numbers (for example 6/7/8/9/0) are not attached to the lexical text.
+4. Confirm source-language pair labels are not staged when the configured language is the target language.
+5. Confirm isolated vocabulary context is the clean target word itself unless a reliable target-language sentence is visible.
