@@ -13,6 +13,11 @@ interface AnkiTemplate {
 
 type AnkiTemplates = Record<string, AnkiTemplate>;
 
+function isMissingNoteError(error: unknown, noteId: number): boolean {
+  return error instanceof Error
+    && error.message.trim().toLowerCase() === `note was not found: ${noteId}`.toLowerCase();
+}
+
 const COLLECTOR_FIELDS = [
   "CollectorID",
   "Prompt",
@@ -138,8 +143,14 @@ export class AnkiClient {
     let noteId = item.lexicalUnit.ankiNoteId;
 
     if (noteId !== undefined) {
-      const notes = await this.invoke<Array<{ noteId: number }>>("notesInfo", { notes: [noteId] });
-      if (notes.length === 0) noteId = undefined;
+      const storedNoteId = noteId;
+      try {
+        const notes = await this.invoke<Array<{ noteId: number }>>("notesInfo", { notes: [storedNoteId] });
+        if (notes.length === 0) noteId = undefined;
+      } catch (error) {
+        if (!isMissingNoteError(error, storedNoteId)) throw error;
+        noteId = undefined;
+      }
     }
 
     if (noteId === undefined) {
