@@ -94,7 +94,7 @@ function isWordBankElement(element: Element): boolean {
 
 function studyContainer(element: Element): Element | null {
   for (const selector of STUDY_CONTAINER_SELECTORS) {
-    const container = element.closest(selector);
+    const container = element.parentElement?.closest(selector);
     if (container) return container;
   }
   return null;
