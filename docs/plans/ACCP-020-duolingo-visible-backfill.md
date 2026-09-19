@@ -62,6 +62,11 @@ Each candidate should include:
 
 Filter obvious UI chrome where reliable.
 
+Context must remain target-language evidence, not a concatenation of the whole challenge UI:
+- sentence/phrase candidates use their own visible target text as context;
+- word/token candidates inherit the nearest clean target-language sentence when one is identifiable;
+- otherwise fall back to the candidate text itself rather than prompt text, answer choices, or controls.
+
 Do not attempt semantic translation or lemma inference in the source adapter.
 
 ## DOM strategy
