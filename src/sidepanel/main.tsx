@@ -63,6 +63,13 @@ interface StagedCandidatePreview {
   duplicateCount: number;
 }
 
+interface LiveSessionCandidate {
+  surfaceText: string;
+  context: string;
+  language: string;
+  capturedAt: string;
+}
+
 const DUOLINGO_OPTIONAL_ORIGINS = [
   "https://duolingo.com/*",
   "https://*.duolingo.com/*",
@@ -141,6 +148,7 @@ function App(): React.ReactElement {
     staged: EMPTY_STAGED_BATCH,
   });
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
+  const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -170,11 +178,13 @@ function App(): React.ReactElement {
         type?: string;
         error?: string;
         status?: VisibleSessionStatus;
+        evidence?: LiveSessionCandidate[];
       };
       if (event.type === "DATA_CHANGED") void load();
       if (event.type === "CAPTURE_ERROR") setError(event.error ?? "Capture failed.");
       if (event.type === "DUOLINGO_VISIBLE_SESSION_UPDATED" && event.status) {
         setBackfill((current) => ({ ...current, supported: true, status: event.status! }));
+        setLiveSessionCandidates(event.status.active ? event.evidence ?? [] : []);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -243,20 +253,24 @@ function App(): React.ReactElement {
         supported?: boolean;
         status?: VisibleSessionStatus;
         staged?: StagedBatchSummary;
+        liveEvidence?: LiveSessionCandidate[];
       };
 
       if (!response.ok) return;
+      const status = response.status ?? { active: false, candidateCount: 0 };
       setBackfill({
         supported: response.supported === true,
-        status: response.status ?? { active: false, candidateCount: 0 },
+        status,
         staged: response.staged ?? EMPTY_STAGED_BATCH,
       });
+      setLiveSessionCandidates(status.active ? response.liveEvidence ?? [] : []);
     } catch {
       setBackfill((current) => ({
         ...current,
         supported: false,
         status: { active: false, candidateCount: 0 },
       }));
+      setLiveSessionCandidates([]);
     }
   }
 
@@ -310,6 +324,7 @@ function App(): React.ReactElement {
         error?: string;
         status?: VisibleSessionStatus;
         staged?: StagedBatchSummary;
+        liveEvidence?: LiveSessionCandidate[];
       };
 
       if (!response.ok || !response.status) {
@@ -321,6 +336,7 @@ function App(): React.ReactElement {
         status: response.status,
         staged: response.staged ?? backfill.staged,
       });
+      setLiveSessionCandidates(response.liveEvidence ?? []);
       setNotice("Duolingo backfill session started. Move through the lesson manually; Collector will only observe visible study material.");
     } catch (sessionError) {
       setError(sessionError instanceof Error ? sessionError.message : "Could not start Duolingo backfill.");
@@ -352,6 +368,7 @@ function App(): React.ReactElement {
         status: response.status ?? { active: false, candidateCount: 0 },
         staged,
       });
+      setLiveSessionCandidates([]);
       setNotice(
         `Backfill session stopped. ${response.foundCount ?? 0} session candidate${response.foundCount === 1 ? "" : "s"} observed; ${staged.candidateCount} candidate${staged.candidateCount === 1 ? "" : "s"} are staged for review.`,
       );
@@ -730,9 +747,34 @@ function App(): React.ReactElement {
             <span>Backfill is opt-in. On first use Chrome asks for Duolingo page access; collection still runs only when you scan or start a session.</span>
           )}
         </div>
+        {backfill.status.active && liveSessionCandidates.length > 0 && (
+          <details className="staged-preview live-session-preview" open>
+            <summary>Live session evidence ({liveSessionCandidates.length})</summary>
+            <div className="staged-preview-list">
+              {liveSessionCandidates.map((candidate, index) => (
+                <article
+                  className="staged-candidate live-session-candidate"
+                  key={`${candidate.language}\u0000${candidate.surfaceText}\u0000${candidate.context}\u0000${index}`}
+                >
+                  <div className="staged-candidate-head">
+                    <strong className="staged-candidate-text" dir="auto">{candidate.surfaceText}</strong>
+                    <span className="pill">live</span>
+                  </div>
+                  <div className="meta">{candidate.language}</div>
+                  {candidate.context && candidate.context !== candidate.surfaceText && (
+                    <div className="staged-candidate-context" dir="auto">{candidate.context}</div>
+                  )}
+                </article>
+              ))}
+            </div>
+            <div className="setting-help">
+              Live preview only. These candidates remain in the active tab until you stop and stage the session.
+            </div>
+          </details>
+        )}
         {stagedCandidates.length > 0 && (
-          <details className="staged-preview" open={stagedCandidates.length <= 3}>
-            <summary>Preview staged evidence ({stagedCandidates.length})</summary>
+          <details className="staged-preview" open={!backfill.status.active && stagedCandidates.length <= 3}>
+            <summary>{backfill.status.active ? "Previously staged evidence" : "Preview staged evidence"} ({stagedCandidates.length})</summary>
             <div className="staged-preview-list">
               {stagedCandidates.map((candidate) => (
                 <article className="staged-candidate" key={candidate.id}>
