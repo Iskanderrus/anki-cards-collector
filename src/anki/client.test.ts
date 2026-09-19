@@ -58,6 +58,32 @@ describe("AnkiClient", () => {
     }
   });
 
+  it("recovers when notesInfo returns the real deleted-note shape", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      const resultByAction: Record<string, unknown> = {
+        notesInfo: [{}],
+        findNotes: [],
+        addNote: 9001,
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+
+    expect(noteId).toBe(9001);
+    expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
+  });
+
   it("recovers when the stored Anki note was deleted", async () => {
     const actions: string[] = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

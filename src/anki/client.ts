@@ -145,8 +145,9 @@ export class AnkiClient {
     if (noteId !== undefined) {
       const storedNoteId = noteId;
       try {
-        const notes = await this.invoke<Array<{ noteId: number }>>("notesInfo", { notes: [storedNoteId] });
-        if (notes.length === 0) noteId = undefined;
+        const notes = await this.invoke<Array<{ noteId?: number }>>("notesInfo", { notes: [storedNoteId] });
+        const storedNoteStillExists = notes.some((note) => note.noteId === storedNoteId);
+        if (!storedNoteStillExists) noteId = undefined;
       } catch (error) {
         if (!isMissingNoteError(error, storedNoteId)) throw error;
         noteId = undefined;
