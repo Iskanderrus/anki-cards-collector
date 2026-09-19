@@ -4,6 +4,21 @@
 
 Use the ACCP-019 staging pipeline to collect useful language evidence from Duolingo material that is actually rendered to the user.
 
+## Implementation status
+
+Implemented as a specialized visible-DOM extractor plus an explicitly activated content-script session.
+
+- one-shot scan injects the existing on-demand content script, reads only rendered lesson/review nodes, and immediately hands the evidence to ACCP-019 staging;
+- session mode starts only after the user clicks **Start backfill session**;
+- the session uses a temporary `MutationObserver` in that tab to accumulate newly rendered visible evidence while the user navigates manually;
+- stopping the session disconnects the observer and sends the accumulated evidence to ACCP-019 staging;
+- page teardown destroys the content-script session automatically;
+- no persistent manifest content script or Duolingo host permission was added;
+- the existing `activeTab` + `scripting` permission model remains unchanged;
+- staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki.
+
+The side panel exposes the minimal ACCP-020 controls and status only. Full staged-candidate review/edit/bulk import remains ACCP-021.
+
 ## Dependencies
 
 - ACCP-019.
