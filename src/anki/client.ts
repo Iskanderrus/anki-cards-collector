@@ -143,11 +143,12 @@ export class AnkiClient {
     let noteId = item.lexicalUnit.ankiNoteId;
 
     if (noteId !== undefined) {
+      const storedNoteId = noteId;
       try {
-        const notes = await this.invoke<Array<{ noteId: number }>>("notesInfo", { notes: [noteId] });
+        const notes = await this.invoke<Array<{ noteId: number }>>("notesInfo", { notes: [storedNoteId] });
         if (notes.length === 0) noteId = undefined;
       } catch (error) {
-        if (!isMissingNoteError(error, noteId)) throw error;
+        if (!isMissingNoteError(error, storedNoteId)) throw error;
         noteId = undefined;
       }
     }
