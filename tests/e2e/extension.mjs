@@ -300,12 +300,31 @@ try {
     `;
   });
 
+  await panel.waitForFunction(() => (
+    document.querySelectorAll(".live-session-candidate").length === 6
+  ));
+  assert.equal(
+    await panel.locator(".live-session-candidate").count(),
+    6,
+    "Active session preview should expose all accumulated evidence before staging.",
+  );
+  assert.equal(
+    await panel.locator(".live-session-candidate .staged-candidate-text", { hasText: "אני לומד עברית" }).count(),
+    1,
+    "Newly rendered sentence evidence should appear in the live session preview.",
+  );
+
   // Switch away from the originating tab before stopping. The service worker must
   // still address the Duolingo tab that owns the explicit session.
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Stop & stage session");
   await panel.getByRole("button", { name: "Start backfill session" }).waitFor();
   await panel.locator(".backfill-status", { hasText: "staged candidate" }).waitFor();
+  assert.equal(
+    await panel.locator(".live-session-candidate").count(),
+    0,
+    "Live session preview should clear after Stop & stage.",
+  );
   assert.equal(
     await termCount(panel),
     2,
