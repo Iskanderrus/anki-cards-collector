@@ -77,6 +77,15 @@ A broken specialized selector should degrade to safer generic visible-text behav
 
 Avoid depending on obfuscated/private internal application state.
 
+## Matching-pairs handling
+
+Matching-pairs exercises can render keyboard shortcut numbers in an outer `[lang]` wrapper around the actual target word. Generic language-marked DOM therefore uses a leaf-only fallback:
+
+- explicit sentence/token/story selectors run first;
+- generic `[lang]` elements are considered only when they do not contain another useful target-language `[lang]` descendant;
+- wrapper shortcut numbers are never stripped heuristically from text, because digits may be legitimate study content;
+- isolated matching-pair vocabulary keeps the clean target word itself as context unless a reliable target-language sentence exists.
+
 ## Session dedupe
 
 Within one active session:
