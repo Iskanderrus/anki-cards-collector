@@ -29,10 +29,11 @@ Run this check with a real Duolingo account after loading the extension build fr
 2. Confirm the side panel visibly says **Backfill active**.
 3. Manually advance through several review/lesson screens yourself.
 4. Confirm the visible candidate count can grow as new target-language material is rendered.
-5. Confirm Collector never clicks, answers, submits, or advances an exercise.
-6. Click **Stop & stage session**.
-7. Confirm the active indicator disappears and a staged candidate count remains.
-8. Confirm the normal corpus count still did not increase.
+5. Confirm **Live session evidence** grows with the accumulated session buffer rather than showing only the latest screen.
+6. Confirm Collector never clicks, answers, submits, or advances an exercise.
+7. Click **Stop & stage session**.
+8. Confirm the live session preview disappears and the accumulated items are visible under staged evidence.
+9. Confirm the normal corpus count still did not increase.
 
 ## Navigation and teardown
 
