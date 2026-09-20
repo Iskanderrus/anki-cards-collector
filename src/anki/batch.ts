@@ -128,10 +128,30 @@ export async function exportBatch(
       });
 
       try {
+        let effectiveBinding = binding;
+        const needsReservation =
+          binding?.ankiNoteId === undefined
+          && (
+            binding?.deckName !== profile.deckName
+            || binding?.modelName !== profile.modelName
+          );
+
+        if (needsReservation) {
+          const reserved: ExportBinding = {
+            lexicalUnitId: id,
+            profileId: profile.id,
+            deckName: profile.deckName,
+            modelName: profile.modelName,
+            updatedAt: new Date().toISOString(),
+          };
+          await persistBinding(reserved);
+          effectiveBinding = reserved;
+        }
+
         const noteId = await client.upsert(
           item,
           profile,
-          binding?.ankiNoteId ?? item.lexicalUnit.ankiNoteId,
+          effectiveBinding?.ankiNoteId ?? item.lexicalUnit.ankiNoteId,
         );
 
         const persisted: ExportBinding = {
@@ -161,7 +181,7 @@ export async function exportBatch(
             noteId,
             profileId: profile.id,
             deckName: profile.deckName,
-            error: `Anki export succeeded, but the local destination binding was not saved: ${errorMessage(persistError)}`,
+            error: `Anki export succeeded and the destination remains pinned, but the local Anki note ID was not saved: ${errorMessage(persistError)}`,
           });
         }
       } catch (exportError) {
