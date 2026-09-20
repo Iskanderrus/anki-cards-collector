@@ -1244,7 +1244,11 @@ function App(): React.ReactElement {
                     value={deckName}
                     onChange={(event) => void setLanguageDeck(route.language, event.target.value)}
                   >
-                    {missing && <option value={deckName}>{deckName} (missing)</option>}
+                    {deckName && !currentCatalogSnapshot()?.decks.some((deck) => deck.name === deckName) && (
+                      <option value={deckName}>
+                        {deckName}{catalogState.kind === "live" ? " (missing)" : " (saved)"}
+                      </option>
+                    )}
                     {currentCatalogSnapshot()?.decks.map((deck) => (
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
@@ -1283,7 +1287,11 @@ function App(): React.ReactElement {
                   <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                 ))}
               </select>
-              <button type="button" disabled={busy || !routeDeckName} onClick={() => void saveLanguageRoute()}>
+              <button
+                type="button"
+                disabled={busy || !routeDeckName || currentCatalogSnapshot() === null}
+                onClick={() => void saveLanguageRoute()}
+              >
                 Add language
               </button>
             </div>
@@ -1305,7 +1313,11 @@ function App(): React.ReactElement {
                     value={deckName}
                     onChange={(event) => void setFallbackDeck(event.target.value)}
                   >
-                    {missing && <option value={deckName}>{deckName} (missing)</option>}
+                    {deckName && !currentCatalogSnapshot()?.decks.some((deck) => deck.name === deckName) && (
+                      <option value={deckName}>
+                        {deckName}{catalogState.kind === "live" ? " (missing)" : " (saved)"}
+                      </option>
+                    )}
                     {currentCatalogSnapshot()?.decks.map((deck) => (
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
