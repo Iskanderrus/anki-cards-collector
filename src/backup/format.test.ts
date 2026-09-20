@@ -181,7 +181,7 @@ describe("backup format", () => {
     ["unknown", "mapped-user-modle"],
   ])("rejects a %s export profile mode in a v3 backup", (_label, mode) => {
     const rawSettings = settings() as unknown as Record<string, unknown>;
-    const profiles = structuredClone(settings().exportProfiles) as Array<Record<string, unknown>>;
+    const profiles = structuredClone(settings().exportProfiles) as unknown as Array<Record<string, unknown>>;
     if (mode === undefined) {
       delete profiles[0]!.mode;
     } else {
