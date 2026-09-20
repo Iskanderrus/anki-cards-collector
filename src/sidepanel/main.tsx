@@ -1349,7 +1349,11 @@ function App(): React.ReactElement {
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
-                <div className="language-deck-row" key={route.language}>
+                <div
+                  className="language-deck-row"
+                  key={route.language}
+                  data-language={route.language}
+                >
                   <strong>{route.language}</strong>
                   <select
                     aria-label={`Anki deck for ${route.language}`}
@@ -1428,7 +1432,10 @@ function App(): React.ReactElement {
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
-                <div className="language-deck-row fallback-deck-row">
+                <div
+                  className="language-deck-row fallback-deck-row"
+                  data-language="other"
+                >
                   <strong>Other languages</strong>
                   <select
                     aria-label="Anki deck for other languages"
