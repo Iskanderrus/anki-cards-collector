@@ -56,7 +56,7 @@ Manual single-selection capture remains independent from this staging path.
 
 ### Persistence
 
-IndexedDB contains two primary entities.
+IndexedDB contains three persistent entities. Learning content remains separate from operational Anki destination state.
 
 ```text
 LexicalUnit
@@ -76,7 +76,16 @@ Occurrence
   context
   source metadata
   capturedAt
+
+ExportBinding
+  lexicalUnitId
+  profileId
+  optional Anki note id
+  deck/model snapshot
+  updatedAt
 ```
+
+`ExportProfile` and language-route configuration live in extension settings; the per-item binding lives in IndexedDB so changing defaults cannot silently reinterpret an already-exported note.
 
 A new capture either creates a lexical unit or attaches another occurrence to an existing one. Once a unit has been canonicalized, a repeated capture of an already-observed surface form can still find that unit through the occurrence index.
 
@@ -98,17 +107,29 @@ See [learning-card policy](learning-card-policy.md).
 
 `AnkiClient` is the only code that knows the AnkiConnect protocol.
 
-Export follows an upsert path:
+Export first resolves an `ExportProfile` for each Ready item:
 
-1. make sure the target deck exists;
-2. make sure the Collector note type contains the proposal fields;
+1. existing per-item binding/override;
+2. language route;
+3. fallback profile.
+
+Ready items are then grouped by profile so one batch can safely target several decks. A successful export persists an `ExportBinding` with the profile, Anki note ID, and deck/model snapshot. Later route or profile-default changes therefore do not silently move an already-exported note.
+
+For a Collector-managed profile, the Anki upsert path is:
+
+1. verify the destination deck; additional profiles must use a live existing deck, while the deterministic legacy/default Collector fallback keeps its historical managed-deck creation behavior;
+2. make sure the Collector-owned note type contains the proposal fields;
 3. derive the same reviewed prompt/answer shown in the side panel;
-4. use the locally stored Anki note id when possible;
+4. use the binding's Anki note ID when possible;
 5. if needed, recover an existing note by `CollectorID`;
 6. update it or create it;
-7. persist the returned note id locally.
+7. persist the returned note ID and destination snapshot in the binding.
 
-The Collector ID is intentionally a first-class Anki field. Human-readable text can change; identity should not.
+Changing an exported item's deck is a separate explicit operation. ACCP-013 permits that move only when the note type remains the same; note-type changes wait for ACCP-014 compatibility/mapping validation.
+
+User-owned note types are not treated as Collector-managed. They can be inspected by the live catalog, but export through them is blocked until ACCP-014 supplies explicit field mapping. Collector does not add fields or rewrite templates/CSS merely because such a model exists.
+
+The Collector ID is intentionally a first-class field of the Collector-managed model. Human-readable text can change; identity should not.
 
 ## Dependency direction
 
@@ -132,5 +153,7 @@ The collector assumes partial failure is normal.
 - Restricted browser page: Chrome rejects injection; the side panel reports the capture failure.
 - Duplicate expression: keep the lexical unit and add an occurrence.
 - Anki is closed: local data stays untouched and TSV remains available.
-- An Anki note was deleted externally: the next export falls back to lookup / create.
+- An Anki note was deleted externally: the next export falls back to lookup / create while retaining the resolved profile.
+- A configured additional deck disappears: export fails usefully instead of silently recreating a possibly mistyped destination.
+- A profile or language route changes: already-exported notes keep their pinned binding snapshot until the user performs an explicit move.
 - A source adapter stops matching: generic capture remains available.
