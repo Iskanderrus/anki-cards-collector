@@ -251,4 +251,23 @@ describe("settings migration", () => {
     ]);
   });
 
+
+  it.each([
+    ["missing", undefined],
+    ["unknown", "collector-managd"],
+  ])("rejects a %s ownership mode on a structurally complete profile", (_label, mode) => {
+    const profile: Record<string, unknown> = {
+      id: "unsafe",
+      name: "Unsafe",
+      deckName: "Hebrew RU",
+      modelName: "My Existing Hebrew Model",
+    };
+    if (mode !== undefined) profile.mode = mode;
+
+    expect(() => migrateSettings({
+      exportProfiles: [profile],
+      fallbackProfileId: "unsafe",
+    })).toThrow("unsupported ownership mode");
+  });
+
 });
