@@ -1,5 +1,12 @@
 import type { BackupDocument } from "../backup/format";
-import type { CaptureDraft, CollectedItem, LexicalUnit, Occurrence, ReviewStatus } from "../core/types";
+import type {
+  CaptureDraft,
+  CollectedItem,
+  ExportBinding,
+  LexicalUnit,
+  Occurrence,
+  ReviewStatus,
+} from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
@@ -169,6 +176,32 @@ function buildRestorePlan(
     occurrencesToAdd,
     occurrencesToUpdate,
   };
+}
+
+function compatibleBindings(
+  left: ExportBinding | undefined,
+  right: ExportBinding | undefined,
+): boolean {
+  if (!left || !right) return true;
+  if (left.profileId !== right.profileId) return false;
+  if (
+    left.ankiNoteId !== undefined
+    && right.ankiNoteId !== undefined
+    && left.ankiNoteId !== right.ankiNoteId
+  ) return false;
+  return true;
+}
+
+function preferredBinding(
+  primary: ExportBinding | undefined,
+  secondary: ExportBinding | undefined,
+  lexicalUnitId: string,
+): ExportBinding | undefined {
+  const source =
+    primary?.ankiNoteId !== undefined ? primary
+    : secondary?.ankiNoteId !== undefined ? secondary
+    : primary ?? secondary;
+  return source ? { ...source, lexicalUnitId } : undefined;
 }
 
 export class CaptureRepository {
@@ -352,6 +385,7 @@ export class CaptureRepository {
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
+      this.database.exportBindings,
       async () => {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
@@ -362,6 +396,21 @@ export class CaptureRepository {
           .first();
 
         if (collision && collision.id !== id) {
+          const [currentBinding, collisionBinding] = await Promise.all([
+            this.database.exportBindings.get(current.id),
+            this.database.exportBindings.get(collision.id),
+          ]);
+
+          if (!compatibleBindings(currentBinding, collisionBinding)) {
+            throw new Error(
+              "Cannot consolidate these forms because they use different export destinations or Anki notes.",
+            );
+          }
+
+          const currentHasIdentity =
+            currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
+          const collisionHasIdentity =
+            collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
           if (
             current.ankiNoteId !== undefined &&
             collision.ankiNoteId !== undefined &&
@@ -372,8 +421,7 @@ export class CaptureRepository {
             );
           }
 
-          const keepCurrent =
-            current.ankiNoteId !== undefined && collision.ankiNoteId === undefined;
+          const keepCurrent = currentHasIdentity && !collisionHasIdentity;
           const mergedNote = combineNotes(requestedNote, collision.note);
           const createdAt = current.createdAt < collision.createdAt
             ? current.createdAt
@@ -385,6 +433,9 @@ export class CaptureRepository {
               .equals(collision.id)
               .modify({ lexicalUnitId: current.id });
             await this.database.lexicalUnits.delete(collision.id);
+            const binding = preferredBinding(currentBinding, collisionBinding, current.id);
+            await this.database.exportBindings.delete(collision.id);
+            if (binding) await this.database.exportBindings.put(binding);
 
             lexicalUnit = {
               ...current,
@@ -405,6 +456,9 @@ export class CaptureRepository {
               .equals(current.id)
               .modify({ lexicalUnitId: collision.id });
             await this.database.lexicalUnits.delete(current.id);
+            const binding = preferredBinding(collisionBinding, currentBinding, collision.id);
+            await this.database.exportBindings.delete(current.id);
+            if (binding) await this.database.exportBindings.put(binding);
 
             lexicalUnit = {
               ...collision,
@@ -512,6 +566,28 @@ export class CaptureRepository {
     return completedPreview;
   }
 
+  async listExportBindings(): Promise<ExportBinding[]> {
+    return this.database.exportBindings.toArray();
+  }
+
+  async getExportBinding(lexicalUnitId: string): Promise<ExportBinding | null> {
+    return await this.database.exportBindings.get(lexicalUnitId) ?? null;
+  }
+
+  async setExportBinding(binding: Omit<ExportBinding, "updatedAt"> & { updatedAt?: string }): Promise<void> {
+    const lexicalUnit = await this.database.lexicalUnits.get(binding.lexicalUnitId);
+    if (!lexicalUnit) throw new Error("Collected item no longer exists.");
+
+    await this.database.exportBindings.put({
+      ...binding,
+      updatedAt: binding.updatedAt ?? new Date().toISOString(),
+    });
+  }
+
+  async clearExportBinding(lexicalUnitId: string): Promise<void> {
+    await this.database.exportBindings.delete(lexicalUnitId);
+  }
+
   async setStatus(id: string, status: ReviewStatus): Promise<void> {
     await this.database.lexicalUnits.update(id, {
       status,
@@ -531,8 +607,10 @@ export class CaptureRepository {
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
+      this.database.exportBindings,
       async () => {
         await this.database.occurrences.where("lexicalUnitId").equals(id).delete();
+        await this.database.exportBindings.delete(id);
         await this.database.lexicalUnits.delete(id);
       },
     );
