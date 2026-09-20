@@ -21,6 +21,8 @@ This repository contains the public implementation: deliberately small, local-fi
 - explains why a proposal was chosen and blocks overly broad or underspecified captures from becoming ready;
 - exports ready items through AnkiConnect with live batch progress and per-item failure reporting;
 - updates previously exported notes instead of blindly creating duplicates;
+- routes different languages/items through explicit export profiles so one Ready batch can target several Anki decks safely;
+- pins an exported item's destination so changing a later language default cannot silently move it;
 - provides TSV fallback plus versioned JSON backup and restore;
 - validates and previews a JSON restore before writing anything;
 - lets source URL retention be set to origin+path, non-tracking query parameters, or no URL;
