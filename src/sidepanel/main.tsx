@@ -15,6 +15,7 @@ import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import {
   DEFAULT_SETTINGS,
+  ensureManagedProfileForDeck,
   loadSettings,
   mergeSettingsForRestore,
   saveSettings,
@@ -147,8 +148,8 @@ function App(): React.ReactElement {
   const [settings, setSettings] = useState<CollectorSettings>(DEFAULT_SETTINGS);
   const [exportBindings, setExportBindings] = useState<Record<string, ExportBinding>>({});
   const [routeLanguage, setRouteLanguage] = useState("");
-  const [routeProfileId, setRouteProfileId] = useState(DEFAULT_SETTINGS.fallbackProfileId);
-  const [pendingMoveProfiles, setPendingMoveProfiles] = useState<Record<string, string>>({});
+  const [routeDeckName, setRouteDeckName] = useState("");
+  const [pendingMoveDecks, setPendingMoveDecks] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -217,11 +218,10 @@ function App(): React.ReactElement {
         : loadedItems[0]?.lexicalUnit.id ?? null
     ));
     setSettings(loadedSettings);
-    setRouteProfileId((current) =>
-      loadedSettings.exportProfiles.some((profile) => profile.id === current)
-        ? current
-        : loadedSettings.fallbackProfileId
+    const fallback = loadedSettings.exportProfiles.find(
+      (profile) => profile.id === loadedSettings.fallbackProfileId,
     );
+    setRouteDeckName((current) => current || fallback?.deckName || "");
   }, []);
 
   useEffect(() => {
@@ -581,11 +581,10 @@ function App(): React.ReactElement {
       await saveSettings(update(current));
       resolved = await loadSettings();
       setSettings(resolved);
-      setRouteProfileId((selected) =>
-        resolved.exportProfiles.some((profile) => profile.id === selected)
-          ? selected
-          : resolved.fallbackProfileId
+      const fallback = resolved.exportProfiles.find(
+        (profile) => profile.id === resolved.fallbackProfileId,
       );
+      setRouteDeckName((selected) => selected || fallback?.deckName || "");
     });
 
     settingsMutationQueue.current = run.then(() => undefined, () => undefined);
