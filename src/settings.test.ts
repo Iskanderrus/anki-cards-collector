@@ -7,7 +7,7 @@ import {
 } from "./settings";
 
 describe("settings migration", () => {
-  it("converts legacy global deck/model settings into one deterministic default profile", () => {
+  it("preserves a legacy user model but routes new cards through Collector Basic in the same deck", () => {
     const settings = migrateSettings({
       defaultLanguage: "HE",
       deckName: "Hebrew RU",
@@ -15,19 +15,26 @@ describe("settings migration", () => {
       sourceUrlMode: "query",
     });
 
-    expect(settings).toEqual({
-      defaultLanguage: "he",
-      sourceUrlMode: "query",
-      exportProfiles: [{
+    expect(settings.defaultLanguage).toBe("he");
+    expect(settings.sourceUrlMode).toBe("query");
+    expect(settings.exportProfiles).toEqual([
+      {
         id: LEGACY_DEFAULT_PROFILE_ID,
-        name: "Collector default",
+        name: "Legacy Anki destination",
         deckName: "Hebrew RU",
         modelName: "Collector Hebrew",
         mode: "mapped-user-model",
-      }],
-      languageRoutes: [],
-      fallbackProfileId: LEGACY_DEFAULT_PROFILE_ID,
-    });
+      },
+      {
+        id: "collector-deck:Hebrew%20RU",
+        name: "Hebrew RU",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        mode: "collector-managed",
+      },
+    ]);
+    expect(settings.languageRoutes).toEqual([]);
+    expect(settings.fallbackProfileId).toBe("collector-deck:Hebrew%20RU");
   });
 
   it("normalizes current profiles and drops routes that reference missing profiles", () => {
@@ -170,7 +177,7 @@ describe("settings migration", () => {
 
     const result = mergeSettingsForRestore(current, incoming);
     expect(result.conflicts).toHaveLength(2);
-    expect(result.conflicts.join("\n")).toContain("Export profile conflict");
+    expect(result.conflicts.join("\n")).toContain("Export destination conflict");
     expect(result.conflicts.join("\n")).toContain("Language route conflict");
   });
 
@@ -199,6 +206,48 @@ describe("settings migration", () => {
     ]);
     expect(result.settings.languageRoutes).toEqual([
       { language: "he", profileId: "he-profile" },
+    ]);
+  });
+
+
+  it("repairs an already-migrated mapped fallback and its language route without changing the legacy profile", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "he",
+      sourceUrlMode: "sanitized",
+      exportProfiles: [{
+        id: LEGACY_DEFAULT_PROFILE_ID,
+        name: "Collector default",
+        deckName: "Spanish RU — Uruguay",
+        modelName: "Serbian RU — Latin Primary — Standalone v3",
+        mode: "mapped-user-model",
+      }],
+      languageRoutes: [{
+        language: "es",
+        profileId: LEGACY_DEFAULT_PROFILE_ID,
+      }],
+      fallbackProfileId: LEGACY_DEFAULT_PROFILE_ID,
+    });
+
+    const managed = settings.exportProfiles.find(
+      (profile) => profile.mode === "collector-managed",
+    );
+    const legacy = settings.exportProfiles.find(
+      (profile) => profile.id === LEGACY_DEFAULT_PROFILE_ID,
+    );
+
+    expect(legacy).toMatchObject({
+      deckName: "Spanish RU — Uruguay",
+      modelName: "Serbian RU — Latin Primary — Standalone v3",
+      mode: "mapped-user-model",
+    });
+    expect(managed).toMatchObject({
+      deckName: "Spanish RU — Uruguay",
+      modelName: "Collector Basic",
+      mode: "collector-managed",
+    });
+    expect(settings.fallbackProfileId).toBe(managed?.id);
+    expect(settings.languageRoutes).toEqual([
+      { language: "es", profileId: managed?.id },
     ]);
   });
 
