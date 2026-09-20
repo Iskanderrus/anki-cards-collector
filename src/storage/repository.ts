@@ -193,6 +193,7 @@ function buildRestorePlan(
 
     const same =
       current.profileId === incoming.profileId
+      && current.state === incoming.state
       && current.ankiNoteId === incoming.ankiNoteId
       && current.deckName === incoming.deckName
       && current.modelName === incoming.modelName;
@@ -233,15 +234,22 @@ function compatibleBindings(
   return true;
 }
 
+function bindingPriority(binding: ExportBinding | undefined): number {
+  if (!binding) return -1;
+  if (binding.state === "exported") return 3;
+  if (binding.state === "reserved") return 2;
+  return 1;
+}
+
 function preferredBinding(
   primary: ExportBinding | undefined,
   secondary: ExportBinding | undefined,
   lexicalUnitId: string,
 ): ExportBinding | undefined {
   const source =
-    primary?.ankiNoteId !== undefined ? primary
-    : secondary?.ankiNoteId !== undefined ? secondary
-    : primary ?? secondary;
+    bindingPriority(primary) >= bindingPriority(secondary)
+      ? primary ?? secondary
+      : secondary ?? primary;
   return source ? { ...source, lexicalUnitId } : undefined;
 }
 
