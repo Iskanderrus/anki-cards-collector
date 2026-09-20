@@ -7,7 +7,7 @@ function profile(): ExportProfile {
     id: "collector",
     name: "Collector",
     deckName: "Collector",
-    modelName: "Collector",
+    modelName: "Collector Basic",
     mode: "collector-managed",
   };
 }
@@ -191,7 +191,7 @@ describe("AnkiClient", () => {
 
       const resultByAction: Record<string, unknown> = {
         deckNames: ["Collector"],
-        modelNames: ["Collector"],
+        modelNames: ["Collector Basic"],
         modelFieldNames: ["CollectorID", "Expression", "Context", "Note", "Source"],
         modelTemplates: {
           Recognition: {
@@ -228,7 +228,7 @@ describe("AnkiClient", () => {
 
       const resultByAction: Record<string, unknown> = {
         deckNames: ["Collector"],
-        modelNames: ["Collector"],
+        modelNames: ["Collector Basic"],
         modelFieldNames: ["CollectorID", "Prompt", "Answer", "CardKind", "Why", "Canonical", "Observed", "Expression", "Context", "Note", "Source"],
         modelTemplates: {
           Recognition: {
