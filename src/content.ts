@@ -29,6 +29,7 @@ interface ActiveVisibleSession {
   observer: MutationObserver;
   scanTimer: number | null;
   allowFixture: boolean;
+  terminating: boolean;
 }
 
 let visibleSession: ActiveVisibleSession | null = null;
@@ -61,6 +62,49 @@ function notifySessionStatus(): void {
   }).catch(() => undefined);
 }
 
+async function autoTerminateVisibleSession(
+  session: ActiveVisibleSession,
+  reason: "unsupported-context" | "pagehide",
+  collectFinalEvidence = false,
+): Promise<void> {
+  if (visibleSession !== session || session.terminating) return;
+
+  session.terminating = true;
+  session.observer.disconnect();
+  if (session.scanTimer !== null) {
+    window.clearTimeout(session.scanTimer);
+    session.scanTimer = null;
+  }
+
+  if (collectFinalEvidence) {
+    void accumulateVisibleEvidence(session);
+  }
+
+  const evidence = [...session.evidence.values()];
+  const response = await chrome.runtime.sendMessage({
+    type: "DUOLINGO_VISIBLE_SESSION_TERMINATED",
+    sessionId: session.id,
+    evidence,
+    reason,
+  }).catch((error) => ({
+    ok: false,
+    error: error instanceof Error ? error.message : "Could not preserve Duolingo session evidence.",
+  })) as { ok?: boolean; error?: string };
+
+  if (!response?.ok) {
+    // Keep the evidence reachable so the user can still explicitly Stop & stage
+    // if an automatic handoff fails while the content context remains alive.
+    session.terminating = false;
+    notifySessionStatus();
+    return;
+  }
+
+  if (visibleSession === session) {
+    visibleSession = null;
+  }
+  notifySessionStatus();
+}
+
 function accumulateVisibleEvidence(session: ActiveVisibleSession): boolean {
   if (!supportsDuolingoVisibleBackfill(document, window.location, session.allowFixture)) {
     return false;
@@ -91,9 +135,7 @@ function scheduleSessionScan(session: ActiveVisibleSession): void {
     if (visibleSession !== session) return;
 
     if (!accumulateVisibleEvidence(session)) {
-      session.observer.disconnect();
-      visibleSession = null;
-      notifySessionStatus();
+      void autoTerminateVisibleSession(session, "unsupported-context");
     }
   }, 80);
 }
@@ -114,6 +156,7 @@ function startVisibleSession(language: string): VisibleSessionStatus {
     observer: new MutationObserver(() => scheduleSessionScan(session)),
     scanTimer: null,
     allowFixture,
+    terminating: false,
   };
 
   visibleSession = session;
@@ -132,6 +175,9 @@ function startVisibleSession(language: string): VisibleSessionStatus {
 function stopVisibleSession(): { status: VisibleSessionStatus; evidence: BatchCaptureEvidence[]; sessionId?: string } {
   const session = visibleSession;
   if (!session) return { status: sessionStatus(), evidence: [] };
+  if (session.terminating) {
+    throw new Error("Duolingo backfill is already ending and staging its evidence.");
+  }
 
   session.observer.disconnect();
   if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
@@ -154,9 +200,7 @@ if (!window.__ankiCardsCollectorLoaded) {
 
   window.addEventListener("pagehide", () => {
     if (!visibleSession) return;
-    visibleSession.observer.disconnect();
-    if (visibleSession.scanTimer !== null) window.clearTimeout(visibleSession.scanTimer);
-    visibleSession = null;
+    void autoTerminateVisibleSession(visibleSession, "pagehide", true);
   }, { once: true });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
