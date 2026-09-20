@@ -34,7 +34,7 @@ Open the side panel and expand **Settings & fallback exports**.
 5. Confirm both profiles show `Collector Basic` as the Collector-managed note type.
 6. Confirm arbitrary existing user note types are not selectable as Collector-managed export models.
 
-Creating an additional profile must require a live existing deck; a stale/missing added-profile deck must not be silently created.
+A missing saved deck must never be created by export. To verify the explicit path, temporarily configure or restore one profile whose saved deck is absent from the live catalog, refresh Anki, confirm **Create saved deck in Anki** appears, and use that button deliberately. Confirm the deck appears only after that click.
 
 ## 3. Configure two language routes
 
