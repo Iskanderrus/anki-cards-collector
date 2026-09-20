@@ -86,10 +86,15 @@ export function migrateSettings(value: unknown): CollectorSettings {
 
   let exportProfiles = normalizedProfiles(raw.exportProfiles);
   if (exportProfiles.length === 0) {
+    const deckName = String(raw.deckName ?? DEFAULT_PROFILE.deckName).trim() || DEFAULT_PROFILE.deckName;
+    const modelName = String(raw.modelName ?? DEFAULT_PROFILE.modelName).trim() || DEFAULT_PROFILE.modelName;
     exportProfiles = [{
       ...DEFAULT_PROFILE,
-      deckName: String(raw.deckName ?? DEFAULT_PROFILE.deckName).trim() || DEFAULT_PROFILE.deckName,
-      modelName: String(raw.modelName ?? DEFAULT_PROFILE.modelName).trim() || DEFAULT_PROFILE.modelName,
+      deckName,
+      modelName,
+      mode: modelName === DEFAULT_PROFILE.modelName
+        ? "collector-managed"
+        : "mapped-user-model",
     }];
   }
 
