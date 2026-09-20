@@ -604,65 +604,82 @@ function App(): React.ReactElement {
     }
   }
 
-  async function setItemProfileOverride(
+  function liveDeckId(deckName: string): string | undefined {
+    const deck = currentCatalogSnapshot()?.decks.find((candidate) => candidate.name === deckName);
+    return deck ? String(deck.id) : undefined;
+  }
+
+  async function ensureDeckProfile(deckName: string): Promise<ExportProfile> {
+    let resolved: ExportProfile | null = null;
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      resolved = ensured.profile;
+      return ensured.settings;
+    });
+    if (!resolved) throw new Error("Could not prepare this Anki deck.");
+    return resolved;
+  }
+
+  async function setItemDeckOverride(
     lexicalUnitId: string,
-    profileId: string,
+    deckName: string,
   ): Promise<void> {
-    if (profileId === "auto") {
+    if (deckName === "auto") {
       const existing = exportBindings[lexicalUnitId];
       if (existing?.ankiNoteId !== undefined) {
-        setError("An exported item is pinned to its destination. Use the explicit move action instead.");
+        setError("This card is already in Anki. Use “Move to another deck…” instead.");
         return;
       }
       await repository.clearExportBinding(lexicalUnitId);
+      setNotice("This card will follow its language deck again.");
       await load();
       return;
     }
 
-    const profile = settings.exportProfiles.find((candidate) => candidate.id === profileId);
-    if (!profile) {
-      setError("The selected export profile no longer exists.");
-      return;
-    }
-
+    const profile = await ensureDeckProfile(deckName);
     const existing = exportBindings[lexicalUnitId];
     if (existing?.ankiNoteId !== undefined) {
-      setPendingMoveProfiles((current) => ({ ...current, [lexicalUnitId]: profileId }));
+      setPendingMoveDecks((current) => ({ ...current, [lexicalUnitId]: deckName }));
       return;
     }
 
     await repository.setExportBinding({
       lexicalUnitId,
-      profileId,
+      profileId: profile.id,
+      deckName: profile.deckName,
+      modelName: profile.modelName,
     });
-    setNotice(`Destination override set to ${profile.name}.`);
+    setNotice(`This card will go to ${deckName}.`);
     await load();
   }
 
   async function moveExportedItem(
     item: CollectedItem,
-    targetProfileId: string,
+    targetDeckName: string,
   ): Promise<void> {
     const binding = exportBindings[item.lexicalUnit.id];
     if (!binding?.ankiNoteId) {
-      setError("This item has no exported Anki note to move.");
+      setError("This card has not been exported to Anki yet.");
       return;
     }
 
     const currentProfile = settings.exportProfiles.find(
       (profile) => profile.id === binding.profileId,
     );
-    const target = settings.exportProfiles.find(
-      (profile) => profile.id === targetProfileId,
-    );
-    if (!currentProfile || !target) {
-      setError("The current or target export profile no longer exists.");
+    if (!currentProfile) {
+      setError("Collector cannot find the saved destination for this Anki card.");
       return;
     }
+
     setBusy(true);
     setError("");
     setNotice("");
     try {
+      const target = await ensureDeckProfile(targetDeckName);
       const movedBinding = await moveExportedNote(
         {
           lexicalUnitId: item.lexicalUnit.id,
@@ -673,56 +690,27 @@ function App(): React.ReactElement {
         new AnkiClient(),
         (nextBinding) => repository.setExportBinding(nextBinding),
       );
-      setPendingMoveProfiles((current) => {
+      setPendingMoveDecks((current) => {
         const next = { ...current };
         delete next[item.lexicalUnit.id];
         return next;
       });
-      setNotice(`Moved Anki note ${movedBinding.ankiNoteId} to ${movedBinding.deckName} and updated its pinned profile.`);
+      setNotice(`Moved Anki note ${movedBinding.ankiNoteId} to ${movedBinding.deckName}.`);
       await load();
     } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "Could not move the Anki note.");
+      setError(moveError instanceof Error ? moveError.message : "Could not move the Anki card.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function addExportProfile(): Promise<void> {
-    const catalog = currentCatalogSnapshot();
-    const deck = catalog?.decks[0];
-    if (!deck) {
-      setError("Refresh the live Anki catalog before adding another export profile.");
-      return;
-    }
-
-    const managedModel = DEFAULT_SETTINGS.exportProfiles[0]!;
-    const liveManagedModel = catalog.models.find(
-      (model) => model.name === managedModel.modelName,
-    );
-
-    const profile: ExportProfile = {
-      id: crypto.randomUUID(),
-      name: `Profile ${settings.exportProfiles.length + 1}`,
-      deckName: deck.name,
-      deckId: String(deck.id),
-      modelName: managedModel.modelName,
-      ...(liveManagedModel ? { modelId: String(liveManagedModel.id) } : {}),
-      mode: "collector-managed",
-    };
-    await persistSettings((current) => ({
-      ...current,
-      exportProfiles: [...current.exportProfiles, profile],
-    }));
-    setNotice("Export profile added. Choose its deck and note type below.");
-  }
-
-  async function createSavedProfileDeck(profile: ExportProfile): Promise<void> {
+  async function createSavedDeck(deckName: string): Promise<void> {
     if (catalogState.kind !== "live") {
-      setError("Refresh the live Anki catalog before creating a saved deck.");
+      setError("Refresh Anki first.");
       return;
     }
-    if (catalogState.snapshot.decks.some((deck) => deck.name === profile.deckName)) {
-      setNotice(`${profile.deckName} already exists in Anki.`);
+    if (catalogState.snapshot.decks.some((deck) => deck.name === deckName)) {
+      setNotice(`${deckName} already exists in Anki.`);
       return;
     }
 
@@ -730,8 +718,8 @@ function App(): React.ReactElement {
     setError("");
     setNotice("");
     try {
-      await new AnkiClient().createDeck(profile.deckName);
-      setNotice(`Created Anki deck ${profile.deckName} explicitly.`);
+      await new AnkiClient().createDeck(deckName);
+      setNotice(`Created Anki deck ${deckName}.`);
       await refreshAnkiCatalog();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Could not create the Anki deck.");
@@ -740,59 +728,52 @@ function App(): React.ReactElement {
     }
   }
 
-  async function updateExportProfile(
-    profileId: string,
-    changes: Partial<ExportProfile>,
-  ): Promise<void> {
-    await persistSettings((current) => ({
-      ...current,
-      exportProfiles: current.exportProfiles.map((profile) =>
-        profile.id === profileId ? { ...profile, ...changes, id: profile.id } : profile
-      ),
-    }));
+  async function setFallbackDeck(deckName: string): Promise<void> {
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      return {
+        ...ensured.settings,
+        fallbackProfileId: ensured.profile.id,
+      };
+    });
+    setNotice(`Other languages will go to ${deckName}.`);
   }
 
-  async function removeExportProfile(profileId: string): Promise<void> {
-    if (profileId === settings.fallbackProfileId) {
-      setError("Choose a different fallback profile before deleting this one.");
-      return;
-    }
-    if (settings.languageRoutes.some((route) => route.profileId === profileId)) {
-      setError("Remove language routes that use this profile before deleting it.");
-      return;
-    }
-    if (Object.values(exportBindings).some((binding) => binding.profileId === profileId)) {
-      setError("This profile is pinned to collected items. Reassign those items before deleting it.");
-      return;
-    }
-
-    await persistSettings((current) => ({
-      ...current,
-      exportProfiles: current.exportProfiles.filter((profile) => profile.id !== profileId),
-    }));
-    setNotice("Export profile removed.");
+  async function setLanguageDeck(language: string, deckName: string): Promise<void> {
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      return {
+        ...ensured.settings,
+        languageRoutes: [
+          ...ensured.settings.languageRoutes.filter((route) => route.language !== language),
+          { language, profileId: ensured.profile.id },
+        ].sort((left, right) => left.language.localeCompare(right.language)),
+      };
+    });
+    setNotice(`${language} cards will go to ${deckName}.`);
   }
 
   async function saveLanguageRoute(): Promise<void> {
     const language = routeLanguage.trim().toLowerCase();
     if (!language || language === "und") {
-      setError("Enter a concrete language code such as he, sr, or es.");
+      setError("Enter a language code such as he, sr, or es.");
       return;
     }
-    if (!settings.exportProfiles.some((profile) => profile.id === routeProfileId)) {
-      setError("Choose a valid export profile for this language.");
+    if (!routeDeckName) {
+      setError("Choose an Anki deck.");
       return;
     }
 
-    await persistSettings((current) => ({
-      ...current,
-      languageRoutes: [
-        ...current.languageRoutes.filter((route) => route.language !== language),
-        { language, profileId: routeProfileId },
-      ].sort((left, right) => left.language.localeCompare(right.language)),
-    }));
+    await setLanguageDeck(language, routeDeckName);
     setRouteLanguage("");
-    setNotice(`Default export route for ${language} saved.`);
   }
 
   async function removeLanguageRoute(language: string): Promise<void> {
@@ -800,7 +781,7 @@ function App(): React.ReactElement {
       ...current,
       languageRoutes: current.languageRoutes.filter((route) => route.language !== language),
     }));
-    setNotice(`Language route ${language} removed.`);
+    setNotice(`${language} will use the “Other languages” deck.`);
   }
 
   function currentCatalogSnapshot(): AnkiCatalogSnapshot | null {
