@@ -447,8 +447,8 @@ describe("AnkiClient", () => {
     );
 
     expect(requests).toEqual([
-      { action: "findCards", params: { query: "nid:4242" } },
-      { action: "changeDeck", params: { cards: [71, 72], deck: "Hebrew RU" } },
+      { action: "findCards", version: 6, params: { query: "nid:4242" } },
+      { action: "changeDeck", version: 6, params: { cards: [71, 72], deck: "Hebrew RU" } },
     ]);
   });
 
