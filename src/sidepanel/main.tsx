@@ -179,12 +179,27 @@ function App(): React.ReactElement {
         error?: string;
         status?: VisibleSessionStatus;
         evidence?: LiveSessionCandidate[];
+        staged?: StagedBatchSummary;
+        foundCount?: number;
+        reason?: string;
       };
       if (event.type === "DATA_CHANGED") void load();
       if (event.type === "CAPTURE_ERROR") setError(event.error ?? "Capture failed.");
       if (event.type === "DUOLINGO_VISIBLE_SESSION_UPDATED" && event.status) {
-        setBackfill((current) => ({ ...current, supported: true, status: event.status! }));
+        setBackfill((current) => ({ ...current, status: event.status! }));
         setLiveSessionCandidates(event.status.active ? event.evidence ?? [] : []);
+      }
+      if (event.type === "DUOLINGO_VISIBLE_SESSION_AUTO_STAGED" && event.staged) {
+        setBackfill({
+          supported: false,
+          status: { active: false, candidateCount: event.foundCount ?? 0 },
+          staged: event.staged,
+        });
+        setLiveSessionCandidates([]);
+        setNotice(
+          `Backfill session ended after leaving the supported Duolingo study context. ${event.foundCount ?? 0} session candidate${event.foundCount === 1 ? "" : "s"} preserved; ${event.staged.candidateCount} candidate${event.staged.candidateCount === 1 ? "" : "s"} are staged for review.`,
+        );
+        void refreshStagedCandidates();
       }
     };
     chrome.runtime.onMessage.addListener(listener);
