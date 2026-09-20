@@ -1,5 +1,10 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { LexicalUnit, Occurrence } from "../core/types";
+import {
+  LEGACY_DEFAULT_PROFILE_ID,
+  type ExportBinding,
+  type LexicalUnit,
+  type Occurrence,
+} from "../core/types";
 import { normalizeIdentityText } from "../core/normalize";
 
 interface LegacyLexicalUnitV1 {
@@ -16,6 +21,7 @@ interface LegacyOccurrenceV1 {
 export class CollectorDatabase extends Dexie {
   lexicalUnits!: EntityTable<LexicalUnit, "id">;
   occurrences!: EntityTable<Occurrence, "id">;
+  exportBindings!: EntityTable<ExportBinding, "lexicalUnitId">;
 
   constructor(name = "anki-cards-collector") {
     super(name);
@@ -47,6 +53,28 @@ export class CollectorDatabase extends Dexie {
         value.surfaceText = surfaceText;
         value.normalizedSurfaceText = normalizeIdentityText(surfaceText);
       });
+    });
+
+    this.version(3).stores({
+      lexicalUnits: "&id, &contentKey, status, updatedAt",
+      occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+      exportBindings: "&lexicalUnitId, profileId, ankiNoteId",
+    }).upgrade(async (transaction) => {
+      const units = await transaction.table("lexicalUnits").toArray() as LexicalUnit[];
+      const bindings = units.flatMap((unit): ExportBinding[] =>
+        unit.ankiNoteId === undefined
+          ? []
+          : [{
+              lexicalUnitId: unit.id,
+              profileId: LEGACY_DEFAULT_PROFILE_ID,
+              ankiNoteId: unit.ankiNoteId,
+              updatedAt: unit.updatedAt,
+            }]
+      );
+
+      if (bindings.length > 0) {
+        await transaction.table("exportBindings").bulkPut(bindings);
+      }
     });
   }
 }
