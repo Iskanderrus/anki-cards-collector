@@ -758,8 +758,8 @@ try {
     "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
-  // ACCP-013 browser acceptance: configure two live-deck profiles and export
-  // two Ready languages in one batch through different destinations.
+  // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
+  // Internal export profiles remain an implementation detail.
   await panel.bringToFront();
   await panel.locator(".settings").evaluate((details) => {
     if (details instanceof HTMLDetailsElement) details.open = true;
@@ -767,56 +767,47 @@ try {
   await clickPanelButton(panel, "Refresh from Anki");
   await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
 
-  let profileCards = panel.locator(".export-profile-card");
-  assert.equal(await profileCards.count(), 1);
-
-  const defaultProfile = profileCards.nth(0);
-  const createSavedDeckButton = defaultProfile.getByRole("button", {
-    name: "Create saved deck in Anki",
-  });
-  await createSavedDeckButton.waitFor();
-  assert.equal(
-    ankiDecks.has("Collector Inbox"),
-    false,
-    "A missing saved deck must not exist before explicit creation.",
-  );
-  const createRequestsBefore = ankiRequests.filter((request) => request.action === "createDeck").length;
-  await createSavedDeckButton.click();
-  await defaultProfile.getByRole("button", { name: "Create saved deck in Anki" }).waitFor({
-    state: "detached",
-  });
+  // Collector Inbox is intentionally absent from the fake live catalog. It must
+  // only be created after the user presses the explicit button.
+  const fallbackRow = panel.locator(".fallback-deck-row");
+  const createDeckButton = fallbackRow.getByRole("button", { name: "Create deck" });
+  await createDeckButton.waitFor();
+  assert.equal(ankiDecks.has("Collector Inbox"), false);
+  const createRequestsBefore = ankiRequests.filter(
+    (request) => request.action === "createDeck",
+  ).length;
+  await createDeckButton.click();
+  await createDeckButton.waitFor({ state: "detached" });
   assert.equal(ankiDecks.has("Collector Inbox"), true);
   assert.equal(
     ankiRequests.filter((request) => request.action === "createDeck").length,
     createRequestsBefore + 1,
-    "The saved deck must be created only by the explicit button.",
+    "A missing saved deck must be created only through the explicit UI action.",
   );
 
-  const hebrewProfile = profileCards.nth(0);
-  await hebrewProfile.getByLabel("Profile name").fill("Hebrew");
-  await hebrewProfile.getByLabel("Anki deck").selectOption({ label: "Hebrew RU" });
+  const addLanguage = panel.locator(".language-deck-add");
+  const newLanguage = addLanguage.getByLabel("New language code");
+  const newLanguageDeck = addLanguage.getByLabel("Anki deck for new language");
 
-  await clickPanelButton(panel, "Add profile");
-  profileCards = panel.locator(".export-profile-card");
-  await profileCards.nth(1).waitFor();
-  assert.equal(await profileCards.count(), 2);
-  const serbianProfile = profileCards.nth(1);
-  await serbianProfile.getByLabel("Profile name").fill("Serbian");
-  await serbianProfile.getByLabel("Anki deck").selectOption({ label: "Serbian RU" });
+  await newLanguage.fill("he");
+  await newLanguageDeck.selectOption({ label: "Hebrew RU" });
+  await clickPanelButton(panel, "Add language");
+  const hebrewRoute = panel.locator(".language-deck-row", { hasText: "he" });
+  await hebrewRoute.waitFor();
+  assert.equal(
+    await hebrewRoute.getByLabel("Anki deck for he").inputValue(),
+    "Hebrew RU",
+  );
 
-  const routeEditor = panel.locator(".language-route-editor");
-  const routeLanguageInput = routeEditor.getByPlaceholder("he, sr, es…");
-  const routeProfileSelect = routeEditor.getByLabel("Profile");
-
-  await routeLanguageInput.fill("he");
-  await routeProfileSelect.selectOption({ label: "Hebrew" });
-  await clickPanelButton(panel, "Save route");
-  await panel.locator(".language-route-row", { hasText: "he → Hebrew" }).waitFor();
-
-  await routeLanguageInput.fill("sr");
-  await routeProfileSelect.selectOption({ label: "Serbian" });
-  await clickPanelButton(panel, "Save route");
-  await panel.locator(".language-route-row", { hasText: "sr → Serbian" }).waitFor();
+  await newLanguage.fill("sr");
+  await newLanguageDeck.selectOption({ label: "Serbian RU" });
+  await clickPanelButton(panel, "Add language");
+  const serbianRoute = panel.locator(".language-deck-row", { hasText: "sr" });
+  await serbianRoute.waitFor();
+  assert.equal(
+    await serbianRoute.getByLabel("Anki deck for sr").inputValue(),
+    "Serbian RU",
+  );
 
   const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
@@ -831,6 +822,17 @@ try {
   await secondRoutingCard.getByRole("button", { name: "Save" }).click();
   await secondRoutingCard.getByRole("button", { name: "Ready" }).click();
   await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  assert.match(
+    await firstRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU/,
+    "The Hebrew card should show only its resolved Anki deck.",
+  );
+  assert.match(
+    await secondRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Serbian RU/,
+    "The Serbian card should show only its resolved Anki deck.",
+  );
 
   ankiRequests.length = 0;
   await clickPanelButton(panel, "Send ready to Anki");
@@ -849,13 +851,11 @@ try {
 
   assert.match(
     await firstRoutingCard.locator(".export-destination").innerText(),
-    /Hebrew.*Hebrew RU/s,
-    "Hebrew item should display its resolved/pinned Hebrew destination.",
+    /Anki:\s*Hebrew RU.*note\s+\d+/s,
   );
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
-    /Serbian.*Serbian RU/s,
-    "Serbian item should display its resolved/pinned Serbian destination.",
+    /Anki:\s*Serbian RU.*note\s+\d+/s,
   );
 
   const accessibility = await new AxeBuilder({ page: panel })
