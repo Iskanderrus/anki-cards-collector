@@ -423,6 +423,20 @@ try {
   await clickPanelButton(panel, "Start backfill session");
   await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
 
+  // Add evidence that exists only in this second session. If automatic
+  // termination drops the live buffer, this candidate will disappear entirely.
+  await duolingoPage.evaluate(() => {
+    const challenge = document.querySelector("#challenge");
+    if (!challenge) throw new Error("Duolingo E2E challenge fixture is missing.");
+    challenge.innerHTML = `
+      <p data-test="challenge-sentence" lang="he">ראיה אוטומטית חדשה</p>
+      <button data-test="continue-button">Continue</button>
+    `;
+  });
+  await panel.locator(".live-session-candidate .staged-candidate-text", {
+    hasText: "ראיה אוטומטית חדשה",
+  }).waitFor();
+
   await duolingoPage.evaluate(() => {
     history.pushState({}, "", "/home");
     const main = document.querySelector("main");
@@ -441,12 +455,39 @@ try {
     0,
     "SPA navigation away from supported study context must terminate the live session.",
   );
+  await panel.locator(".notice", { hasText: "preserved" }).waitFor();
+
   const awayStatus = await panel.evaluate(
     async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
   );
   assert.equal(awayStatus?.ok, true);
   assert.equal(awayStatus?.status?.active, false);
   assert.equal(awayStatus?.supported, false);
+
+  await panel.waitForFunction(async () => {
+    const response = await chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" });
+    return response?.batch?.candidates?.some(
+      (candidate) => candidate.surfaceText === "ראיה אוטומטית חדשה",
+    ) === true;
+  });
+  const autoStagedBatch = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(autoStagedBatch?.ok, true);
+  assert.equal(
+    autoStagedBatch.batch.candidates.some(
+      (candidate) =>
+        candidate.surfaceText === "ראיה אוטומטית חדשה"
+        && candidate.language === "he",
+    ),
+    true,
+    "Evidence unique to an auto-terminated session must survive in ACCP-019 staging.",
+  );
+  assert.equal(
+    autoStagedBatch.batch.candidates.length,
+    7,
+    "Automatic session termination should add only the new unique session evidence.",
+  );
 
   // Matching-pairs challenges often put keyboard shortcut numbers in an outer
   // language-marked wrapper. Only the clean leaf target text should be staged.
@@ -472,7 +513,7 @@ try {
     async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
   );
   assert.equal(pairsBatch?.ok, true);
-  assert.equal(pairsBatch?.batch?.candidates?.length, 11);
+  assert.equal(pairsBatch?.batch?.candidates?.length, 12);
 
   const pairTexts = pairsBatch.batch.candidates
     .map((candidate) => candidate.surfaceText)
