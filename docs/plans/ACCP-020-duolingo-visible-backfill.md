@@ -21,6 +21,8 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - granting page access does not start background collection: extraction still runs only for a one-shot scan or an explicitly active session;
 - staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki;
 - the staged batch is mirrored in versioned `chrome.storage.session` so MV3 service-worker suspension cannot erase it;
+- live-session ownership is mirrored separately as `tabId + sessionId`, so worker revival can address the original Duolingo tab even when another tab is active;
+- restored live ownership is validated against that exact content-script session before use; stale owner records are cleared;
 - worker revival reconstructs the in-memory pipeline by rerunning `stageBatch()` against the current corpus, so dispositions are recalculated rather than persisted as stale classifications;
 - session storage remains transient and is not part of IndexedDB backups or Anki export.
 
@@ -52,6 +54,8 @@ Collector installs a temporary observer/content-script session scoped to the act
 As the user manually moves through review/lesson material, Collector may inspect newly rendered visible DOM and accumulate new candidate evidence.
 
 The user can stop the session at any time.
+
+Explicit stop is acknowledgement-driven: the content script freezes/disconnects the live buffer but keeps it reachable, background stages and persists it, and only a successful staging acknowledgement lets the content script discard the session. A staging persistence failure therefore leaves the same frozen buffer available for retry.
 
 The session also stops when:
 
@@ -143,6 +147,8 @@ Use deterministic HTML/DOM fixtures for:
 - same-document SPA navigation away from supported study context, including proof that a candidate unique to that session survives in the staged batch;
 - changing the configured language while a session is active;
 - actual extension service-worker termination/restart after staging, verifying staged evidence survives while corpus data remains unchanged;
+- actual worker restart during an active session followed by switching to another tab, verifying status/stop still target the original session owner;
+- injected staged-session persistence failure during explicit Stop, verifying the frozen live buffer remains reachable and the retry succeeds;
 - no-candidate page.
 
 Browser E2E should verify the observer only runs after explicit activation.
