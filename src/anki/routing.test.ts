@@ -68,7 +68,7 @@ describe("resolveExportRoute", () => {
     const route = resolveExportRoute(item(), settings, binding);
     expect(route.source).toBe("binding");
     expect(route.profile.deckName).toBe("Hebrew New Default");
-    expect(route.profile.modelName).toBe("Collector Basic v2");
+    expect(route.profile.modelName).toBe("Collector Basic");
   });
 
   it("pins an exported item to its stored destination snapshot after profile edits", () => {
