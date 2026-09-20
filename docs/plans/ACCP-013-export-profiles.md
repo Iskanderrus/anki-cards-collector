@@ -112,7 +112,7 @@ The ACCP-013 implementation uses:
 - migration of existing `ankiNoteId` values into bindings without changing the note ID;
 - binding → language route → fallback resolution;
 - a `reserved` destination binding (profile + deck/model snapshot) persisted before the first Anki mutation, so a cross-system partial failure cannot leave a new Anki note without a durable route pin;
-- reserved destinations cannot be cleared or rerouted until retry reconciles them;
+- `reserved` bindings are external identity locks: they cannot be cleared, rerouted, deleted with their lexical unit, or re-keyed through canonical consolidation until retry reconciles them;
 - binding deck/model snapshots for reserved and already-exported items;
 - resolved-destination batch grouping with failure isolation, including separate groups for current vs older pinned snapshots sharing the same profile ID;
 - explicit same-note-type deck moves for exported notes, with rollback to the original deck if saving the new local binding fails;
@@ -131,6 +131,7 @@ The implementation intentionally does **not** infer that an arbitrary discovered
 The ACCP-013 review findings are covered explicitly:
 
 - one old pinned destination and one current destination sharing the same profile ID are exported separately in both input orders;
-- a successful/uncertain Anki mutation followed by failed note-ID persistence leaves a `reserved` binding, blocks destination reinterpretation, and reconciles safely on retry;
+- a successful/uncertain Anki mutation followed by failed note-ID persistence leaves a `reserved` binding, blocks destination reinterpretation, deletion, binding clearing, and CollectorID-changing consolidation, and reconciles safely on retry;
+- repository regressions cover reserved deletion, reserved→unbound collision, two-reserved collision, direct clear/reroute attempts, and same-destination `reserved → exported` reconciliation;
 - malformed/missing profile ownership modes in backup/settings input are rejected;
 - a forged `collector-managed` profile pointing at an arbitrary existing model is rejected before any AnkiConnect mutation action.
