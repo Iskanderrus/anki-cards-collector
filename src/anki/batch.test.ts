@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CollectedItem, CollectorSettings } from "../core/types";
+import type {
+  CollectedItem,
+  CollectorSettings,
+  ExportBinding,
+  ExportProfile,
+} from "../core/types";
 import { exportBatch, type AnkiExportClient, type ExportProgress } from "./batch";
 
-function item(id: string, text: string): CollectedItem {
+function item(id: string, text: string, language: string): CollectedItem {
   return {
     lexicalUnit: {
       id,
-      contentKey: `es::${text.toLowerCase()}`,
+      contentKey: `${language}::${text.toLowerCase()}`,
       canonicalText: text,
       normalizedCanonicalText: text.toLowerCase(),
-      language: "es",
+      language,
       note: "",
       status: "ready",
       createdAt: "2026-09-19T00:00:00Z",
@@ -19,67 +24,156 @@ function item(id: string, text: string): CollectedItem {
   };
 }
 
+const profiles: ExportProfile[] = [
+  {
+    id: "he-profile",
+    name: "Hebrew",
+    deckName: "Hebrew RU",
+    modelName: "Collector Basic",
+    mode: "collector-managed",
+  },
+  {
+    id: "sr-profile",
+    name: "Serbian",
+    deckName: "Serbian RU",
+    modelName: "Collector Basic",
+    mode: "collector-managed",
+  },
+  {
+    id: "fallback-profile",
+    name: "Fallback",
+    deckName: "Collector Inbox",
+    modelName: "Collector Basic",
+    mode: "collector-managed",
+  },
+];
+
 const settings: CollectorSettings = {
-  defaultLanguage: "es",
-  deckName: "Collector",
-  modelName: "Collector",
+  defaultLanguage: "he",
   sourceUrlMode: "sanitized",
+  exportProfiles: profiles,
+  languageRoutes: [
+    { language: "he", profileId: "he-profile" },
+    { language: "sr", profileId: "sr-profile" },
+  ],
+  fallbackProfileId: "fallback-profile",
 };
 
-describe("exportBatch", () => {
-  it("continues after an item fails and persists successful note IDs", async () => {
-    const upsert = vi.fn(async (current: CollectedItem) => {
-      if (current.lexicalUnit.id === "two") throw new Error("Rejected note");
-      return current.lexicalUnit.id === "one" ? 101 : 303;
-    });
+function client(overrides: Partial<AnkiExportClient> = {}): AnkiExportClient {
+  return {
+    ping: vi.fn(async () => 6),
+    ensureDeckAndModel: vi.fn(async () => undefined),
+    upsert: vi.fn(async (current) => current.lexicalUnit.id.length + 100),
+    ...overrides,
+  };
+}
 
-    const client: AnkiExportClient = {
-      ping: vi.fn(async () => 6),
-      ensureDeckAndModel: vi.fn(async () => undefined),
-      upsert,
-    };
-    const persisted: Array<[string, number]> = [];
+describe("exportBatch profile routing", () => {
+  it("routes a mixed-language batch through different profiles", async () => {
+    const exportClient = client();
+    const persisted: ExportBinding[] = [];
     const progress: ExportProgress[] = [];
 
     const report = await exportBatch(
-      [item("one", "uno"), item("two", "dos"), item("three", "tres")],
+      [
+        item("he-one", "שלום", "he"),
+        item("sr-one", "zdravo", "sr"),
+        item("es-one", "hola", "es"),
+      ],
       settings,
-      client,
-      async (id, noteId) => {
-        persisted.push([id, noteId]);
+      new Map(),
+      exportClient,
+      async (binding) => {
+        persisted.push(binding);
       },
       (value) => progress.push(value),
     );
 
-    expect(upsert).toHaveBeenCalledTimes(3);
-    expect(persisted).toEqual([["one", 101], ["three", 303]]);
-    expect(report).toMatchObject({
-      total: 3,
-      exported: 2,
-      failed: 1,
-      warnings: 0,
-    });
-    expect(report.results.map((result) => result.kind)).toEqual([
-      "exported",
-      "failed",
-      "exported",
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledTimes(3);
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(profiles[0]);
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(profiles[1]);
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(profiles[2]);
+
+    expect(exportClient.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ lexicalUnit: expect.objectContaining({ id: "he-one" }) }),
+      profiles[0],
+      undefined,
+    );
+    expect(exportClient.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ lexicalUnit: expect.objectContaining({ id: "sr-one" }) }),
+      profiles[1],
+      undefined,
+    );
+    expect(exportClient.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ lexicalUnit: expect.objectContaining({ id: "es-one" }) }),
+      profiles[2],
+      undefined,
+    );
+
+    expect(persisted.map((binding) => [binding.lexicalUnitId, binding.profileId])).toEqual([
+      ["he-one", "he-profile"],
+      ["sr-one", "sr-profile"],
+      ["es-one", "fallback-profile"],
     ]);
-    expect(progress.at(-1)?.currentText).toBe("tres");
-    expect(progress.at(-1)?.completed).toBe(3);
-    expect(progress.at(-1)?.total).toBe(3);
+    expect(report).toMatchObject({ total: 3, exported: 3, failed: 0, warnings: 0 });
+    expect(progress.at(-1)).toEqual({ completed: 3, total: 3 });
   });
 
-  it("reports a local persistence warning without calling the Anki export a failure", async () => {
-    const client: AnkiExportClient = {
-      ping: vi.fn(async () => 6),
-      ensureDeckAndModel: vi.fn(async () => undefined),
-      upsert: vi.fn(async () => 4242),
+  it("lets an existing binding override a changed language route", async () => {
+    const current = item("he-one", "שלום", "he");
+    const binding: ExportBinding = {
+      lexicalUnitId: current.lexicalUnit.id,
+      profileId: "sr-profile",
+      ankiNoteId: 4242,
+      deckName: "Serbian RU",
+      modelName: "Collector Basic",
+      updatedAt: "2026-09-19T10:00:00Z",
     };
+    const exportClient = client();
+
+    await exportBatch(
+      [current],
+      settings,
+      new Map([[current.lexicalUnit.id, binding]]),
+      exportClient,
+      async () => undefined,
+    );
+
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(profiles[1]);
+    expect(exportClient.upsert).toHaveBeenCalledWith(current, profiles[1], 4242);
+  });
+
+  it("isolates profile setup failure while exporting other profile groups", async () => {
+    const ensureDeckAndModel = vi.fn(async (profile: ExportProfile) => {
+      if (profile.id === "sr-profile") throw new Error("Serbian deck unavailable");
+    });
+    const exportClient = client({ ensureDeckAndModel });
 
     const report = await exportBatch(
-      [item("one", "uno")],
+      [
+        item("he-one", "שלום", "he"),
+        item("sr-one", "zdravo", "sr"),
+      ],
       settings,
-      client,
+      new Map(),
+      exportClient,
+      async () => undefined,
+    );
+
+    expect(report).toMatchObject({ total: 2, exported: 1, failed: 1 });
+    expect(report.results[0]?.kind).toBe("exported");
+    expect(report.results[1]).toMatchObject({
+      kind: "failed",
+      error: "Serbian deck unavailable",
+    });
+  });
+
+  it("reports a local binding persistence warning without calling Anki export a failure", async () => {
+    const report = await exportBatch(
+      [item("he-one", "שלום", "he")],
+      settings,
+      new Map(),
+      client({ upsert: vi.fn(async () => 4242) }),
       async () => {
         throw new Error("IndexedDB unavailable");
       },
@@ -94,27 +188,27 @@ describe("exportBatch", () => {
     expect(report.results[0]).toMatchObject({
       kind: "exported_untracked",
       noteId: 4242,
-      canonicalText: "uno",
+      profileId: "he-profile",
+      deckName: "Hebrew RU",
     });
   });
 
-  it("stops before item processing when Anki setup fails", async () => {
-    const upsert = vi.fn(async () => 1);
-    const client: AnkiExportClient = {
+  it("stops before routing when Anki is offline", async () => {
+    const exportClient = client({
       ping: vi.fn(async () => {
         throw new Error("Anki is offline");
       }),
-      ensureDeckAndModel: vi.fn(async () => undefined),
-      upsert,
-    };
+    });
 
     await expect(exportBatch(
-      [item("one", "uno")],
+      [item("he-one", "שלום", "he")],
       settings,
-      client,
+      new Map(),
+      exportClient,
       async () => undefined,
     )).rejects.toThrow("Anki is offline");
 
-    expect(upsert).not.toHaveBeenCalled();
+    expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
+    expect(exportClient.upsert).not.toHaveBeenCalled();
   });
 });
