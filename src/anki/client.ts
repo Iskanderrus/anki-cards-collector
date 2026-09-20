@@ -1,4 +1,8 @@
-import type { CollectedItem, ExportProfile } from "../core/types";
+import {
+  LEGACY_DEFAULT_PROFILE_ID,
+  type CollectedItem,
+  type ExportProfile,
+} from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 
 interface AnkiResponse<T> {
@@ -96,6 +100,11 @@ export class AnkiClient {
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
     const decks = await this.invoke<string[]>("deckNames");
     if (!decks.includes(profile.deckName)) {
+      if (profile.id !== LEGACY_DEFAULT_PROFILE_ID) {
+        throw new Error(
+          `Anki deck "${profile.deckName}" is not available. Refresh the live catalog and choose an existing deck.`,
+        );
+      }
       await this.invoke("createDeck", { deck: profile.deckName });
     }
 
