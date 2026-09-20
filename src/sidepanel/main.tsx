@@ -683,19 +683,23 @@ function App(): React.ReactElement {
   async function addExportProfile(): Promise<void> {
     const catalog = currentCatalogSnapshot();
     const deck = catalog?.decks[0];
-    const model = catalog?.models[0];
-    if (!deck || !model) {
+    if (!deck) {
       setError("Refresh the live Anki catalog before adding another export profile.");
       return;
     }
+
+    const managedModel = DEFAULT_SETTINGS.exportProfiles[0]!;
+    const liveManagedModel = catalog.models.find(
+      (model) => model.name === managedModel.modelName,
+    );
 
     const profile: ExportProfile = {
       id: crypto.randomUUID(),
       name: `Profile ${settings.exportProfiles.length + 1}`,
       deckName: deck.name,
       deckId: String(deck.id),
-      modelName: model.name,
-      modelId: String(model.id),
+      modelName: managedModel.modelName,
+      ...(liveManagedModel ? { modelId: String(liveManagedModel.id) } : {}),
       mode: "collector-managed",
     };
     await persistSettings({
@@ -1206,30 +1210,15 @@ function App(): React.ReactElement {
                     </select>
                   </label>
 
-                  <label>
-                    Anki note type
-                    <select
-                      value={profile.modelName}
-                      onChange={(event) => {
-                        const modelName = event.target.value;
-                        const model = currentCatalogSnapshot()?.models.find((candidate) => candidate.name === modelName);
-                        void updateExportProfile(profile.id, {
-                          modelName,
-                          ...(model ? { modelId: String(model.id) } : { modelId: undefined }),
-                        });
-                        if (model) void inspectAnkiModel(modelName);
-                      }}
-                    >
-                      {!currentCatalogSnapshot()?.models.some((model) => model.name === profile.modelName) && (
-                        <option value={profile.modelName}>
-                          {profile.modelName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                        </option>
-                      )}
-                      {currentCatalogSnapshot()?.models.map((model) => (
-                        <option key={String(model.id)} value={model.name}>{model.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="profile-model">
+                    <strong>Anki note type</strong>
+                    <span>{profile.modelName}</span>
+                    <span className="setting-help">
+                      {profile.mode === "collector-managed"
+                        ? "Collector-managed for ACCP-013. Existing user note types require explicit ACCP-014 mapping before export."
+                        : "User-owned note type. Export is blocked until ACCP-014 field mapping is configured."}
+                    </span>
+                  </div>
 
                   <div className="setting-help">
                     Mode: {profile.mode === "collector-managed" ? "Collector-managed note type" : "Mapped user note type"}
