@@ -861,7 +861,7 @@ function App(): React.ReactElement {
       const backup = parseBackup(await file.text());
       const preview = await repository.previewRestore(backup);
       const settingsMerge = backup.settings
-        ? mergeSettingsForRestore(settings, backup.settings)
+        ? mergeSettingsForRestore(settings, backup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
         : { settings, conflicts: [] };
       const combinedPreview = {
         ...preview,
@@ -897,7 +897,7 @@ function App(): React.ReactElement {
     setNotice("");
 
     const settingsMerge = pendingBackup.settings
-      ? mergeSettingsForRestore(settings, pendingBackup.settings)
+      ? mergeSettingsForRestore(settings, pendingBackup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
       : { settings, conflicts: [] };
     if (settingsMerge.conflicts.length > 0) {
       setError("Backup routing configuration conflicts with current local settings.");
