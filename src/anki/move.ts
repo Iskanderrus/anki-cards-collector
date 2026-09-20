@@ -32,13 +32,13 @@ export async function moveExportedNote(
     throw new Error("This item has no exported Anki note to move.");
   }
   if (targetProfile.mode !== "collector-managed") {
-    throw new Error("Moving to a mapped user note type requires ACCP-014.");
+    throw new Error("Collector cannot move cards into a custom Anki note type safely yet.");
   }
 
   const currentModelName = binding.modelName ?? currentProfile.modelName;
   if (currentModelName !== targetProfile.modelName) {
     throw new Error(
-      "Changing an exported note's note type requires ACCP-014 mapping. Only same-note-type deck moves are allowed here.",
+      "This move would change the Anki note type. Collector can only move the card between decks while keeping the same note type.",
     );
   }
 
