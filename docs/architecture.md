@@ -113,7 +113,7 @@ Export first resolves an `ExportProfile` for each Ready item:
 2. language route;
 3. fallback profile.
 
-Ready items are then grouped by profile so one batch can safely target several decks. A successful export persists an `ExportBinding` with the profile, Anki note ID, and deck/model snapshot. Later route or profile-default changes therefore do not silently move an already-exported note.
+Ready items are then grouped by profile so one batch can safely target several decks. Before the first Anki mutation for an unbound item, Collector persists a destination reservation containing the profile plus deck/model snapshot. A successful export fills the Anki note ID into that binding. This prevents a cross-system partial failure from leaving a newly created Anki note without a durable route pin. Later route or profile-default changes therefore do not silently reinterpret or move that note.
 
 For a Collector-managed profile, the Anki upsert path is:
 
@@ -125,7 +125,7 @@ For a Collector-managed profile, the Anki upsert path is:
 6. update it or create it;
 7. persist the returned note ID and destination snapshot in the binding.
 
-Changing an exported item's deck is a separate explicit operation. ACCP-013 permits that move only when the note type remains the same; note-type changes wait for ACCP-014 compatibility/mapping validation.
+Changing an exported item's deck is a separate explicit operation. ACCP-013 permits that move only when the note type remains the same; note-type changes wait for ACCP-014 compatibility/mapping validation. The move is compensating: if Anki moves successfully but the new local binding cannot be saved, Collector attempts to move the note back to the original deck and reports a hard divergence if even that rollback fails.
 
 User-owned note types are not treated as Collector-managed. They can be inspected by the live catalog, but export through them is blocked until ACCP-014 supplies explicit field mapping. Collector does not add fields or rewrite templates/CSS merely because such a model exists.
 
