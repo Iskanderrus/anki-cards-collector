@@ -245,6 +245,7 @@ function App(): React.ReactElement {
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
+  const deckAnalysisRequestId = useRef(0);
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -924,11 +925,16 @@ function App(): React.ReactElement {
   async function inspectAnkiDeck(deckName: string): Promise<void> {
     if (!deckName) return;
 
+    const requestId = deckAnalysisRequestId.current + 1;
+    deckAnalysisRequestId.current = requestId;
     setDeckAnalysisState({ kind: "loading", deckName });
+
     try {
       const analysis = await deckAnalysisService.analyze(deckName);
+      if (deckAnalysisRequestId.current !== requestId) return;
       setDeckAnalysisState({ kind: "live", analysis });
     } catch (analysisError) {
+      if (deckAnalysisRequestId.current !== requestId) return;
       setDeckAnalysisState({
         kind: "error",
         deckName,
@@ -937,6 +943,11 @@ function App(): React.ReactElement {
           : "Could not inspect this Anki deck.",
       });
     }
+  }
+
+  function closeDeckAnalysis(): void {
+    deckAnalysisRequestId.current += 1;
+    setDeckAnalysisState({ kind: "idle" });
   }
 
   async function refreshAnkiCatalog(): Promise<void> {
@@ -1506,7 +1517,7 @@ function App(): React.ReactElement {
                       <button
                         className="ghost"
                         type="button"
-                        onClick={() => setDeckAnalysisState({ kind: "idle" })}
+                        onClick={closeDeckAnalysis}
                       >
                         Close
                       </button>
@@ -1538,8 +1549,8 @@ function App(): React.ReactElement {
                               <div className="representative-meta">
                                 <span>
                                   {card.templateOrdinal === undefined
-                                    ? "Template ordinal unavailable"
-                                    : `Card template #${card.templateOrdinal + 1}`}
+                                    ? "Card ordinal unavailable"
+                                    : `Card ordinal #${card.templateOrdinal + 1}`}
                                 </span>
                                 <span>{card.css.length} CSS chars</span>
                               </div>
