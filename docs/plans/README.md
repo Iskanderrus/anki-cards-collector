@@ -20,8 +20,12 @@ Open planned work:
 - [ACCP-016 — live Anki catalog](ACCP-016-anki-catalog.md)
 - [ACCP-017 — deck/model analysis and existing-card preview](ACCP-017-deck-model-analysis.md)
 - [ACCP-018 — guided export-profile setup](ACCP-018-guided-profile-setup.md)
-- [ACCP-019 — staged batch-capture pipeline](ACCP-019-batch-capture-pipeline.md)
-- [ACCP-020 — Duolingo visible lesson backfill](ACCP-020-duolingo-visible-backfill.md)
 - [ACCP-021 — batch backfill review workflow](ACCP-021-backfill-review-workflow.md)
 
 See the repository-level [implementation order](../../implementation-order.md) for dependencies and recommended sequencing.
+
+
+Completed implementation plans retained for architecture/history:
+
+- [ACCP-019 — staged batch-capture pipeline](ACCP-019-batch-capture-pipeline.md)
+- [ACCP-020 — Duolingo visible lesson backfill](ACCP-020-duolingo-visible-backfill.md)

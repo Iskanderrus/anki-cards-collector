@@ -1,13 +1,32 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
-import type { CollectedItem, CollectorSettings, Occurrence, ReviewStatus, SourceUrlMode } from "../core/types";
+import type {
+  CollectedItem,
+  CollectorSettings,
+  ExportBinding,
+  ExportProfile,
+  Occurrence,
+  ReviewStatus,
+  SourceUrlMode,
+} from "../core/types";
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
+import {
+  DEFAULT_SETTINGS,
+  ensureManagedProfileForDeck,
+  loadSettings,
+  mergeSettingsForRestore,
+  saveSettings,
+} from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
+import {
+  assertDestinationChangeReconciled,
+  resolveExportRoute,
+} from "../anki/routing";
+import { moveExportedNote } from "../anki/move";
 import {
   AnkiCatalogService,
   type AnkiCatalogRefreshResult,
@@ -130,6 +149,10 @@ function sourceLabel(occurrence: Occurrence | undefined): string {
 function App(): React.ReactElement {
   const [items, setItems] = useState<CollectedItem[]>([]);
   const [settings, setSettings] = useState<CollectorSettings>(DEFAULT_SETTINGS);
+  const [exportBindings, setExportBindings] = useState<Record<string, ExportBinding>>({});
+  const [routeLanguage, setRouteLanguage] = useState("");
+  const [routeDeckName, setRouteDeckName] = useState("");
+  const [pendingMoveDecks, setPendingMoveDecks] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -149,6 +172,7 @@ function App(): React.ReactElement {
   });
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
+  const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -159,14 +183,48 @@ function App(): React.ReactElement {
   );
 
   const load = useCallback(async () => {
-    const loadedItems = await repository.list();
+    const [loadedItems, loadedBindings, loadedSettings] = await Promise.all([
+      repository.list(),
+      repository.listExportBindings(),
+      loadSettings(),
+    ]);
+
+    const completedBindings = await Promise.all(loadedBindings.map(async (binding) => {
+      if (
+        binding.ankiNoteId === undefined
+        || (binding.deckName !== undefined && binding.modelName !== undefined)
+      ) {
+        return binding;
+      }
+
+      const profile = loadedSettings.exportProfiles.find(
+        (candidate) => candidate.id === binding.profileId,
+      );
+      if (!profile) return binding;
+
+      const completed: ExportBinding = {
+        ...binding,
+        deckName: binding.deckName ?? profile.deckName,
+        modelName: binding.modelName ?? profile.modelName,
+      };
+      await repository.setExportBinding(completed);
+      return completed;
+    }));
+
     setItems(loadedItems);
+    setExportBindings(Object.fromEntries(
+      completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
+    ));
     setActiveId((current) => (
       current && loadedItems.some((item) => item.lexicalUnit.id === current)
         ? current
         : loadedItems[0]?.lexicalUnit.id ?? null
     ));
-    setSettings(await loadSettings());
+    setSettings(loadedSettings);
+    const fallback = loadedSettings.exportProfiles.find(
+      (profile) => profile.id === loadedSettings.fallbackProfileId,
+    );
+    setRouteDeckName((current) => current || fallback?.deckName || "");
   }, []);
 
   useEffect(() => {
@@ -475,18 +533,40 @@ function App(): React.ReactElement {
       return;
     }
 
+    const legacyCustom = ready.filter((item) => {
+      const binding = exportBindings[item.lexicalUnit.id];
+      if (!binding?.ankiNoteId) return false;
+      const profile = settings.exportProfiles.find(
+        (candidate) => candidate.id === binding.profileId,
+      );
+      return profile?.mode === "mapped-user-model";
+    });
+    const exportable = ready.filter((item) => !legacyCustom.includes(item));
+
+    if (exportable.length === 0) {
+      if (legacyCustom.length > 0) {
+        setNotice(
+          `${legacyCustom.length} existing Anki card${legacyCustom.length === 1 ? "" : "s"} use custom note types and were left unchanged.`,
+        );
+      } else {
+        setError("No Ready cards can be exported.");
+      }
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
     setExportOutcomes({});
-    setExportProgress({ completed: 0, total: ready.length });
+    setExportProgress({ completed: 0, total: exportable.length });
 
     try {
       const report = await exportBatch(
-        ready,
+        exportable,
         settings,
+        new Map(Object.values(exportBindings).map((binding) => [binding.lexicalUnitId, binding])),
         new AnkiClient(),
-        (id, noteId) => repository.setAnkiNoteId(id, noteId),
+        (binding) => repository.setExportBinding(binding),
         setExportProgress,
       );
 
@@ -495,6 +575,9 @@ function App(): React.ReactElement {
       ));
 
       const parts = [`${report.exported} exported`];
+      if (legacyCustom.length > 0) {
+        parts.push(`${legacyCustom.length} existing custom-card${legacyCustom.length === 1 ? "" : "s"} skipped`);
+      }
       if (report.failed > 0) parts.push(`${report.failed} failed`);
       if (report.warnings > 0) parts.push(`${report.warnings} local warning${report.warnings === 1 ? "" : "s"}`);
 
@@ -516,9 +599,228 @@ function App(): React.ReactElement {
     }
   }
 
-  async function persistSettings(next: CollectorSettings): Promise<void> {
-    setSettings(next);
-    await saveSettings(next);
+  async function persistSettings(
+    update: (current: CollectorSettings) => CollectorSettings,
+  ): Promise<CollectorSettings> {
+    let resolved = settings;
+    const run = settingsMutationQueue.current.then(async () => {
+      const current = await loadSettings();
+      await saveSettings(update(current));
+      resolved = await loadSettings();
+      setSettings(resolved);
+      const fallback = resolved.exportProfiles.find(
+        (profile) => profile.id === resolved.fallbackProfileId,
+      );
+      setRouteDeckName((selected) => selected || fallback?.deckName || "");
+    });
+
+    settingsMutationQueue.current = run.then(() => undefined, () => undefined);
+    await run;
+    return resolved;
+  }
+
+  function resolvedRoute(item: CollectedItem) {
+    try {
+      return resolveExportRoute(
+        item,
+        settings,
+        exportBindings[item.lexicalUnit.id] ?? null,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  function liveDeckId(deckName: string): string | undefined {
+    const deck = currentCatalogSnapshot()?.decks.find((candidate) => candidate.name === deckName);
+    return deck ? String(deck.id) : undefined;
+  }
+
+  async function ensureDeckProfile(deckName: string): Promise<ExportProfile> {
+    let resolved: ExportProfile | null = null;
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      resolved = ensured.profile;
+      return ensured.settings;
+    });
+    if (!resolved) throw new Error("Could not prepare this Anki deck.");
+    return resolved;
+  }
+
+  async function setItemDeckOverride(
+    lexicalUnitId: string,
+    deckName: string,
+  ): Promise<void> {
+    const existing = exportBindings[lexicalUnitId];
+
+    try {
+      assertDestinationChangeReconciled(existing);
+    } catch (reconcileError) {
+      setError(
+        reconcileError instanceof Error
+          ? reconcileError.message
+          : "Retry Send ready to Anki before changing this deck.",
+      );
+      return;
+    }
+
+    if (deckName === "auto") {
+      if (existing?.ankiNoteId !== undefined || existing?.state === "exported") {
+        setError("This card is already in Anki. Use “Move to another deck…” instead.");
+        return;
+      }
+      await repository.clearExportBinding(lexicalUnitId);
+      setNotice("This card will follow its language deck again.");
+      await load();
+      return;
+    }
+
+    const profile = await ensureDeckProfile(deckName);
+    if (existing?.ankiNoteId !== undefined || existing?.state === "exported") {
+      setPendingMoveDecks((current) => ({ ...current, [lexicalUnitId]: deckName }));
+      return;
+    }
+
+    await repository.setExportBinding({
+      lexicalUnitId,
+      profileId: profile.id,
+      state: "override",
+      deckName: profile.deckName,
+      modelName: profile.modelName,
+    });
+    setNotice(`This card will go to ${deckName}.`);
+    await load();
+  }
+
+  async function moveExportedItem(
+    item: CollectedItem,
+    targetDeckName: string,
+  ): Promise<void> {
+    const binding = exportBindings[item.lexicalUnit.id];
+    if (!binding?.ankiNoteId) {
+      setError("This card has not been exported to Anki yet.");
+      return;
+    }
+
+    const currentProfile = settings.exportProfiles.find(
+      (profile) => profile.id === binding.profileId,
+    );
+    if (!currentProfile) {
+      setError("Collector cannot find the saved destination for this Anki card.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const target = await ensureDeckProfile(targetDeckName);
+      const movedBinding = await moveExportedNote(
+        {
+          lexicalUnitId: item.lexicalUnit.id,
+          binding,
+          currentProfile,
+          targetProfile: target,
+        },
+        new AnkiClient(),
+        (nextBinding) => repository.setExportBinding(nextBinding),
+      );
+      setPendingMoveDecks((current) => {
+        const next = { ...current };
+        delete next[item.lexicalUnit.id];
+        return next;
+      });
+      setNotice(`Moved Anki note ${movedBinding.ankiNoteId} to ${movedBinding.deckName}.`);
+      await load();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Could not move the Anki card.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createSavedDeck(deckName: string): Promise<void> {
+    if (catalogState.kind !== "live") {
+      setError("Refresh Anki first.");
+      return;
+    }
+    if (catalogState.snapshot.decks.some((deck) => deck.name === deckName)) {
+      setNotice(`${deckName} already exists in Anki.`);
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await new AnkiClient().createDeck(deckName);
+      setNotice(`Created Anki deck ${deckName}.`);
+      await refreshAnkiCatalog();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Could not create the Anki deck.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setFallbackDeck(deckName: string): Promise<void> {
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      return {
+        ...ensured.settings,
+        fallbackProfileId: ensured.profile.id,
+      };
+    });
+    setNotice(`Other languages will go to ${deckName}.`);
+  }
+
+  async function setLanguageDeck(language: string, deckName: string): Promise<void> {
+    await persistSettings((current) => {
+      const ensured = ensureManagedProfileForDeck(
+        current,
+        deckName,
+        liveDeckId(deckName),
+      );
+      return {
+        ...ensured.settings,
+        languageRoutes: [
+          ...ensured.settings.languageRoutes.filter((route) => route.language !== language),
+          { language, profileId: ensured.profile.id },
+        ].sort((left, right) => left.language.localeCompare(right.language)),
+      };
+    });
+    setNotice(`${language} cards will go to ${deckName}.`);
+  }
+
+  async function saveLanguageRoute(): Promise<void> {
+    const language = routeLanguage.trim().toLowerCase();
+    if (!language || language === "und") {
+      setError("Enter a language code such as he, sr, or es.");
+      return;
+    }
+    if (!routeDeckName) {
+      setError("Choose an Anki deck.");
+      return;
+    }
+
+    await setLanguageDeck(language, routeDeckName);
+    setRouteLanguage("");
+  }
+
+  async function removeLanguageRoute(language: string): Promise<void> {
+    await persistSettings((current) => ({
+      ...current,
+      languageRoutes: current.languageRoutes.filter((route) => route.language !== language),
+    }));
+    setNotice(`${language} will use the “Other languages” deck.`);
   }
 
   function currentCatalogSnapshot(): AnkiCatalogSnapshot | null {
@@ -551,11 +853,15 @@ function App(): React.ReactElement {
     const result = await catalogService.refresh();
     setCatalogState(result);
 
+    const fallbackProfile = settings.exportProfiles.find(
+      (profile) => profile.id === settings.fallbackProfileId,
+    );
     if (
-      (result.kind === "live" || result.kind === "stale")
-      && result.snapshot.models.some((model) => model.name === settings.modelName)
+      fallbackProfile
+      && (result.kind === "live" || result.kind === "stale")
+      && result.snapshot.models.some((model) => model.name === fallbackProfile.modelName)
     ) {
-      await inspectAnkiModel(settings.modelName);
+      await inspectAnkiModel(fallbackProfile.modelName);
     } else {
       setModelState({ kind: "idle" });
     }
@@ -571,7 +877,7 @@ function App(): React.ReactElement {
   function backupJson(): void {
     downloadText(
       "anki-cards-collector-backup.json",
-      serializeBackup(items),
+      serializeBackup(items, settings, Object.values(exportBindings)),
       "application/json;charset=utf-8",
     );
   }
@@ -588,12 +894,19 @@ function App(): React.ReactElement {
     try {
       const backup = parseBackup(await file.text());
       const preview = await repository.previewRestore(backup);
+      const settingsMerge = backup.settings
+        ? mergeSettingsForRestore(settings, backup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
+        : { settings, conflicts: [] };
+      const combinedPreview = {
+        ...preview,
+        conflicts: [...preview.conflicts, ...settingsMerge.conflicts],
+      };
       setPendingBackup(backup);
-      setRestorePreview(preview);
+      setRestorePreview(combinedPreview);
 
-      if (preview.conflicts.length > 0) {
+      if (combinedPreview.conflicts.length > 0) {
         setError(
-          `Backup has ${preview.conflicts.length} conflict${preview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
+          `Backup has ${combinedPreview.conflicts.length} conflict${combinedPreview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
         );
       } else {
         setNotice("Backup validated. Review the dry-run counts before restoring.");
@@ -617,7 +930,24 @@ function App(): React.ReactElement {
     setError("");
     setNotice("");
 
+    const settingsMerge = pendingBackup.settings
+      ? mergeSettingsForRestore(settings, pendingBackup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
+      : { settings, conflicts: [] };
+    if (settingsMerge.conflicts.length > 0) {
+      setError("Backup routing configuration conflicts with current local settings.");
+      setBusy(false);
+      return;
+    }
+
+    const previousSettings = settings;
+    let settingsChanged = false;
+
     try {
+      if (pendingBackup.settings) {
+        await saveSettings(settingsMerge.settings);
+        settingsChanged = true;
+      }
+
       const result = await repository.restoreBackup(pendingBackup);
       clearRestorePreview();
       await load();
@@ -626,13 +956,25 @@ function App(): React.ReactElement {
         result.lexicalUnitsAdded +
         result.lexicalUnitsUpdated +
         result.occurrencesAdded +
-        result.occurrencesUpdated;
+        result.occurrencesUpdated +
+        result.exportBindingsAdded;
       setNotice(
         changed === 0
           ? "Backup is already fully represented in the local corpus."
           : `Backup restored: ${result.lexicalUnitsAdded} items added, ${result.lexicalUnitsUpdated} updated, ${result.occurrencesAdded} occurrences added.`,
       );
     } catch (restoreError) {
+      if (settingsChanged) {
+        try {
+          await saveSettings(previousSettings);
+          setSettings(previousSettings);
+        } catch {
+          setError(
+            "Backup restore failed and Collector could not restore the previous routing settings. Reopen Settings before exporting.",
+          );
+          return;
+        }
+      }
       setError(restoreError instanceof Error ? restoreError.message : "Backup restore failed.");
     } finally {
       setBusy(false);
@@ -846,22 +1188,25 @@ function App(): React.ReactElement {
       </div>
 
       <details className="settings">
-        <summary>Settings & fallback exports</summary>
+        <summary>Settings & Anki</summary>
         <div className="settings-grid">
           <label>
-            Language code
+            Capture language
             <input
               value={settings.defaultLanguage}
               placeholder="es, sr, he…"
-              onChange={(event) => void persistSettings({ ...settings, defaultLanguage: event.target.value || "und" })}
+              onChange={(event) => {
+                const defaultLanguage = event.target.value || "und";
+                void persistSettings((current) => ({ ...current, defaultLanguage }));
+              }}
             />
           </label>
           <div className="anki-catalog">
             <div className="anki-catalog-head">
               <div>
-                <strong>Live Anki catalog</strong>
+                <strong>Anki connection</strong>
                 <div className="setting-help">
-                  Read-only discovery. Refreshing does not create decks, change note types, or update cards.
+                  Refresh to load your Anki decks. Refreshing does not change anything in Anki.
                 </div>
               </div>
               <button
@@ -878,59 +1223,140 @@ function App(): React.ReactElement {
               {catalogState.kind === "idle" && "Not checked yet."}
               {catalogState.kind === "loading" && "Reading decks and note types from Anki…"}
               {catalogState.kind === "live" && (
-                <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"} · {catalogState.snapshot.models.length} note type{catalogState.snapshot.models.length === 1 ? "" : "s"}</>
+                <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"}</>
               )}
               {catalogState.kind === "stale" && (
-                <>Showing the last successful catalog. Refresh failed: {catalogState.error}</>
+                <>Showing the last loaded decks. Refresh failed: {catalogState.error}</>
               )}
               {catalogState.kind === "unavailable" && (
-                <>Anki catalog unavailable: {catalogState.error}</>
+                <>Could not connect to Anki: {catalogState.error}</>
               )}
             </div>
           </div>
 
-          <label>
-            Anki deck
-            <select
-              value={settings.deckName}
-              onChange={(event) => void persistSettings({ ...settings, deckName: event.target.value })}
-            >
-              {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === settings.deckName) && (
-                <option value={settings.deckName}>
-                  {settings.deckName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                </option>
-              )}
-              {currentCatalogSnapshot()?.decks.map((deck) => (
-                <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
-              ))}
-            </select>
-          </label>
+          <div className="language-decks">
+            <div className="anki-catalog-head">
+              <div>
+                <strong>Anki decks by language</strong>
+                <div className="setting-help">
+                  Choose where each language should go. New cards use Collector Basic automatically.
+                </div>
+              </div>
+            </div>
 
-          <label>
-            Anki note type
-            <select
-              value={settings.modelName}
-              onChange={(event) => {
-                const modelName = event.target.value;
-                void persistSettings({ ...settings, modelName });
-                if (currentCatalogSnapshot()?.models.some((model) => model.name === modelName)) {
-                  void inspectAnkiModel(modelName);
-                } else {
-                  setModelState({ kind: "idle" });
-                }
-              }}
-            >
-              {!currentCatalogSnapshot()?.models.some((model) => model.name === settings.modelName) && (
-                <option value={settings.modelName}>
-                  {settings.modelName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                </option>
-              )}
-              {currentCatalogSnapshot()?.models.map((model) => (
-                <option key={String(model.id)} value={model.name}>{model.name}</option>
-              ))}
-            </select>
-          </label>
+            {settings.languageRoutes.map((route) => {
+              const profile = settings.exportProfiles.find(
+                (candidate) => candidate.id === route.profileId,
+              );
+              const deckName = profile?.deckName ?? "";
+              const missing = catalogState.kind === "live"
+                && deckName
+                && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
+              return (
+                <div className="language-deck-row" key={route.language}>
+                  <strong>{route.language}</strong>
+                  <select
+                    aria-label={`Anki deck for ${route.language}`}
+                    value={deckName}
+                    onChange={(event) => void setLanguageDeck(route.language, event.target.value)}
+                  >
+                    {deckName && !currentCatalogSnapshot()?.decks.some((deck) => deck.name === deckName) && (
+                      <option value={deckName}>
+                        {deckName}{catalogState.kind === "live" ? " (missing)" : " (saved)"}
+                      </option>
+                    )}
+                    {currentCatalogSnapshot()?.decks.map((deck) => (
+                      <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                    ))}
+                  </select>
+                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
+                    Remove
+                  </button>
+                  {missing && (
+                    <button
+                      className="ghost"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void createSavedDeck(deckName)}
+                    >
+                      Create deck
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="language-deck-add">
+              <input
+                aria-label="New language code"
+                value={routeLanguage}
+                placeholder="he, sr, es…"
+                onChange={(event) => setRouteLanguage(event.target.value)}
+              />
+              <select
+                aria-label="Anki deck for new language"
+                value={routeDeckName}
+                onChange={(event) => setRouteDeckName(event.target.value)}
+              >
+                {!routeDeckName && <option value="">Choose deck…</option>}
+                {currentCatalogSnapshot()?.decks.map((deck) => (
+                  <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={busy || !routeDeckName || currentCatalogSnapshot() === null}
+                onClick={() => void saveLanguageRoute()}
+              >
+                Add language
+              </button>
+            </div>
+
+            {(() => {
+              const fallback = settings.exportProfiles.find(
+                (profile) => profile.id === settings.fallbackProfileId,
+              );
+              const deckName = fallback?.deckName ?? "";
+              const missing = catalogState.kind === "live"
+                && deckName
+                && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
+
+              return (
+                <div className="language-deck-row fallback-deck-row">
+                  <strong>Other languages</strong>
+                  <select
+                    aria-label="Anki deck for other languages"
+                    value={deckName}
+                    onChange={(event) => void setFallbackDeck(event.target.value)}
+                  >
+                    {deckName && !currentCatalogSnapshot()?.decks.some((deck) => deck.name === deckName) && (
+                      <option value={deckName}>
+                        {deckName}{catalogState.kind === "live" ? " (missing)" : " (saved)"}
+                      </option>
+                    )}
+                    {currentCatalogSnapshot()?.decks.map((deck) => (
+                      <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                    ))}
+                  </select>
+                  {missing && (
+                    <button
+                      className="ghost"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void createSavedDeck(deckName)}
+                    >
+                      Create deck
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          <details className="advanced-settings">
+            <summary>Advanced</summary>
+            <div className="advanced-settings-grid">
           {modelState.kind !== "idle" && (
             <div className="anki-model-inspector" aria-live="polite">
               {modelState.kind === "loading" && <span>Inspecting note type…</span>}
@@ -962,10 +1388,10 @@ function App(): React.ReactElement {
             Source URL retention
             <select
               value={settings.sourceUrlMode}
-              onChange={(event) => void persistSettings({
-                ...settings,
-                sourceUrlMode: event.target.value as SourceUrlMode,
-              })}
+              onChange={(event) => {
+                const sourceUrlMode = event.target.value as SourceUrlMode;
+                void persistSettings((current) => ({ ...current, sourceUrlMode }));
+              }}
             >
               <option value="sanitized">Origin + path only (default)</option>
               <option value="query">Keep non-tracking query parameters</option>
@@ -1004,6 +1430,8 @@ function App(): React.ReactElement {
                 <span>{restorePreview.occurrencesAdded} occurrences to add</span>
                 <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
                 <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
+                <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
+                <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
               </div>
 
               {restorePreview.conflicts.length > 0 && (
@@ -1024,6 +1452,8 @@ function App(): React.ReactElement {
               </div>
             </div>
           )}
+            </div>
+          </details>
         </div>
       </details>
 
@@ -1041,6 +1471,16 @@ function App(): React.ReactElement {
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = proposeLearningCard(item);
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
+          const binding = exportBindings[unit.id];
+          const route = resolvedRoute(item);
+          const boundProfile = binding
+            ? settings.exportProfiles.find((profile) => profile.id === binding.profileId)
+            : null;
+          const legacyCustomNote =
+            binding?.ankiNoteId !== undefined && boundProfile?.mode === "mapped-user-model";
+          const reconciliationPending = binding?.state === "reserved";
+          const currentDeckName = route?.profile.deckName ?? binding?.deckName ?? "";
+          const pendingMoveDeckName = pendingMoveDecks[unit.id] ?? currentDeckName;
 
           return (
             <article
@@ -1123,6 +1563,76 @@ function App(): React.ReactElement {
                   {selectedOccurrence?.context && <p className="context">{selectedOccurrence.context}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
 
+                  <div className="export-destination compact">
+                    <div className="export-destination-head">
+                      <span>
+                        <strong>Anki:</strong>{" "}
+                        {currentDeckName || "choose a deck in Settings"}
+                      </span>
+                      {binding?.ankiNoteId !== undefined && (
+                        <span className="setting-help">note {binding.ankiNoteId}</span>
+                      )}
+                    </div>
+
+                    {reconciliationPending ? (
+                      <div className="legacy-note-warning" role="status">
+                        Previous export needs confirmation. Send Ready cards to Anki again before changing this deck.
+                      </div>
+                    ) : legacyCustomNote ? (
+                      <div className="legacy-note-warning" role="status">
+                        This existing Anki card uses a custom note type. Collector will leave it unchanged for now.
+                      </div>
+                    ) : currentCatalogSnapshot() ? (
+                      <details className="destination-change">
+                        <summary>
+                          {binding?.ankiNoteId !== undefined ? "Move to another deck…" : "Change deck…"}
+                        </summary>
+
+                        {binding?.ankiNoteId !== undefined ? (
+                          <div className="destination-change-row">
+                            <select
+                              aria-label={`Move ${unit.canonicalText} to Anki deck`}
+                              value={pendingMoveDeckName}
+                              onChange={(event) => setPendingMoveDecks((current) => ({
+                                ...current,
+                                [unit.id]: event.target.value,
+                              }))}
+                            >
+                              {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === pendingMoveDeckName) && pendingMoveDeckName && (
+                                <option value={pendingMoveDeckName}>{pendingMoveDeckName} (current)</option>
+                              )}
+                              {currentCatalogSnapshot()?.decks.map((deck) => (
+                                <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                              ))}
+                            </select>
+                            {pendingMoveDeckName && pendingMoveDeckName !== currentDeckName && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void moveExportedItem(item, pendingMoveDeckName)}
+                              >
+                                Move
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <select
+                            aria-label={`Anki deck override for ${unit.canonicalText}`}
+                            value={binding ? currentDeckName : "auto"}
+                            onChange={(event) => void setItemDeckOverride(unit.id, event.target.value)}
+                          >
+                            <option value="auto">
+                              Use language rule{route ? ` — ${route.profile.deckName}` : ""}
+                            </option>
+                            {currentCatalogSnapshot()?.decks.map((deck) => (
+                              <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </details>
+                    ) : null}
+                  </div>
+
                   {proposal.occurrenceSelection && item.occurrences.length > 1 && (
                     <div className="occurrence-selection">
                       <strong>
@@ -1166,7 +1676,7 @@ function App(): React.ReactElement {
                   )}
                   {exportOutcome?.kind === "exported" && (
                     <div className="item-export-result success" role="status">
-                      Exported to Anki note {exportOutcome.noteId}.
+                      Exported to {exportOutcome.deckName}, Anki note {exportOutcome.noteId}.
                     </div>
                   )}
 
@@ -1190,7 +1700,12 @@ function App(): React.ReactElement {
                     )}
                     <button
                       className="ghost danger"
-                      disabled={busy}
+                      disabled={busy || reconciliationPending}
+                      title={
+                        reconciliationPending
+                          ? "Retry Send ready to Anki before deleting this item."
+                          : undefined
+                      }
                       onClick={() => void repository.remove(unit.id).then(load)}
                     >
                       Delete

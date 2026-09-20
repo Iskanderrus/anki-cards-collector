@@ -1,22 +1,28 @@
-import type {
-  CaptureSource,
-  CollectedItem,
-  LexicalUnit,
-  Occurrence,
-  ReviewStatus,
-  SourceKind,
+import {
+  LEGACY_DEFAULT_PROFILE_ID,
+  type CaptureSource,
+  type CollectedItem,
+  type CollectorSettings,
+  type ExportBinding,
+  type LexicalUnit,
+  type Occurrence,
+  type ReviewStatus,
+  type SourceKind,
 } from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
+import { migrateSettings } from "../settings";
 
-export const BACKUP_VERSION = 2 as const;
+export const BACKUP_VERSION = 3 as const;
 
-export interface BackupDocumentV2 {
+export interface BackupDocumentV3 {
   version: typeof BACKUP_VERSION;
   exportedAt: string;
   items: CollectedItem[];
+  exportBindings: ExportBinding[];
+  settings?: CollectorSettings;
 }
 
-export type BackupDocument = BackupDocumentV2;
+export type BackupDocument = BackupDocumentV3;
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -28,6 +34,17 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
 function readString(record: Record<string, unknown>, key: string, path: string): string {
   const value = record[key];
   if (typeof value !== "string") throw new Error(`${path}.${key} must be a string.`);
+  return value;
+}
+
+function readOptionalString(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): string | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error(`${path}.${key} must be a string when present.`);
   return value;
 }
 
@@ -159,11 +176,10 @@ function readLegacyV1Item(value: unknown, path: string): CollectedItem {
   const occurrences = record.occurrences.map((occurrenceValue, index): Occurrence => {
     const occurrencePath = `${path}.occurrences[${index}]`;
     const legacyOccurrence = asRecord(occurrenceValue, occurrencePath);
-    const lexicalUnitId = readString(legacyOccurrence, "lexicalUnitId", occurrencePath);
 
     return {
       id: readString(legacyOccurrence, "id", occurrencePath),
-      lexicalUnitId,
+      lexicalUnitId: readString(legacyOccurrence, "lexicalUnitId", occurrencePath),
       surfaceText: canonicalText,
       normalizedSurfaceText: normalizeIdentityText(canonicalText),
       context: readString(legacyOccurrence, "context", occurrencePath),
@@ -204,19 +220,99 @@ function validateItems(items: CollectedItem[]): CollectedItem[] {
   return items;
 }
 
+function readExportBinding(value: unknown, path: string): ExportBinding {
+  const record = asRecord(value, path);
+  const ankiNoteId = readOptionalAnkiNoteId(record, path);
+  const rawState = record.state;
+  const state =
+    rawState === undefined
+      ? (ankiNoteId === undefined ? "reserved" : "exported")
+      : rawState;
+
+  if (state !== "override" && state !== "reserved" && state !== "exported") {
+    throw new Error(`${path}.state is not supported.`);
+  }
+  if (state === "exported" && ankiNoteId === undefined) {
+    throw new Error(`${path}.state cannot be exported without an ankiNoteId.`);
+  }
+
+  return {
+    lexicalUnitId: readString(record, "lexicalUnitId", path),
+    profileId: readString(record, "profileId", path),
+    state,
+    ...(ankiNoteId === undefined ? {} : { ankiNoteId }),
+    ...(readOptionalString(record, "deckName", path) === undefined
+      ? {}
+      : { deckName: readOptionalString(record, "deckName", path)! }),
+    ...(readOptionalString(record, "modelName", path) === undefined
+      ? {}
+      : { modelName: readOptionalString(record, "modelName", path)! }),
+    updatedAt: readDate(record, "updatedAt", path),
+  };
+}
+
+function legacyBindings(items: CollectedItem[]): ExportBinding[] {
+  return items.flatMap((item): ExportBinding[] =>
+    item.lexicalUnit.ankiNoteId === undefined
+      ? []
+      : [{
+          lexicalUnitId: item.lexicalUnit.id,
+          profileId: LEGACY_DEFAULT_PROFILE_ID,
+          state: "exported",
+          ankiNoteId: item.lexicalUnit.ankiNoteId,
+          updatedAt: item.lexicalUnit.updatedAt,
+        }]
+  );
+}
+
+function validateBindings(
+  bindings: ExportBinding[],
+  items: CollectedItem[],
+  settings?: CollectorSettings,
+): ExportBinding[] {
+  const lexicalIds = new Set(items.map((item) => item.lexicalUnit.id));
+  const profileIds = settings
+    ? new Set(settings.exportProfiles.map((profile) => profile.id))
+    : null;
+  const bindingIds = new Set<string>();
+
+  for (const binding of bindings) {
+    if (bindingIds.has(binding.lexicalUnitId)) {
+      throw new Error(`Backup contains duplicate export binding for ${binding.lexicalUnitId}.`);
+    }
+    if (!lexicalIds.has(binding.lexicalUnitId)) {
+      throw new Error(`Export binding ${binding.lexicalUnitId} does not match a backup lexical unit.`);
+    }
+    if (profileIds && !profileIds.has(binding.profileId)) {
+      throw new Error(`Export binding ${binding.lexicalUnitId} points to a missing export profile.`);
+    }
+    if (!profileIds && binding.profileId !== LEGACY_DEFAULT_PROFILE_ID) {
+      throw new Error(`Legacy backup binding ${binding.lexicalUnitId} uses an unknown export profile.`);
+    }
+    bindingIds.add(binding.lexicalUnitId);
+  }
+
+  return bindings;
+}
+
 export function serializeBackup(
   items: CollectedItem[],
+  settings: CollectorSettings,
+  exportBindings: ExportBinding[],
   exportedAt = new Date().toISOString(),
 ): string {
-  const document: BackupDocumentV2 = {
+  const normalizedSettings = migrateSettings(settings);
+  const document: BackupDocumentV3 = {
     version: BACKUP_VERSION,
     exportedAt,
     items,
+    exportBindings: validateBindings(exportBindings, items, normalizedSettings),
+    settings: normalizedSettings,
   };
   return JSON.stringify(document, null, 2);
 }
 
-export function parseBackup(raw: string): BackupDocumentV2 {
+export function parseBackup(raw: string): BackupDocumentV3 {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -235,7 +331,7 @@ export function parseBackup(raw: string): BackupDocumentV2 {
       `Backup version ${version} is newer than this extension supports (version ${BACKUP_VERSION}).`,
     );
   }
-  if (version !== 1 && version !== BACKUP_VERSION) {
+  if (version !== 1 && version !== 2 && version !== BACKUP_VERSION) {
     throw new Error(`Backup version ${version} is not supported.`);
   }
 
@@ -260,9 +356,34 @@ export function parseBackup(raw: string): BackupDocumentV2 {
         return { lexicalUnit, occurrences };
       });
 
+  const validatedItems = validateItems(items);
+
+  if (version < 3) {
+    return {
+      version: BACKUP_VERSION,
+      exportedAt,
+      items: validatedItems,
+      exportBindings: validateBindings(legacyBindings(validatedItems), validatedItems),
+    };
+  }
+
+  if (!Array.isArray(root.exportBindings)) {
+    throw new Error("Backup.exportBindings must be an array.");
+  }
+  if (root.settings === undefined) {
+    throw new Error("Backup.settings is required for backup version 3.");
+  }
+
+  const settings = migrateSettings(root.settings);
+  const exportBindings = root.exportBindings.map((value, index) =>
+    readExportBinding(value, `Backup.exportBindings[${index}]`)
+  );
+
   return {
     version: BACKUP_VERSION,
     exportedAt,
-    items: validateItems(items),
+    items: validatedItems,
+    exportBindings: validateBindings(exportBindings, validatedItems, settings),
+    settings,
   };
 }

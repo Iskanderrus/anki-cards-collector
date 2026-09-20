@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnkiClient } from "./client";
-import type { CollectedItem, CollectorSettings } from "../core/types";
+import type { CollectedItem, ExportProfile } from "../core/types";
 
-function settings(): CollectorSettings {
+function profile(): ExportProfile {
   return {
-    defaultLanguage: "es",
+    id: "collector",
+    name: "Collector",
     deckName: "Collector",
-    modelName: "Collector",
-    sourceUrlMode: "sanitized",
+    modelName: "Collector Basic",
+    mode: "collector-managed",
   };
 }
 
@@ -78,7 +79,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(9001);
     expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
@@ -110,7 +111,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(9001);
     expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
@@ -132,7 +133,7 @@ describe("AnkiClient", () => {
     }) as unknown as typeof fetch;
 
     await expect(
-      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings()),
+      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile()),
     ).rejects.toThrow("Collection is not available");
     expect(actions).toEqual(["notesInfo"]);
   });
@@ -153,7 +154,7 @@ describe("AnkiClient", () => {
       return new Response(JSON.stringify({ result, error: null }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(4242);
     expect(actions.map(({ action }) => action)).toEqual(["notesInfo", "updateNoteFields"]);
@@ -190,7 +191,7 @@ describe("AnkiClient", () => {
 
       const resultByAction: Record<string, unknown> = {
         deckNames: ["Collector"],
-        modelNames: ["Collector"],
+        modelNames: ["Collector Basic"],
         modelFieldNames: ["CollectorID", "Expression", "Context", "Note", "Source"],
         modelTemplates: {
           Recognition: {
@@ -209,7 +210,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(profile());
 
     expect(actions.filter((action) => action === "modelFieldAdd")).toHaveLength(6);
     expect(actions).toContain("updateModelTemplates");
@@ -227,7 +228,7 @@ describe("AnkiClient", () => {
 
       const resultByAction: Record<string, unknown> = {
         deckNames: ["Collector"],
-        modelNames: ["Collector"],
+        modelNames: ["Collector Basic"],
         modelFieldNames: ["CollectorID", "Prompt", "Answer", "CardKind", "Why", "Canonical", "Observed", "Expression", "Context", "Note", "Source"],
         modelTemplates: {
           Recognition: {
@@ -243,7 +244,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(profile());
 
     expect(actions).not.toContain("updateModelTemplates");
     expect(actions).not.toContain("updateModelStyling");
@@ -343,7 +344,7 @@ describe("AnkiClient", () => {
       return new Response(JSON.stringify({ result, error: null }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(value, settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(value, profile());
 
     const update = requests.find(({ action }) => action === "updateNoteFields");
     expect(update?.params).toMatchObject({
@@ -357,6 +358,137 @@ describe("AnkiClient", () => {
         },
       },
     });
+  });
+
+
+  it("does not implicitly create a missing deck for an added export profile", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      const result = request.action === "deckNames"
+        ? ["Existing Deck"]
+        : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const addedProfile: ExportProfile = {
+      id: "he-profile",
+      name: "Hebrew",
+      deckName: "Missing Hebrew Deck",
+      modelName: "Collector Basic",
+      mode: "collector-managed",
+    };
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(addedProfile),
+    ).rejects.toThrow("create this saved deck explicitly");
+
+    expect(actions).toEqual(["deckNames"]);
+    expect(actions).not.toContain("createDeck");
+  });
+
+  it("refuses a missing deck for the default profile instead of creating it implicitly", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      const result = request.action === "deckNames" ? [] : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const fallback: ExportProfile = {
+      id: "collector-default",
+      name: "Collector default",
+      deckName: "Collector Inbox",
+      modelName: "Collector Basic",
+      mode: "collector-managed",
+    };
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(fallback),
+    ).rejects.toThrow("create this saved deck explicitly");
+
+    expect(actions).toEqual(["deckNames"]);
+    expect(actions).not.toContain("createDeck");
+  });
+
+  it("creates a deck only through the explicit createDeck action", async () => {
+    const requests: Array<{ action: string; version: number; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        version: number;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      return new Response(JSON.stringify({ result: 123, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).createDeck("Collector Inbox"),
+    ).resolves.toBe(123);
+
+    expect(requests).toEqual([{
+      action: "createDeck",
+      version: 6,
+      params: { deck: "Collector Inbox" },
+    }]);
+  });
+
+  it("moves all cards of an existing note through an explicit changeDeck action", async () => {
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      const result = request.action === "findCards" ? [71, 72] : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).moveNoteToDeck(
+      4242,
+      "Hebrew RU",
+    );
+
+    expect(requests).toEqual([
+      { action: "findCards", version: 6, params: { query: "nid:4242" } },
+      { action: "changeDeck", version: 6, params: { cards: [71, 72], deck: "Hebrew RU" } },
+    ]);
+  });
+
+
+  it("refuses schema mutation for an arbitrary model even when mode claims collector-managed", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      return new Response(JSON.stringify({ result: null, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const unsafe: ExportProfile = {
+      id: "unsafe",
+      name: "Unsafe",
+      deckName: "Hebrew RU",
+      modelName: "My Existing Hebrew Model",
+      mode: "collector-managed",
+    };
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(unsafe),
+    ).rejects.toThrow("not the recognized Collector-managed model");
+
+    expect(actions).toEqual([]);
   });
 
 });

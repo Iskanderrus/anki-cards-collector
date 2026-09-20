@@ -1,5 +1,6 @@
-import type { CollectedItem, CollectorSettings } from "../core/types";
+import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
+import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
 
 interface AnkiResponse<T> {
   result: T;
@@ -93,16 +94,27 @@ export class AnkiClient {
     return this.invoke<RawAnkiModelStyling>("modelStyling", { modelName });
   }
 
-  async ensureDeckAndModel(settings: CollectorSettings): Promise<void> {
+  async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
+    if (
+      profile.mode !== "collector-managed"
+      || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
+    ) {
+      throw new Error(
+        `Collector refuses to modify Anki note type "${profile.modelName}" because it is not the recognized Collector-managed model.`,
+      );
+    }
+
     const decks = await this.invoke<string[]>("deckNames");
-    if (!decks.includes(settings.deckName)) {
-      await this.invoke("createDeck", { deck: settings.deckName });
+    if (!decks.includes(profile.deckName)) {
+      throw new Error(
+        `Anki deck "${profile.deckName}" is not available. Refresh the live catalog, choose an existing deck, or create this saved deck explicitly.`,
+      );
     }
 
     const models = await this.invoke<string[]>("modelNames");
-    if (!models.includes(settings.modelName)) {
+    if (!models.includes(profile.modelName)) {
       await this.invoke("createModel", {
-        modelName: settings.modelName,
+        modelName: profile.modelName,
         inOrderFields: [...COLLECTOR_FIELDS],
         css: COLLECTOR_CSS,
         isCloze: false,
@@ -115,24 +127,24 @@ export class AnkiClient {
       return;
     }
 
-    const fields = await this.invoke<string[]>("modelFieldNames", { modelName: settings.modelName });
+    const fields = await this.invoke<string[]>("modelFieldNames", { modelName: profile.modelName });
     for (const fieldName of COLLECTOR_FIELDS) {
       if (!fields.includes(fieldName)) {
         await this.invoke("modelFieldAdd", {
-          modelName: settings.modelName,
+          modelName: profile.modelName,
           fieldName,
         });
       }
     }
 
     const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
-      modelName: settings.modelName,
+      modelName: profile.modelName,
     });
     const recognition = templates.Recognition;
     if (recognition?.Front === LEGACY_FRONT && recognition.Back === LEGACY_BACK) {
       await this.invoke("updateModelTemplates", {
         model: {
-          name: settings.modelName,
+          name: profile.modelName,
           templates: {
             Recognition: {
               Front: POLICY_FRONT,
@@ -143,14 +155,18 @@ export class AnkiClient {
       });
       await this.invoke("updateModelStyling", {
         model: {
-          name: settings.modelName,
+          name: profile.modelName,
           css: COLLECTOR_CSS,
         },
       });
     }
   }
 
-  async upsert(item: CollectedItem, settings: CollectorSettings): Promise<number> {
+  async upsert(
+    item: CollectedItem,
+    profile: ExportProfile,
+    existingNoteId?: number,
+  ): Promise<number> {
     const proposal = proposeLearningCard(item);
     if (!proposal.recommended) {
       throw new Error(proposal.warning ?? "This item needs review before export.");
@@ -171,7 +187,7 @@ export class AnkiClient {
       Source: occurrence?.source.url ?? "",
     };
 
-    let noteId = item.lexicalUnit.ankiNoteId;
+    let noteId = existingNoteId ?? item.lexicalUnit.ankiNoteId;
 
     if (noteId !== undefined) {
       const storedNoteId = noteId;
@@ -201,12 +217,26 @@ export class AnkiClient {
 
     return this.invoke<number>("addNote", {
       note: {
-        deckName: settings.deckName,
-        modelName: settings.modelName,
+        deckName: profile.deckName,
+        modelName: profile.modelName,
         fields,
         options: { allowDuplicate: false },
         tags: ["anki-cards-collector", `collector::${proposal.cardKind}`],
       },
     });
+  }
+
+  async createDeck(deckName: string): Promise<number> {
+    const normalized = deckName.trim();
+    if (!normalized) throw new Error("Deck name cannot be empty.");
+    return this.invoke<number>("createDeck", { deck: normalized });
+  }
+
+  async moveNoteToDeck(noteId: number, deckName: string): Promise<void> {
+    const cards = await this.invoke<number[]>("findCards", { query: `nid:${noteId}` });
+    if (cards.length === 0) {
+      throw new Error(`No Anki cards were found for note ${noteId}.`);
+    }
+    await this.invoke("changeDeck", { cards, deck: deckName });
   }
 }

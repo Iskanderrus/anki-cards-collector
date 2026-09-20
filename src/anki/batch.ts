@@ -1,9 +1,15 @@
-import type { CollectedItem, CollectorSettings } from "../core/types";
+import type {
+  CollectedItem,
+  CollectorSettings,
+  ExportBinding,
+  ExportProfile,
+} from "../core/types";
+import { resolveExportRoute, validateProfileForCurrentExport } from "./routing";
 
 export interface AnkiExportClient {
   ping(): Promise<number>;
-  ensureDeckAndModel(settings: CollectorSettings): Promise<void>;
-  upsert(item: CollectedItem, settings: CollectorSettings): Promise<number>;
+  ensureDeckAndModel(profile: ExportProfile): Promise<void>;
+  upsert(item: CollectedItem, profile: ExportProfile, existingNoteId?: number): Promise<number>;
 }
 
 export interface ExportProgress {
@@ -19,12 +25,16 @@ export type ExportItemOutcome =
       id: string;
       canonicalText: string;
       noteId: number;
+      profileId: string;
+      deckName: string;
     }
   | {
       kind: "exported_untracked";
       id: string;
       canonicalText: string;
       noteId: number;
+      profileId: string;
+      deckName: string;
       error: string;
     }
   | {
@@ -42,72 +52,169 @@ export interface ExportBatchReport {
   results: ExportItemOutcome[];
 }
 
+export type PersistExportBinding = (binding: ExportBinding) => Promise<void>;
+
+interface RoutedItem {
+  item: CollectedItem;
+  binding: ExportBinding | null;
+  profile: ExportProfile;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown export error.";
+}
+
+function failedOutcome(item: CollectedItem, error: unknown): ExportItemOutcome {
+  return {
+    kind: "failed",
+    id: item.lexicalUnit.id,
+    canonicalText: item.lexicalUnit.canonicalText,
+    error: errorMessage(error),
+  };
+}
+
+function resolvedDestinationKey(profile: ExportProfile): string {
+  return JSON.stringify([
+    profile.id,
+    profile.deckName,
+    profile.modelName,
+    profile.mode,
+  ]);
 }
 
 export async function exportBatch(
   items: CollectedItem[],
   settings: CollectorSettings,
+  bindings: ReadonlyMap<string, ExportBinding>,
   client: AnkiExportClient,
-  persistNoteId: (id: string, noteId: number) => Promise<void>,
+  persistBinding: PersistExportBinding,
   onProgress: (progress: ExportProgress) => void = () => undefined,
 ): Promise<ExportBatchReport> {
   const total = items.length;
   onProgress({ completed: 0, total });
 
   await client.ping();
-  await client.ensureDeckAndModel(settings);
 
   const results: ExportItemOutcome[] = [];
-  let exported = 0;
-  let failed = 0;
-  let warnings = 0;
+  const routed: RoutedItem[] = [];
 
   for (const item of items) {
-    const id = item.lexicalUnit.id;
-    const canonicalText = item.lexicalUnit.canonicalText;
-    onProgress({
-      completed: results.length,
-      total,
-      currentId: id,
-      currentText: canonicalText,
-    });
-
     try {
-      const noteId = await client.upsert(item, settings);
-      exported += 1;
-
-      try {
-        await persistNoteId(id, noteId);
-        results.push({ kind: "exported", id, canonicalText, noteId });
-      } catch (persistError) {
-        warnings += 1;
-        results.push({
-          kind: "exported_untracked",
-          id,
-          canonicalText,
-          noteId,
-          error: `Anki export succeeded, but the local note ID was not saved: ${errorMessage(persistError)}`,
-        });
-      }
-    } catch (exportError) {
-      failed += 1;
-      results.push({
-        kind: "failed",
-        id,
-        canonicalText,
-        error: errorMessage(exportError),
-      });
+      const binding = bindings.get(item.lexicalUnit.id) ?? null;
+      const route = resolveExportRoute(item, settings, binding);
+      validateProfileForCurrentExport(route.profile);
+      routed.push({ item, binding, profile: route.profile });
+    } catch (error) {
+      results.push(failedOutcome(item, error));
     }
-
-    onProgress({
-      completed: results.length,
-      total,
-      currentId: id,
-      currentText: canonicalText,
-    });
   }
 
-  return { total, exported, failed, warnings, results };
+  const groups = new Map<string, RoutedItem[]>();
+  for (const entry of routed) {
+    const key = resolvedDestinationKey(entry.profile);
+    const values = groups.get(key) ?? [];
+    values.push(entry);
+    groups.set(key, values);
+  }
+
+  for (const entries of groups.values()) {
+    const profile = entries[0]!.profile;
+
+    try {
+      await client.ensureDeckAndModel(profile);
+    } catch (error) {
+      for (const entry of entries) results.push(failedOutcome(entry.item, error));
+      continue;
+    }
+
+    for (const { item, binding } of entries) {
+      const id = item.lexicalUnit.id;
+      const canonicalText = item.lexicalUnit.canonicalText;
+      onProgress({
+        completed: results.length,
+        total,
+        currentId: id,
+        currentText: canonicalText,
+      });
+
+      try {
+        let effectiveBinding = binding;
+        const needsReservation =
+          binding?.ankiNoteId === undefined
+          && binding?.state !== "reserved"
+          && binding?.state !== "exported";
+
+        if (needsReservation) {
+          const reserved: ExportBinding = {
+            lexicalUnitId: id,
+            profileId: profile.id,
+            state: "reserved",
+            deckName: profile.deckName,
+            modelName: profile.modelName,
+            updatedAt: new Date().toISOString(),
+          };
+          await persistBinding(reserved);
+          effectiveBinding = reserved;
+        }
+
+        const noteId = await client.upsert(
+          item,
+          profile,
+          effectiveBinding?.ankiNoteId ?? item.lexicalUnit.ankiNoteId,
+        );
+
+        const persisted: ExportBinding = {
+          lexicalUnitId: id,
+          profileId: profile.id,
+          state: "exported",
+          ankiNoteId: noteId,
+          deckName: profile.deckName,
+          modelName: profile.modelName,
+          updatedAt: new Date().toISOString(),
+        };
+
+        try {
+          await persistBinding(persisted);
+          results.push({
+            kind: "exported",
+            id,
+            canonicalText,
+            noteId,
+            profileId: profile.id,
+            deckName: profile.deckName,
+          });
+        } catch (persistError) {
+          results.push({
+            kind: "exported_untracked",
+            id,
+            canonicalText,
+            noteId,
+            profileId: profile.id,
+            deckName: profile.deckName,
+            error: `Anki export succeeded and the destination remains pinned, but the local Anki note ID was not saved: ${errorMessage(persistError)}`,
+          });
+        }
+      } catch (exportError) {
+        results.push(failedOutcome(item, exportError));
+      }
+
+      onProgress({
+        completed: results.length,
+        total,
+        currentId: id,
+        currentText: canonicalText,
+      });
+    }
+  }
+
+  // Route/setup failures are discovered before grouped item processing, so final
+  // result order follows the input for predictable UI reporting.
+  const byId = new Map(results.map((result) => [result.id, result]));
+  const ordered = items.map((item) => byId.get(item.lexicalUnit.id)!).filter(Boolean);
+  const exported = ordered.filter((result) => result.kind !== "failed").length;
+  const failed = ordered.filter((result) => result.kind === "failed").length;
+  const warnings = ordered.filter((result) => result.kind === "exported_untracked").length;
+
+  onProgress({ completed: total, total });
+  return { total, exported, failed, warnings, results: ordered };
 }

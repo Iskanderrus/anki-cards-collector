@@ -137,6 +137,14 @@ Collector owns its:
 
 Collector may add fields or migrate the exact known default template because it owns that schema.
 
+## Current ACCP-013 boundary
+
+ACCP-013 implements multi-deck routing now, but it deliberately keeps actual export on the Collector-managed note type. Additional profiles choose live existing decks; they do not turn arbitrary discovered note types into Collector-managed models.
+
+A legacy saved model name other than the known Collector-managed model is treated conservatively as user-owned and blocked from export until mapping exists.
+
+ACCP-014 is the point where a profile can safely become a mapped user-model profile.
+
 ## User-owned models
 
 An existing user model is read-only from Collector's perspective.

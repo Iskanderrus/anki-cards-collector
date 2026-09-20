@@ -1,6 +1,9 @@
 export type ReviewStatus = "inbox" | "ready" | "archived";
 export type SourceKind = "web" | "duolingo";
 export type SourceUrlMode = "sanitized" | "query" | "none";
+export type ExportProfileMode = "collector-managed" | "mapped-user-model";
+
+export const LEGACY_DEFAULT_PROFILE_ID = "collector-default";
 
 export interface CaptureSource {
   kind: SourceKind;
@@ -45,9 +48,37 @@ export interface CollectedItem {
   occurrences: Occurrence[];
 }
 
+export interface ExportProfile {
+  id: string;
+  name: string;
+  deckName: string;
+  deckId?: string;
+  modelName: string;
+  modelId?: string;
+  mode: ExportProfileMode;
+}
+
+export interface LanguageRoute {
+  language: string;
+  profileId: string;
+}
+
+export type ExportBindingState = "override" | "reserved" | "exported";
+
+export interface ExportBinding {
+  lexicalUnitId: string;
+  profileId: string;
+  state: ExportBindingState;
+  ankiNoteId?: number;
+  deckName?: string;
+  modelName?: string;
+  updatedAt: string;
+}
+
 export interface CollectorSettings {
   defaultLanguage: string;
-  deckName: string;
-  modelName: string;
   sourceUrlMode: SourceUrlMode;
+  exportProfiles: ExportProfile[];
+  languageRoutes: LanguageRoute[];
+  fallbackProfileId: string;
 }

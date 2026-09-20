@@ -26,6 +26,130 @@ assert.ok(
   "Duolingo subdomain access must be optional.",
 );
 
+const ankiRequests = [];
+let nextAnkiNoteId = 9000;
+const ankiDecks = new Map([
+  ["Hebrew RU", 2],
+  ["Serbian RU", 3],
+]);
+
+const collectorFields = [
+  "CollectorID",
+  "Prompt",
+  "Answer",
+  "CardKind",
+  "Why",
+  "Canonical",
+  "Observed",
+  "Expression",
+  "Context",
+  "Note",
+  "Source",
+];
+
+const ankiServer = createServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  ankiRequests.push(body);
+
+  const action = body.action;
+  const params = body.params ?? {};
+  let result = null;
+  let error = null;
+
+  switch (action) {
+    case "version":
+      result = 6;
+      break;
+    case "deckNamesAndIds":
+      result = Object.fromEntries(ankiDecks);
+      break;
+    case "modelNamesAndIds":
+      result = {
+        "Collector Basic": 10,
+        "Hebrew Existing": 11,
+      };
+      break;
+    case "modelFieldNames":
+      result = params.modelName === "Collector Basic"
+        ? collectorFields
+        : ["Hebrew", "Russian"];
+      break;
+    case "modelFieldsOnTemplates":
+      result = params.modelName === "Collector Basic"
+        ? { Recognition: [["Prompt"], ["Prompt", "Answer", "Context", "Note"]] }
+        : { Recognition: [["Hebrew"], ["Hebrew", "Russian"]] };
+      break;
+    case "modelTemplates":
+      result = params.modelName === "Collector Basic"
+        ? {
+            Recognition: {
+              Front: "{{Prompt}}",
+              Back: "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>",
+            },
+          }
+        : {
+            Recognition: {
+              Front: "{{Hebrew}}",
+              Back: "{{FrontSide}}<hr>{{Russian}}",
+            },
+          };
+      break;
+    case "modelStyling":
+      result = { css: ".card { font-size: 22px; }" };
+      break;
+    case "deckNames":
+      result = [...ankiDecks.keys()];
+      break;
+    case "modelNames":
+      result = ["Collector Basic", "Hebrew Existing"];
+      break;
+    case "notesInfo":
+      result = (params.notes ?? []).map((noteId) => ({ noteId }));
+      break;
+    case "findNotes":
+      result = [];
+      break;
+    case "addNote":
+      nextAnkiNoteId += 1;
+      result = nextAnkiNoteId;
+      break;
+    case "createDeck": {
+      const deckName = String(params.deck ?? "");
+      if (!ankiDecks.has(deckName)) {
+        const nextDeckId = Math.max(0, ...ankiDecks.values()) + 1;
+        ankiDecks.set(deckName, nextDeckId);
+      }
+      result = ankiDecks.get(deckName);
+      break;
+    }
+    case "updateNoteFields":
+    case "modelFieldAdd":
+    case "updateModelTemplates":
+    case "updateModelStyling":
+    case "changeDeck":
+      result = null;
+      break;
+    case "findCards":
+      result = [7001];
+      break;
+    default:
+      error = `Unexpected AnkiConnect action in E2E fixture: ${action}`;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+  });
+  response.end(JSON.stringify({ result, error }));
+});
+
+await new Promise((resolveListen, rejectListen) => {
+  ankiServer.once("error", rejectListen);
+  ankiServer.listen(8765, "127.0.0.1", resolveListen);
+});
+
 const server = createServer((request, response) => {
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 
@@ -292,7 +416,7 @@ try {
   await panel.locator(".settings").evaluate((details) => {
     if (details instanceof HTMLDetailsElement) details.open = true;
   });
-  const languageInput = panel.locator("label").filter({ hasText: "Language code" }).locator("input");
+  const languageInput = panel.getByPlaceholder("es, sr, he…");
   await languageInput.fill("he");
   await panel.waitForFunction(async () => {
     const stored = await chrome.storage.local.get("collectorSettings");
@@ -634,6 +758,106 @@ try {
     "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
+  // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
+  // Internal export profiles remain an implementation detail.
+  await panel.bringToFront();
+  await panel.locator(".settings").evaluate((details) => {
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  });
+  await clickPanelButton(panel, "Refresh from Anki");
+  await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
+
+  // Collector Inbox is intentionally absent from the fake live catalog. It must
+  // only be created after the user presses the explicit button.
+  const fallbackRow = panel.locator(".fallback-deck-row");
+  const createDeckButton = fallbackRow.getByRole("button", { name: "Create deck" });
+  await createDeckButton.waitFor();
+  assert.equal(ankiDecks.has("Collector Inbox"), false);
+  const createRequestsBefore = ankiRequests.filter(
+    (request) => request.action === "createDeck",
+  ).length;
+  await createDeckButton.click();
+  await createDeckButton.waitFor({ state: "detached" });
+  assert.equal(ankiDecks.has("Collector Inbox"), true);
+  assert.equal(
+    ankiRequests.filter((request) => request.action === "createDeck").length,
+    createRequestsBefore + 1,
+    "A missing saved deck must be created only through the explicit UI action.",
+  );
+
+  const addLanguage = panel.locator(".language-deck-add");
+  const newLanguage = addLanguage.getByLabel("New language code");
+  const newLanguageDeck = addLanguage.getByLabel("Anki deck for new language");
+
+  await newLanguage.fill("he");
+  await newLanguageDeck.selectOption({ label: "Hebrew RU" });
+  await clickPanelButton(panel, "Add language");
+  const hebrewRoute = panel.locator(".language-deck-row", { hasText: "he" });
+  await hebrewRoute.waitFor();
+  assert.equal(
+    await hebrewRoute.getByLabel("Anki deck for he").inputValue(),
+    "Hebrew RU",
+  );
+
+  await newLanguage.fill("sr");
+  await newLanguageDeck.selectOption({ label: "Serbian RU" });
+  await clickPanelButton(panel, "Add language");
+  const serbianRoute = panel.locator(".language-deck-row", { hasText: "sr" });
+  await serbianRoute.waitFor();
+  assert.equal(
+    await serbianRoute.getByLabel("Anki deck for sr").inputValue(),
+    "Serbian RU",
+  );
+
+  const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
+  await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
+  await firstRoutingCard.getByRole("button", { name: "Save" }).click();
+  await firstRoutingCard.getByRole("button", { name: "Ready" }).click();
+  await firstRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  const secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
+  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
+  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
+  await secondRoutingCard.getByRole("button", { name: "Ready" }).click();
+  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  assert.match(
+    await firstRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU/,
+    "The Hebrew card should show only its resolved Anki deck.",
+  );
+  assert.match(
+    await secondRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Serbian RU/,
+    "The Serbian card should show only its resolved Anki deck.",
+  );
+
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
+
+  const addNotes = ankiRequests.filter((request) => request.action === "addNote");
+  assert.equal(addNotes.length, 2, "Mixed Ready batch should create two routed Anki notes.");
+  const deckByCanonical = Object.fromEntries(
+    addNotes.map((request) => [
+      request.params.note.fields.Canonical,
+      request.params.note.deckName,
+    ]),
+  );
+  assert.equal(deckByCanonical["Aunque llueva"], "Hebrew RU");
+  assert.equal(deckByCanonical["Context menu phrase"], "Serbian RU");
+
+  assert.match(
+    await firstRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU.*note\s+\d+/s,
+  );
+  assert.match(
+    await secondRoutingCard.locator(".export-destination").innerText(),
+    /Anki:\s*Serbian RU.*note\s+\d+/s,
+  );
+
   const accessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -676,6 +900,9 @@ try {
   console.log("Browser extension capture, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
-  await new Promise((resolveClose) => server.close(resolveClose));
+  await Promise.all([
+    new Promise((resolveClose) => server.close(resolveClose)),
+    new Promise((resolveClose) => ankiServer.close(resolveClose)),
+  ]);
   await rm(userDataDir, { recursive: true, force: true });
 }

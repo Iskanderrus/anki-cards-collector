@@ -1,13 +1,24 @@
 import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
-import type { LexicalUnit, Occurrence } from "../core/types";
+import { LEGACY_DEFAULT_PROFILE_ID, type LexicalUnit, type Occurrence } from "../core/types";
 import { CollectorDatabase } from "./database";
 import { CaptureRepository } from "./repository";
 
 const LEGACY_V1_SCHEMA = {
   lexicalUnits: "&id, &contentKey, status, updatedAt",
   occurrences: "&id, lexicalUnitId, capturedAt",
+} as const;
+
+const LEGACY_V2_SCHEMA = {
+  lexicalUnits: "&id, &contentKey, status, updatedAt",
+  occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+} as const;
+
+const LEGACY_V3_SCHEMA = {
+  lexicalUnits: "&id, &contentKey, status, updatedAt",
+  occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+  exportBindings: "&lexicalUnitId, profileId, ankiNoteId",
 } as const;
 
 interface LegacyLexicalUnitV1 {
@@ -106,6 +117,13 @@ describe("CollectorDatabase migration baseline", () => {
 
     expect(await current.lexicalUnits.get(legacyUnit.id)).toEqual(expectedUnit);
     expect(await current.occurrences.get(legacyOccurrence.id)).toEqual(expectedOccurrence);
+    expect(await current.exportBindings.get(legacyUnit.id)).toEqual({
+      lexicalUnitId: legacyUnit.id,
+      profileId: LEGACY_DEFAULT_PROFILE_ID,
+      state: "exported",
+      ankiNoteId: 4242,
+      updatedAt: legacyUnit.updatedAt,
+    });
 
     const listed = await new CaptureRepository(current).list();
     expect(listed[0]?.lexicalUnit).toEqual(expectedUnit);
@@ -113,4 +131,98 @@ describe("CollectorDatabase migration baseline", () => {
 
     current.close();
   });
+
+  it("migrates a frozen v2 exported note into an export binding without changing note identity", async () => {
+    const name = `collector-v2-migration-${crypto.randomUUID()}`;
+    databaseNames.push(name);
+
+    const unit: LexicalUnit = {
+      id: "legacy-v2-unit",
+      contentKey: "he::שלום",
+      canonicalText: "שלום",
+      normalizedCanonicalText: "שלום",
+      language: "he",
+      note: "",
+      status: "ready",
+      createdAt: "2026-08-01T10:00:00Z",
+      updatedAt: "2026-08-02T10:00:00Z",
+      ankiNoteId: 9191,
+    };
+    const occurrence: Occurrence = {
+      id: "legacy-v2-occ",
+      lexicalUnitId: unit.id,
+      surfaceText: "שלום",
+      normalizedSurfaceText: "שלום",
+      context: "שלום עולם",
+      source: {
+        kind: "duolingo",
+        adapter: "duolingo-visible-backfill",
+        url: "https://www.duolingo.com/lesson",
+        title: "Duolingo",
+      },
+      capturedAt: "2026-08-01T10:00:00Z",
+    };
+
+    const legacy = new Dexie(name);
+    legacy.version(2).stores(LEGACY_V2_SCHEMA);
+    await legacy.open();
+    await legacy.table<LexicalUnit>("lexicalUnits").add(unit);
+    await legacy.table<Occurrence>("occurrences").add(occurrence);
+    legacy.close();
+
+    const current = new CollectorDatabase(name);
+    await current.open();
+
+    expect(await current.lexicalUnits.get(unit.id)).toEqual(unit);
+    expect(await current.exportBindings.get(unit.id)).toEqual({
+      lexicalUnitId: unit.id,
+      profileId: LEGACY_DEFAULT_PROFILE_ID,
+      state: "exported",
+      ankiNoteId: 9191,
+      updatedAt: unit.updatedAt,
+    });
+
+    current.close();
+  });
+
+  it("migrates pre-state v3 bindings conservatively to reserved/exported lifecycle states", async () => {
+    const name = `collector-v3-binding-state-${crypto.randomUUID()}`;
+    databaseNames.push(name);
+
+    const legacy = new Dexie(name);
+    legacy.version(3).stores(LEGACY_V3_SCHEMA);
+    await legacy.open();
+    await legacy.table("exportBindings").bulkAdd([
+      {
+        lexicalUnitId: "reserved-unit",
+        profileId: "he-profile",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        updatedAt: "2026-09-20T10:00:00Z",
+      },
+      {
+        lexicalUnitId: "exported-unit",
+        profileId: "he-profile",
+        ankiNoteId: 5151,
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        updatedAt: "2026-09-20T10:00:00Z",
+      },
+    ]);
+    legacy.close();
+
+    const current = new CollectorDatabase(name);
+    await current.open();
+
+    const reserved = await current.exportBindings.get("reserved-unit");
+    expect(reserved).toMatchObject({ state: "reserved" });
+    expect(reserved).not.toHaveProperty("ankiNoteId");
+    expect(await current.exportBindings.get("exported-unit")).toMatchObject({
+      state: "exported",
+      ankiNoteId: 5151,
+    });
+
+    current.close();
+  });
+
 });
