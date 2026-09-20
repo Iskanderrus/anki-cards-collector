@@ -291,7 +291,7 @@ async function startVisibleDuolingoSession(): Promise<{
       if (existing?.ok && existing.status?.active) {
         return {
           status: existing.status,
-          staged: stagedSummary(batchPipeline.getActiveBatch()),
+          staged: stagedSummary(await currentStagedBatch()),
           liveEvidence: existing.evidence ?? [],
         };
       }
@@ -316,7 +316,7 @@ async function startVisibleDuolingoSession(): Promise<{
   visibleSessionTabId = tabId;
   return {
     status: response.status,
-    staged: stagedSummary(batchPipeline.getActiveBatch()),
+    staged: stagedSummary(await currentStagedBatch()),
     liveEvidence: response.evidence ?? [],
   };
 }
@@ -337,7 +337,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
         return {
           supported: true,
           status: response.status,
-          staged: stagedSummary(batchPipeline.getActiveBatch()),
+          staged: stagedSummary(await currentStagedBatch()),
           liveEvidence: response.evidence ?? [],
         };
       }
@@ -358,7 +358,7 @@ async function visibleDuolingoSessionStatus(): Promise<{
       return {
         supported: false,
         status: { active: false, candidateCount: 0 },
-        staged: stagedSummary(batchPipeline.getActiveBatch()),
+        staged: stagedSummary(await currentStagedBatch()),
         liveEvidence: [],
       };
     }
@@ -367,14 +367,14 @@ async function visibleDuolingoSessionStatus(): Promise<{
     return {
       supported: response.supported === true,
       status: response.status,
-      staged: stagedSummary(batchPipeline.getActiveBatch()),
+      staged: stagedSummary(await currentStagedBatch()),
       liveEvidence: response.status.active ? response.evidence ?? [] : [],
     };
   } catch {
     return {
       supported: false,
       status: { active: false, candidateCount: 0 },
-      staged: stagedSummary(batchPipeline.getActiveBatch()),
+      staged: stagedSummary(await currentStagedBatch()),
       liveEvidence: [],
     };
   }
@@ -552,8 +552,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "GET_STAGED_BATCH") {
-    sendResponse({ ok: true, batch: batchPipeline.getActiveBatch() });
-    return false;
+    void currentStagedBatch()
+      .then((batch) => sendResponse({ ok: true, batch }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
   }
 
   return false;
