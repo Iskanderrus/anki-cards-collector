@@ -4,7 +4,10 @@ import type {
   CollectorSettings,
   ExportBinding,
 } from "../core/types";
-import { resolveExportRoute } from "./routing";
+import {
+  assertDestinationChangeReconciled,
+  resolveExportRoute,
+} from "./routing";
 
 function item(language = "he"): CollectedItem {
   return {
@@ -114,6 +117,22 @@ describe("resolveExportRoute", () => {
     expect(route.source).toBe("binding");
     expect(route.profile.deckName).toBe("Hebrew Reserved");
     expect(route.profile.modelName).toBe("Collector Basic");
+  });
+
+
+  it("blocks destination clear/change while a previous export is awaiting reconciliation", () => {
+    const binding: ExportBinding = {
+      lexicalUnitId: "unit-1",
+      profileId: "he-profile",
+      state: "reserved",
+      deckName: "Hebrew Reserved",
+      modelName: "Collector Basic",
+      updatedAt: "2026-09-20T00:00:00Z",
+    };
+
+    expect(() => assertDestinationChangeReconciled(binding)).toThrow(
+      "Retry export before changing its destination",
+    );
   });
 
 });
