@@ -114,7 +114,7 @@ Export first resolves an `ExportProfile` for each Ready item:
 2. language route;
 3. fallback profile.
 
-Ready items are grouped by their **resolved destination identity** (profile ID + resolved deck + resolved model + ownership mode), not merely by profile ID. This keeps an older pinned snapshot separate from the current definition of the same profile. Before the first Anki mutation for an unbound item, Collector persists a `reserved` destination binding containing the profile plus deck/model snapshot. A successful export upgrades it to `exported` and fills the Anki note ID. If the final local write fails or the network outcome is uncertain, the `reserved` state remains authoritative: the user cannot clear or reroute that destination until a retry reconciles it against Anki. This prevents a cross-system partial failure from leaving a newly created Anki note with a silently reinterpreted local destination. Later route or profile-default changes therefore do not silently reinterpret or move that note.
+Ready items are grouped by their **resolved destination identity** (profile ID + resolved deck + resolved model + ownership mode), not merely by profile ID. This keeps an older pinned snapshot separate from the current definition of the same profile. Before the first Anki mutation for an unbound item, Collector persists a `reserved` destination binding containing the profile plus deck/model snapshot. A successful export upgrades it to `exported` and fills the Anki note ID. If the final local write fails or the network outcome is uncertain, the `reserved` state becomes an **external identity lock**: the destination cannot be cleared or rerouted, the lexical unit cannot be deleted, and canonical consolidation cannot replace its Collector ID until a retry reconciles it against Anki. Repository methods enforce those transitions directly; UI guards are only an additional convenience layer. This prevents a cross-system partial failure from losing or re-keying a possibly existing Anki note identity. Later route or profile-default changes therefore do not silently reinterpret or move that note.
 
 For a Collector-managed profile, the Anki upsert path is:
 
@@ -157,6 +157,6 @@ The collector assumes partial failure is normal.
 - An Anki note was deleted externally: the next export falls back to lookup / create while retaining the resolved profile.
 - A configured deck disappears: export fails usefully instead of silently recreating it. The side panel may create the saved deck only through an explicit user action after a live catalog refresh.
 - A profile or language route changes: already-exported notes keep their pinned binding snapshot until the user performs an explicit move.
-- A local note-ID write or export response is uncertain after Anki mutation: the destination remains `reserved`, and destination changes are blocked until retry/reconciliation.
+- A local note-ID write or export response is uncertain after Anki mutation: the binding remains `reserved`; destination changes, deletion, binding clearing, and ID-changing consolidation are blocked until retry/reconciliation.
 - Backup/settings data contains an unknown export-profile ownership mode: restore/settings normalization fails closed before any Anki schema mutation.
 - A source adapter stops matching: generic capture remains available.
