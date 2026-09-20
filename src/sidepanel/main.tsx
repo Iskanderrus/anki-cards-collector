@@ -1195,152 +1195,112 @@ function App(): React.ReactElement {
             </div>
           </div>
 
-          <div className="export-profiles">
+          <div className="language-decks">
             <div className="anki-catalog-head">
               <div>
-                <strong>Export profiles</strong>
+                <strong>Anki decks by language</strong>
                 <div className="setting-help">
-                  Each profile is a reusable Anki destination. ACCP-013 currently exports only through Collector-managed note types; user-owned note-type mapping arrives in ACCP-014.
+                  Choose where each language should go. New cards use Collector Basic automatically.
                 </div>
               </div>
-              <button className="ghost" type="button" disabled={busy} onClick={() => void addExportProfile()}>
-                Add profile
-              </button>
             </div>
 
-            <label>
-              Fallback profile
-              <select
-                value={settings.fallbackProfileId}
-                onChange={(event) => {
-                  const fallbackProfileId = event.target.value;
-                  void persistSettings((current) => ({ ...current, fallbackProfileId }));
-                }}
-              >
-                {settings.exportProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>{profile.name}</option>
-                ))}
-              </select>
-            </label>
+            {settings.languageRoutes.map((route) => {
+              const profile = settings.exportProfiles.find(
+                (candidate) => candidate.id === route.profileId,
+              );
+              const deckName = profile?.deckName ?? "";
+              const missing = catalogState.kind === "live"
+                && deckName
+                && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
-            <div className="export-profile-list">
-              {settings.exportProfiles.map((profile) => (
-                <article className="export-profile-card" key={profile.id}>
-                  <label>
-                    Profile name
-                    <input
-                      value={profile.name}
-                      onChange={(event) => void updateExportProfile(profile.id, {
-                        name: event.target.value || "Unnamed profile",
-                      })}
-                    />
-                  </label>
-
-                  <label>
-                    Anki deck
-                    <select
-                      value={profile.deckName}
-                      onChange={(event) => {
-                        const deckName = event.target.value;
-                        const deck = currentCatalogSnapshot()?.decks.find((candidate) => candidate.name === deckName);
-                        void updateExportProfile(profile.id, {
-                          deckName,
-                          ...(deck ? { deckId: String(deck.id) } : { deckId: undefined }),
-                        });
-                      }}
-                    >
-                      {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === profile.deckName) && (
-                        <option value={profile.deckName}>
-                          {profile.deckName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                        </option>
-                      )}
-                      {currentCatalogSnapshot()?.decks.map((deck) => (
-                        <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="profile-model">
-                    <strong>Anki note type</strong>
-                    <span>{profile.modelName}</span>
-                    <span className="setting-help">
-                      {profile.mode === "collector-managed"
-                        ? "Collector-managed for ACCP-013. Existing user note types require explicit ACCP-014 mapping before export."
-                        : "User-owned note type. Export is blocked until ACCP-014 field mapping is configured."}
-                    </span>
-                  </div>
-
-                  <div className="setting-help">
-                    Mode: {profile.mode === "collector-managed" ? "Collector-managed note type" : "Mapped user note type"}
-                    {profile.id === settings.fallbackProfileId ? " · fallback" : ""}
-                  </div>
-
-                  {catalogState.kind === "live" && !catalogState.snapshot.decks.some((deck) => deck.name === profile.deckName) && (
+              return (
+                <div className="language-deck-row" key={route.language}>
+                  <strong>{route.language}</strong>
+                  <select
+                    aria-label={`Anki deck for ${route.language}`}
+                    value={deckName}
+                    onChange={(event) => void setLanguageDeck(route.language, event.target.value)}
+                  >
+                    {missing && <option value={deckName}>{deckName} (missing)</option>}
+                    {currentCatalogSnapshot()?.decks.map((deck) => (
+                      <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                    ))}
+                  </select>
+                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
+                    Remove
+                  </button>
+                  {missing && (
                     <button
                       className="ghost"
                       type="button"
                       disabled={busy}
-                      onClick={() => void createSavedProfileDeck(profile)}
+                      onClick={() => void createSavedDeck(deckName)}
                     >
-                      Create saved deck in Anki
+                      Create deck
                     </button>
                   )}
-
-                  {settings.exportProfiles.length > 1 && (
-                    <button
-                      className="ghost danger"
-                      type="button"
-                      disabled={busy || profile.id === settings.fallbackProfileId}
-                      onClick={() => void removeExportProfile(profile.id)}
-                    >
-                      Remove profile
-                    </button>
-                  )}
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="language-routes">
-            <strong>Language routing</strong>
-            <div className="setting-help">
-              Ready items use a pinned item binding first, then a language route, then the fallback profile.
-            </div>
-            {settings.languageRoutes.map((route) => {
-              const profile = settings.exportProfiles.find((candidate) => candidate.id === route.profileId);
-              return (
-                <div className="language-route-row" key={route.language}>
-                  <span><strong>{route.language}</strong> → {profile?.name ?? "missing profile"}</span>
-                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
-                    Remove
-                  </button>
                 </div>
               );
             })}
-            <div className="language-route-editor">
-              <label>
-                Language code
-                <input
-                  value={routeLanguage}
-                  placeholder="he, sr, es…"
-                  onChange={(event) => setRouteLanguage(event.target.value)}
-                />
-              </label>
-              <label>
-                Profile
-                <select
-                  value={routeProfileId}
-                  onChange={(event) => setRouteProfileId(event.target.value)}
-                >
-                  {settings.exportProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>{profile.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button type="button" disabled={busy} onClick={() => void saveLanguageRoute()}>
-                Save route
+
+            <div className="language-deck-add">
+              <input
+                aria-label="New language code"
+                value={routeLanguage}
+                placeholder="he, sr, es…"
+                onChange={(event) => setRouteLanguage(event.target.value)}
+              />
+              <select
+                aria-label="Anki deck for new language"
+                value={routeDeckName}
+                onChange={(event) => setRouteDeckName(event.target.value)}
+              >
+                {!routeDeckName && <option value="">Choose deck…</option>}
+                {currentCatalogSnapshot()?.decks.map((deck) => (
+                  <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                ))}
+              </select>
+              <button type="button" disabled={busy || !routeDeckName} onClick={() => void saveLanguageRoute()}>
+                Add language
               </button>
             </div>
+
+            {(() => {
+              const fallback = settings.exportProfiles.find(
+                (profile) => profile.id === settings.fallbackProfileId,
+              );
+              const deckName = fallback?.deckName ?? "";
+              const missing = catalogState.kind === "live"
+                && deckName
+                && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
+
+              return (
+                <div className="language-deck-row fallback-deck-row">
+                  <strong>Other</strong>
+                  <select
+                    aria-label="Anki deck for other languages"
+                    value={deckName}
+                    onChange={(event) => void setFallbackDeck(event.target.value)}
+                  >
+                    {missing && <option value={deckName}>{deckName} (missing)</option>}
+                    {currentCatalogSnapshot()?.decks.map((deck) => (
+                      <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                    ))}
+                  </select>
+                  {missing && (
+                    <button
+                      className="ghost"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void createSavedDeck(deckName)}
+                    >
+                      Create deck
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {modelState.kind !== "idle" && (
