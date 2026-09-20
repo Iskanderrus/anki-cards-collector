@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnkiClient } from "./client";
-import type { CollectedItem, ExportProfile } from "../core/types";
+import {
+  LEGACY_DEFAULT_PROFILE_ID,
+  type CollectedItem,
+  type ExportProfile,
+} from "../core/types";
 
 function profile(): ExportProfile {
   return {
@@ -358,6 +362,94 @@ describe("AnkiClient", () => {
         },
       },
     });
+  });
+
+
+  it("does not implicitly create a missing deck for an added export profile", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      const result = request.action === "deckNames"
+        ? ["Existing Deck"]
+        : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const addedProfile: ExportProfile = {
+      id: "he-profile",
+      name: "Hebrew",
+      deckName: "Missing Hebrew Deck",
+      modelName: "Collector Basic",
+      mode: "collector-managed",
+    };
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(addedProfile),
+    ).rejects.toThrow("Refresh the live catalog and choose an existing deck");
+
+    expect(actions).toEqual(["deckNames"]);
+    expect(actions).not.toContain("createDeck");
+  });
+
+  it("retains explicit legacy/default fallback deck creation", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+
+      const resultByAction: Record<string, unknown> = {
+        deckNames: [],
+        createDeck: 123,
+        modelNames: [],
+        createModel: 456,
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const fallback: ExportProfile = {
+      id: LEGACY_DEFAULT_PROFILE_ID,
+      name: "Collector default",
+      deckName: "Collector Inbox",
+      modelName: "Collector Basic",
+      mode: "collector-managed",
+    };
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(fallback);
+    expect(actions).toEqual(["deckNames", "createDeck", "modelNames", "createModel"]);
+  });
+
+  it("moves all cards of an existing note through an explicit changeDeck action", async () => {
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      const result = request.action === "findCards" ? [71, 72] : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).moveNoteToDeck(
+      4242,
+      "Hebrew RU",
+    );
+
+    expect(requests).toEqual([
+      { action: "findCards", params: { query: "nid:4242" } },
+      { action: "changeDeck", params: { cards: [71, 72], deck: "Hebrew RU" } },
+    ]);
   });
 
 });
