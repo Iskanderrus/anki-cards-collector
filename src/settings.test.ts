@@ -19,7 +19,7 @@ describe("settings migration", () => {
         name: "Collector default",
         deckName: "Hebrew RU",
         modelName: "Collector Hebrew",
-        mode: "collector-managed",
+        mode: "mapped-user-model",
       }],
       languageRoutes: [],
       fallbackProfileId: LEGACY_DEFAULT_PROFILE_ID,
