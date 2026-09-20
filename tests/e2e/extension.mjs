@@ -69,6 +69,7 @@ const ankiServer = createServer(async (request, response) => {
       result = {
         "Collector Basic": 10,
         "Hebrew Existing": 11,
+        "Hebrew Verbs": 12,
       };
       break;
     case "modelFieldNames":
@@ -103,7 +104,7 @@ const ankiServer = createServer(async (request, response) => {
       result = [...ankiDecks.keys()];
       break;
     case "modelNames":
-      result = ["Collector Basic", "Hebrew Existing"];
+      result = ["Collector Basic", "Hebrew Existing", "Hebrew Verbs"];
       break;
     case "notesInfo":
       result = (params.notes ?? []).map((noteId) => ({ noteId }));
@@ -132,8 +133,92 @@ const ankiServer = createServer(async (request, response) => {
       result = null;
       break;
     case "findCards":
-      result = [7001];
+      if (params.query === 'deck:"Hebrew RU"') {
+        result = [8006, 8001, 8005, 8002, 8004, 8003];
+      } else if (params.query === 'deck:"Serbian RU"') {
+        result = [8101];
+      } else {
+        result = [7001];
+      }
       break;
+    case "cardsInfo": {
+      const fixtures = {
+        8001: {
+          cardId: 8001,
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Existing",
+          ord: 0,
+          question: "<div class=front>שלום</div>",
+          answer: "<div class=back>hello</div>",
+          css: ".front { font-size: 24px; } .back { font-size: 18px; }",
+          fields: {},
+        },
+        8002: {
+          cardId: 8002,
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Existing",
+          ord: 0,
+          question: "<div class=front>בית</div>",
+          answer: "<div class=back>house</div>",
+          css: ".front { font-size: 24px; } .back { font-size: 18px; }",
+          fields: {},
+        },
+        8003: {
+          cardId: 8003,
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Existing",
+          ord: 1,
+          question: "<div class=front>water</div>",
+          answer: "<div class=back>מים</div>",
+          css: ".front { font-size: 24px; } .back { font-size: 18px; }",
+          fields: {},
+        },
+        8004: {
+          cardId: 8004,
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Existing",
+          ord: 1,
+          question: "<div class=front>book</div>",
+          answer: "<div class=back>ספר</div>",
+          css: ".front { font-size: 24px; } .back { font-size: 18px; }",
+          fields: {},
+        },
+        8005: {
+          cardId: 8005,
+          deckName: "Hebrew RU",
+          modelName: "Collector Basic",
+          ord: 0,
+          question: "<div>collector front</div>",
+          answer: "<div>collector back</div>",
+          css: ".card { font-family: sans-serif; }",
+          fields: {},
+        },
+        8006: {
+          cardId: 8006,
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Verbs",
+          ord: 0,
+          question: "<div>כותב</div>",
+          answer: "<div>writes</div>",
+          css: ".card { font-size: 20px; }",
+          fields: {},
+        },
+        8101: {
+          cardId: 8101,
+          deckName: "Serbian RU",
+          modelName: "Collector Basic",
+          ord: 0,
+          question: "<div>dobar dan</div>",
+          answer: "<div>добрый день</div>",
+          css: ".card { font-size: 20px; }",
+          fields: {},
+        },
+      };
+      result = (params.cards ?? [])
+        .map((cardId) => fixtures[cardId])
+        .filter(Boolean);
+      break;
+    }
     default:
       error = `Unexpected AnkiConnect action in E2E fixture: ${action}`;
   }
@@ -807,6 +892,66 @@ try {
   assert.equal(
     await serbianRoute.getByLabel("Anki deck for sr").inputValue(),
     "Serbian RU",
+  );
+
+  // ACCP-017: inspecting a configured deck is bounded, read-only evidence.
+  const mutations = new Set([
+    "addNote",
+    "changeDeck",
+    "createDeck",
+    "createModel",
+    "modelFieldAdd",
+    "updateModelTemplates",
+    "updateModelStyling",
+    "updateNoteFields",
+  ]);
+  const requestsBeforeDeckAnalysis = ankiRequests.length;
+  await hebrewRoute.getByRole("button", { name: "Inspect" }).click();
+
+  const analysisPanel = panel.locator(".deck-analysis");
+  await analysisPanel.getByText("Existing cards in Hebrew RU").waitFor();
+  await analysisPanel.getByText("Inspected 6 of 6 sampled cards from 6 total.").waitFor();
+
+  const modelSamples = analysisPanel.locator(".deck-model-sample");
+  assert.equal(await modelSamples.count(), 3);
+  await analysisPanel.getByText("Hebrew Existing").waitFor();
+  await analysisPanel.getByText("4/6 inspected").waitFor();
+  await analysisPanel.getByText("Hebrew Verbs").waitFor();
+  await analysisPanel.getByText("1/6 inspected").first().waitFor();
+  await analysisPanel.getByText("Collector Basic").waitFor();
+
+  const hebrewModel = analysisPanel.locator(".deck-model-sample", {
+    hasText: "Hebrew Existing",
+  });
+  await hebrewModel.evaluate((details) => {
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  });
+  assert.equal(
+    await hebrewModel.locator(".representative-card").count(),
+    2,
+    "Two sampled template ordinals should produce two representatives.",
+  );
+
+  const firstRepresentativeFront = hebrewModel
+    .locator('iframe[title="Hebrew Existing representative front"]')
+    .first();
+  await firstRepresentativeFront.waitFor();
+  assert.match(
+    await firstRepresentativeFront.contentFrame().locator("body").innerText(),
+    /שלום/,
+    "Representative front should use rendered cardsInfo content.",
+  );
+
+  const analysisRequests = ankiRequests.slice(requestsBeforeDeckAnalysis);
+  assert.deepEqual(
+    analysisRequests.map((request) => request.action),
+    ["findCards", "cardsInfo"],
+    "Deck analysis should use only its bounded read-only AnkiConnect actions.",
+  );
+  assert.equal(
+    analysisRequests.some((request) => mutations.has(request.action)),
+    false,
+    "Inspecting a deck must not mutate Anki.",
   );
 
   const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
