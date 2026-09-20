@@ -131,6 +131,7 @@ describe("exportBatch profile routing", () => {
     const binding: ExportBinding = {
       lexicalUnitId: current.lexicalUnit.id,
       profileId: "sr-profile",
+      state: "exported",
       ankiNoteId: 4242,
       deckName: "Serbian RU",
       modelName: "Collector Basic",
@@ -255,4 +256,92 @@ describe("exportBatch profile routing", () => {
     expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
     expect(exportClient.upsert).not.toHaveBeenCalled();
   });
+
+  async function verifyPinnedAndCurrentProfileStaySeparated(order: "old-first" | "new-first") {
+    const oldItem = item("he-old", "ישן", "he");
+    const newItem = item("he-new", "חדש", "he");
+    const oldBinding: ExportBinding = {
+      lexicalUnitId: oldItem.lexicalUnit.id,
+      profileId: "he-profile",
+      state: "exported",
+      ankiNoteId: 4242,
+      deckName: "Hebrew Old",
+      modelName: "Collector Basic",
+      updatedAt: "2026-09-19T10:00:00Z",
+    };
+
+    const exportClient = client({
+      upsert: vi.fn(async (current, profile, existingNoteId) =>
+        existingNoteId ?? (profile.deckName === "Hebrew RU" ? 9001 : 9002)
+      ),
+    });
+    const persisted: ExportBinding[] = [];
+
+    const input = order === "old-first"
+      ? [oldItem, newItem]
+      : [newItem, oldItem];
+
+    await exportBatch(
+      input,
+      settings,
+      new Map([[oldItem.lexicalUnit.id, oldBinding]]),
+      exportClient,
+      async (binding) => {
+        persisted.push(binding);
+      },
+    );
+
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledTimes(2);
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "he-profile",
+        deckName: "Hebrew Old",
+        modelName: "Collector Basic",
+      }),
+    );
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "he-profile",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+      }),
+    );
+
+    expect(exportClient.upsert).toHaveBeenCalledWith(
+      oldItem,
+      expect.objectContaining({ deckName: "Hebrew Old" }),
+      4242,
+    );
+    expect(exportClient.upsert).toHaveBeenCalledWith(
+      newItem,
+      expect.objectContaining({ deckName: "Hebrew RU" }),
+      undefined,
+    );
+
+    const finalOld = persisted.filter(
+      (binding) => binding.lexicalUnitId === oldItem.lexicalUnit.id && binding.state === "exported",
+    ).at(-1);
+    const finalNew = persisted.filter(
+      (binding) => binding.lexicalUnitId === newItem.lexicalUnit.id && binding.state === "exported",
+    ).at(-1);
+
+    expect(finalOld).toMatchObject({
+      profileId: "he-profile",
+      deckName: "Hebrew Old",
+      ankiNoteId: 4242,
+    });
+    expect(finalNew).toMatchObject({
+      profileId: "he-profile",
+      deckName: "Hebrew RU",
+    });
+  }
+
+  it("keeps old pinned and current destinations separate when the pinned item is first", async () => {
+    await verifyPinnedAndCurrentProfileStaySeparated("old-first");
+  });
+
+  it("keeps old pinned and current destinations separate when the current item is first", async () => {
+    await verifyPinnedAndCurrentProfileStaySeparated("new-first");
+  });
+
 });
