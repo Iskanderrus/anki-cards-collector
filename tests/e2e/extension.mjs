@@ -28,6 +28,10 @@ assert.ok(
 
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
+const ankiDecks = new Map([
+  ["Hebrew RU", 2],
+  ["Serbian RU", 3],
+]);
 
 const collectorFields = [
   "CollectorID",
@@ -59,11 +63,7 @@ const ankiServer = createServer(async (request, response) => {
       result = 6;
       break;
     case "deckNamesAndIds":
-      result = {
-        "Collector Inbox": 1,
-        "Hebrew RU": 2,
-        "Serbian RU": 3,
-      };
+      result = Object.fromEntries(ankiDecks);
       break;
     case "modelNamesAndIds":
       result = {
@@ -100,7 +100,7 @@ const ankiServer = createServer(async (request, response) => {
       result = { css: ".card { font-size: 22px; }" };
       break;
     case "deckNames":
-      result = ["Collector Inbox", "Hebrew RU", "Serbian RU"];
+      result = [...ankiDecks.keys()];
       break;
     case "modelNames":
       result = ["Collector Basic", "Hebrew Existing"];
@@ -115,6 +115,15 @@ const ankiServer = createServer(async (request, response) => {
       nextAnkiNoteId += 1;
       result = nextAnkiNoteId;
       break;
+    case "createDeck": {
+      const deckName = String(params.deck ?? "");
+      if (!ankiDecks.has(deckName)) {
+        const nextDeckId = Math.max(0, ...ankiDecks.values()) + 1;
+        ankiDecks.set(deckName, nextDeckId);
+      }
+      result = ankiDecks.get(deckName);
+      break;
+    }
     case "updateNoteFields":
     case "modelFieldAdd":
     case "updateModelTemplates":
@@ -760,6 +769,29 @@ try {
 
   let profileCards = panel.locator(".export-profile-card");
   assert.equal(await profileCards.count(), 1);
+
+  const defaultProfile = profileCards.nth(0);
+  const createSavedDeckButton = defaultProfile.getByRole("button", {
+    name: "Create saved deck in Anki",
+  });
+  await createSavedDeckButton.waitFor();
+  assert.equal(
+    ankiDecks.has("Collector Inbox"),
+    false,
+    "A missing saved deck must not exist before explicit creation.",
+  );
+  const createRequestsBefore = ankiRequests.filter((request) => request.action === "createDeck").length;
+  await createSavedDeckButton.click();
+  await defaultProfile.getByRole("button", { name: "Create saved deck in Anki" }).waitFor({
+    state: "detached",
+  });
+  assert.equal(ankiDecks.has("Collector Inbox"), true);
+  assert.equal(
+    ankiRequests.filter((request) => request.action === "createDeck").length,
+    createRequestsBefore + 1,
+    "The saved deck must be created only by the explicit button.",
+  );
+
   const hebrewProfile = profileCards.nth(0);
   await hebrewProfile.getByLabel("Profile name").fill("Hebrew");
   await hebrewProfile.getByLabel("Anki deck").selectOption({ label: "Hebrew RU" });
