@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DECK_ANALYSIS_SAMPLE_SIZE,
+  MAX_REPRESENTATIVE_HTML_CHARS,
   DeckAnalysisService,
   deckScopedSearch,
   selectDeterministicCardSample,
@@ -201,4 +202,37 @@ describe("DeckAnalysisService", () => {
       })).analyze("Hebrew RU"),
     ).rejects.toThrow("cardsInfo response must be an array");
   });
+
+  it("treats selected deck subdecks as in-scope Anki evidence", async () => {
+    const fake = client({
+      findCards: vi.fn(async () => [1, 2]),
+      cardsInfo: vi.fn(async () => [
+        card(1, "Parent Model", 0, "Hebrew RU"),
+        card(2, "Child Model", 0, "Hebrew RU::Verbs"),
+      ]),
+    });
+
+    const result = await new DeckAnalysisService(fake, 2).analyze("Hebrew RU");
+    expect(result.inspectedCardCount).toBe(2);
+    expect(result.models.map((model) => model.modelName).sort()).toEqual([
+      "Child Model",
+      "Parent Model",
+    ]);
+  });
+
+  it("rejects oversized representative HTML as unavailable evidence", async () => {
+    const fake = client({
+      findCards: vi.fn(async () => [1]),
+      cardsInfo: vi.fn(async () => [{
+        ...card(1, "Huge"),
+        question: "x".repeat(MAX_REPRESENTATIVE_HTML_CHARS + 1),
+      }]),
+    });
+
+    const result = await new DeckAnalysisService(fake).analyze("Hebrew RU");
+    expect(result.inspectedCardCount).toBe(0);
+    expect(result.unavailableSampleCount).toBe(1);
+    expect(result.models).toEqual([]);
+  });
+
 });
