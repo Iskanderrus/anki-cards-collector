@@ -34,6 +34,7 @@ Run this check with a real Duolingo account after loading the extension build fr
 7. Click **Stop & stage session**.
 8. Confirm the live session preview disappears and the accumulated items are visible under staged evidence.
 9. Confirm the normal corpus count still did not increase.
+10. Optional lifecycle spot-check: with a session active, switch to another browser tab and reopen Collector after some idle time. Confirm the same session is still shown and Stop still finalizes the original Duolingo tab.
 
 ## Navigation and teardown
 
