@@ -2,12 +2,21 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
-import type { CollectedItem, CollectorSettings, Occurrence, ReviewStatus, SourceUrlMode } from "../core/types";
+import type {
+  CollectedItem,
+  CollectorSettings,
+  ExportBinding,
+  ExportProfile,
+  Occurrence,
+  ReviewStatus,
+  SourceUrlMode,
+} from "../core/types";
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
+import { resolveExportRoute } from "../anki/routing";
 import {
   AnkiCatalogService,
   type AnkiCatalogRefreshResult,
@@ -130,6 +139,10 @@ function sourceLabel(occurrence: Occurrence | undefined): string {
 function App(): React.ReactElement {
   const [items, setItems] = useState<CollectedItem[]>([]);
   const [settings, setSettings] = useState<CollectorSettings>(DEFAULT_SETTINGS);
+  const [exportBindings, setExportBindings] = useState<Record<string, ExportBinding>>({});
+  const [routeLanguage, setRouteLanguage] = useState("");
+  const [routeProfileId, setRouteProfileId] = useState(DEFAULT_SETTINGS.fallbackProfileId);
+  const [pendingMoveProfiles, setPendingMoveProfiles] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -159,14 +172,26 @@ function App(): React.ReactElement {
   );
 
   const load = useCallback(async () => {
-    const loadedItems = await repository.list();
+    const [loadedItems, loadedBindings, loadedSettings] = await Promise.all([
+      repository.list(),
+      repository.listExportBindings(),
+      loadSettings(),
+    ]);
     setItems(loadedItems);
+    setExportBindings(Object.fromEntries(
+      loadedBindings.map((binding) => [binding.lexicalUnitId, binding]),
+    ));
     setActiveId((current) => (
       current && loadedItems.some((item) => item.lexicalUnit.id === current)
         ? current
         : loadedItems[0]?.lexicalUnit.id ?? null
     ));
-    setSettings(await loadSettings());
+    setSettings(loadedSettings);
+    setRouteProfileId((current) =>
+      loadedSettings.exportProfiles.some((profile) => profile.id === current)
+        ? current
+        : loadedSettings.fallbackProfileId
+    );
   }, []);
 
   useEffect(() => {
@@ -485,8 +510,9 @@ function App(): React.ReactElement {
       const report = await exportBatch(
         ready,
         settings,
+        new Map(Object.values(exportBindings).map((binding) => [binding.lexicalUnitId, binding])),
         new AnkiClient(),
-        (id, noteId) => repository.setAnkiNoteId(id, noteId),
+        (binding) => repository.setExportBinding(binding),
         setExportProgress,
       );
 
@@ -551,11 +577,15 @@ function App(): React.ReactElement {
     const result = await catalogService.refresh();
     setCatalogState(result);
 
+    const fallbackProfile = settings.exportProfiles.find(
+      (profile) => profile.id === settings.fallbackProfileId,
+    );
     if (
-      (result.kind === "live" || result.kind === "stale")
-      && result.snapshot.models.some((model) => model.name === settings.modelName)
+      fallbackProfile
+      && (result.kind === "live" || result.kind === "stale")
+      && result.snapshot.models.some((model) => model.name === fallbackProfile.modelName)
     ) {
-      await inspectAnkiModel(settings.modelName);
+      await inspectAnkiModel(fallbackProfile.modelName);
     } else {
       setModelState({ kind: "idle" });
     }
@@ -571,7 +601,7 @@ function App(): React.ReactElement {
   function backupJson(): void {
     downloadText(
       "anki-cards-collector-backup.json",
-      serializeBackup(items),
+      serializeBackup(items, settings, Object.values(exportBindings)),
       "application/json;charset=utf-8",
     );
   }
@@ -619,6 +649,9 @@ function App(): React.ReactElement {
 
     try {
       const result = await repository.restoreBackup(pendingBackup);
+      if (pendingBackup.settings) {
+        await saveSettings(pendingBackup.settings);
+      }
       clearRestorePreview();
       await load();
 
@@ -626,7 +659,8 @@ function App(): React.ReactElement {
         result.lexicalUnitsAdded +
         result.lexicalUnitsUpdated +
         result.occurrencesAdded +
-        result.occurrencesUpdated;
+        result.occurrencesUpdated +
+        result.exportBindingsAdded;
       setNotice(
         changed === 0
           ? "Backup is already fully represented in the local corpus."
