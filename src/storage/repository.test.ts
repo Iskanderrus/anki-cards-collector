@@ -530,4 +530,62 @@ describe("CaptureRepository", () => {
     });
   });
 
+
+  it("prevents direct clearing or rerouting of a reserved binding at repository boundary", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    await expect(
+      repository.clearExportBinding(captured.lexicalUnit.id),
+    ).rejects.toThrow("Cannot clear a reserved Anki identity");
+
+    await expect(repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "other-profile",
+      state: "override",
+      deckName: "Other Deck",
+      modelName: "Collector Basic",
+    })).rejects.toThrow("Cannot change a reserved Anki identity");
+
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toMatchObject({
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+    });
+  });
+
+  it("allows a reserved binding to reconcile to exported only on the same destination", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "exported",
+      ankiNoteId: 4242,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toMatchObject({
+      profileId: "es-profile",
+      state: "exported",
+      ankiNoteId: 4242,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+  });
+
 });
