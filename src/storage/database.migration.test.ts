@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
-import type { LexicalUnit, Occurrence } from "../core/types";
+import { LEGACY_DEFAULT_PROFILE_ID, type LexicalUnit, type Occurrence } from "../core/types";
 import { CollectorDatabase } from "./database";
 import { CaptureRepository } from "./repository";
 
@@ -106,6 +106,12 @@ describe("CollectorDatabase migration baseline", () => {
 
     expect(await current.lexicalUnits.get(legacyUnit.id)).toEqual(expectedUnit);
     expect(await current.occurrences.get(legacyOccurrence.id)).toEqual(expectedOccurrence);
+    expect(await current.exportBindings.get(legacyUnit.id)).toEqual({
+      lexicalUnitId: legacyUnit.id,
+      profileId: LEGACY_DEFAULT_PROFILE_ID,
+      ankiNoteId: 4242,
+      updatedAt: legacyUnit.updatedAt,
+    });
 
     const listed = await new CaptureRepository(current).list();
     expect(listed[0]?.lexicalUnit).toEqual(expectedUnit);
