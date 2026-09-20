@@ -28,12 +28,21 @@ export function resolveExportRoute(
   binding: ExportBinding | null,
 ): ResolvedExportRoute {
   if (binding) {
-    const profile = profileById(settings, binding.profileId);
-    if (!profile) {
+    const configuredProfile = profileById(settings, binding.profileId);
+    if (!configuredProfile) {
       throw new Error(
         `Export destination for "${item.lexicalUnit.canonicalText}" is pinned to a missing profile. Reassign it explicitly before export.`,
       );
     }
+
+    const profile = binding.ankiNoteId === undefined
+      ? configuredProfile
+      : {
+          ...configuredProfile,
+          deckName: binding.deckName ?? configuredProfile.deckName,
+          modelName: binding.modelName ?? configuredProfile.modelName,
+        };
+
     return { profile, source: "binding", binding };
   }
 
