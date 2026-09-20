@@ -1,15 +1,8 @@
-# Manual ACCP-013 export-profile acceptance
+# Manual ACCP-013 Anki deck-routing acceptance
 
 Run this against real Anki Desktop + AnkiConnect before closing ACCP-013.
 
-The purpose is to prove routing and identity with real decks. Do **not** use a user-owned note type for export in this ticket; ACCP-014 adds explicit field mapping for those models.
-
-## Safety
-
-1. Sync/backup Anki normally before the run.
-2. Keep any personal backup JSON or screenshots containing study content out of the public issue.
-3. Use three existing destination decks for three language routes. Hebrew, Serbian, and Spanish are the canonical ACCP-013 acceptance set when those real decks are available.
-4. Use the Collector-managed note type (`Collector Basic`) for this acceptance.
+The user-facing goal is simple: choose an Anki deck for each language, then export one mixed Ready batch safely.
 
 ## 1. Build and reload
 
@@ -23,98 +16,96 @@ npm run build
 
 Reload the unpacked extension in `chrome://extensions`.
 
-Open the side panel and expand **Settings & fallback exports**.
+Open the side panel and expand **Settings & Anki**.
 
-## 2. Verify live catalog and profile setup
+## 2. Load your Anki decks
 
 1. Click **Refresh from Anki**.
-2. Confirm the two real destination decks appear.
-3. Configure/rename the default profile for the first deck.
-4. Click **Add profile** and choose the second live deck.
-5. Confirm both profiles show `Collector Basic` as the Collector-managed note type.
-6. Confirm arbitrary existing user note types are not selectable as Collector-managed export models.
+2. Confirm Collector reports a successful connection and shows your real decks.
+3. Under **Anki decks by language**, set:
+   - `he` → your Hebrew deck;
+   - `sr` → your Serbian deck;
+   - `es` → your Spanish deck.
+4. Set **Other languages** to the deck you want as the general fallback.
 
-A missing saved deck must never be created by export. To verify the explicit path, temporarily configure or restore one profile whose saved deck is absent from the live catalog, refresh Anki, confirm **Create saved deck in Anki** appears, and use that button deliberately. Confirm the deck appears only after that click.
+Collector uses its own `Collector Basic` note type for new cards. Existing Anki cards that were previously linked to a custom note type are left unchanged rather than rewritten.
 
-## 3. Configure two language routes
+## 3. Explicit missing-deck creation
 
-Create three routes, for example:
+Export must never create a missing deck by itself.
+
+If a saved destination is missing from live Anki, Collector shows **Create deck** beside that destination.
+
+Verify:
+
+1. the deck is absent in Anki;
+2. merely exporting or refreshing does not create it;
+3. click **Create deck**;
+4. only then confirm the deck appears in Anki.
+
+## 4. Mixed three-language export
+
+Prepare at least one **new/unexported** Ready Collector item for each language: Hebrew, Serbian, and Spanish.
+
+Before export, each card should show only a simple destination line such as:
 
 ```text
-he -> Hebrew profile
-sr -> Serbian profile
-es -> Spanish profile
+Anki: Hebrew deck
+Anki: Serbian deck
+Anki: Spanish deck
 ```
-
-Confirm all three appear in the routing list.
-
-## 4. Mixed Ready batch
-
-Prepare at least one Ready Collector item for each of the three routed languages.
-
-Before export, confirm each item's **Destination** line shows the expected profile/deck.
 
 Click **Send ready to Anki** once.
 
 Verify in Anki:
 
-- all three items were exported in the same operation;
-- Hebrew is in the Hebrew-configured deck;
-- Serbian is in the Serbian-configured deck;
-- Spanish is in the Spanish-configured deck;
-- both use the Collector-managed note type;
-- no user-owned model fields/templates/CSS were modified.
+- all three new cards were exported in the same operation;
+- each card landed in the configured language deck;
+- each card uses `Collector Basic`;
+- no existing user-owned note type was modified.
 
-Record only the two Anki note IDs and destination deck names if a public acceptance comment is needed; do not publish the study text.
+Old cards already linked to custom Anki note types may be skipped with a neutral message; they must not be rewritten or reported as three generic export failures.
 
-## 5. Binding pin test
+## 5. Destination pin test
 
-After the successful export:
+Choose one of the newly exported cards and record its Anki note ID.
 
-1. note each exported item's Anki note ID;
-2. change the language route/fallback so it would now resolve somewhere else for an unbound item;
-3. re-export the same Ready items.
+Then change that language's deck rule to another deck and export again.
 
 Verify:
 
-- each existing note keeps the same Anki note ID;
-- neither existing card moves decks merely because the route/default changed;
-- the side panel still shows the pinned destination snapshot.
+- the existing note keeps the same Anki note ID;
+- it stays in its original deck;
+- the card still shows its pinned Anki deck.
 
-## 6. Explicit same-model move
+Changing a language rule affects future/unbound cards, not already-exported notes.
 
-For one exported item:
+## 6. Deliberate move
 
-1. choose the other Collector-managed profile in the item's destination control;
-2. confirm that changing the selector alone does not move the Anki card;
-3. click **Move exported note**;
-4. verify the card moves to the target deck;
-5. verify the Anki note ID stays unchanged;
-6. re-export and confirm the moved destination remains pinned.
+For the same exported card:
 
-A move that would change note type must be blocked until ACCP-014.
+1. open **Move to another deck…**;
+2. choose another deck;
+3. confirm that selection alone does not move the Anki card;
+4. click **Move**;
+5. verify the card moves to the chosen deck;
+6. verify the Anki note ID stays unchanged;
+7. export again and confirm it remains pinned there.
 
-## 7. v2 -> v3 identity migration spot-check
+## 7. Legacy identity spot-check
 
-If the local Collector database contains a note exported before ACCP-013:
+If an item was already exported before ACCP-013, confirm its existing Anki note ID is still displayed after the v2 → v3 local database upgrade.
 
-1. record its existing Anki note ID before reloading the new build;
-2. open the new side panel so IndexedDB upgrades to v3;
-3. re-export that item.
-
-Verify the same Anki note is updated rather than duplicated. Its new `ExportBinding` should preserve the existing note ID and pin the migrated default destination.
+If that old card uses a custom note type, Collector should leave it unchanged until explicit custom-note mapping is implemented.
 
 ## Acceptance record
 
-Record:
+Record only:
 
-- browser/version;
-- Anki Desktop + AnkiConnect version if convenient;
-- the three deck names;
-- whether the mixed batch routed correctly;
-- note IDs before/after the pin test;
-- explicit move result;
-- v2->v3 existing-note identity result if an older exported item was available;
-- any unexpected deck/model mutation.
+- the Hebrew, Serbian, and Spanish deck names;
+- whether one mixed export routed all three correctly;
+- one note ID before/after the pin test;
+- the explicit move result;
+- whether any old custom-note card was left unchanged as expected.
 
-Do not attach private corpus backups or screenshots that reveal study content unless intentionally redacted.
+Do not publish private study text or corpus backups.
