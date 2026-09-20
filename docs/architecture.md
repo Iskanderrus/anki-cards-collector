@@ -117,7 +117,7 @@ Ready items are then grouped by profile so one batch can safely target several d
 
 For a Collector-managed profile, the Anki upsert path is:
 
-1. verify the destination deck; additional profiles must use a live existing deck, while the deterministic legacy/default Collector fallback keeps its historical managed-deck creation behavior;
+1. verify the destination deck exists; no export path creates a missing deck implicitly;
 2. make sure the Collector-owned note type contains the proposal fields;
 3. derive the same reviewed prompt/answer shown in the side panel;
 4. use the binding's Anki note ID when possible;
@@ -154,6 +154,6 @@ The collector assumes partial failure is normal.
 - Duplicate expression: keep the lexical unit and add an occurrence.
 - Anki is closed: local data stays untouched and TSV remains available.
 - An Anki note was deleted externally: the next export falls back to lookup / create while retaining the resolved profile.
-- A configured additional deck disappears: export fails usefully instead of silently recreating a possibly mistyped destination.
+- A configured deck disappears: export fails usefully instead of silently recreating it. The side panel may create the saved deck only through an explicit user action after a live catalog refresh.
 - A profile or language route changes: already-exported notes keep their pinned binding snapshot until the user performs an explicit move.
 - A source adapter stops matching: generic capture remains available.
