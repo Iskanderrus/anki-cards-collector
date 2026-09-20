@@ -66,7 +66,7 @@ export function resolveExportRoute(
 export function validateProfileForCurrentExport(profile: ExportProfile): void {
   if (profile.mode !== "collector-managed") {
     throw new Error(
-      `Export profile "${profile.name}" uses an existing user-owned note type. Field mapping is implemented by ACCP-014; this profile cannot export yet.`,
+      `This existing Anki destination uses a custom note type that Collector cannot update safely yet.`,
     );
   }
 }
