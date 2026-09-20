@@ -543,8 +543,203 @@ function App(): React.ReactElement {
   }
 
   async function persistSettings(next: CollectorSettings): Promise<void> {
-    setSettings(next);
     await saveSettings(next);
+    const normalized = await loadSettings();
+    setSettings(normalized);
+    setRouteProfileId((current) =>
+      normalized.exportProfiles.some((profile) => profile.id === current)
+        ? current
+        : normalized.fallbackProfileId
+    );
+  }
+
+  function resolvedRoute(item: CollectedItem) {
+    try {
+      return resolveExportRoute(
+        item,
+        settings,
+        exportBindings[item.lexicalUnit.id] ?? null,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  async function setItemProfileOverride(
+    lexicalUnitId: string,
+    profileId: string,
+  ): Promise<void> {
+    if (profileId === "auto") {
+      const existing = exportBindings[lexicalUnitId];
+      if (existing?.ankiNoteId !== undefined) {
+        setError("An exported item is pinned to its destination. Use the explicit move action instead.");
+        return;
+      }
+      await repository.clearExportBinding(lexicalUnitId);
+      await load();
+      return;
+    }
+
+    const profile = settings.exportProfiles.find((candidate) => candidate.id === profileId);
+    if (!profile) {
+      setError("The selected export profile no longer exists.");
+      return;
+    }
+
+    const existing = exportBindings[lexicalUnitId];
+    if (existing?.ankiNoteId !== undefined) {
+      setPendingMoveProfiles((current) => ({ ...current, [lexicalUnitId]: profileId }));
+      return;
+    }
+
+    await repository.setExportBinding({
+      lexicalUnitId,
+      profileId,
+    });
+    setNotice(`Destination override set to ${profile.name}.`);
+    await load();
+  }
+
+  async function moveExportedItem(
+    item: CollectedItem,
+    targetProfileId: string,
+  ): Promise<void> {
+    const binding = exportBindings[item.lexicalUnit.id];
+    if (!binding?.ankiNoteId) {
+      setError("This item has no exported Anki note to move.");
+      return;
+    }
+
+    const currentProfile = settings.exportProfiles.find(
+      (profile) => profile.id === binding.profileId,
+    );
+    const target = settings.exportProfiles.find(
+      (profile) => profile.id === targetProfileId,
+    );
+    if (!currentProfile || !target) {
+      setError("The current or target export profile no longer exists.");
+      return;
+    }
+    if (target.mode !== "collector-managed") {
+      setError("Moving to a mapped user note type requires ACCP-014.");
+      return;
+    }
+    if (currentProfile.modelName !== target.modelName) {
+      setError("Changing an exported note's note type requires ACCP-014 mapping. Only same-note-type deck moves are allowed here.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const client = new AnkiClient();
+      await client.ensureDeckAndModel(target);
+      await client.moveNoteToDeck(binding.ankiNoteId, target.deckName);
+      await repository.setExportBinding({
+        lexicalUnitId: item.lexicalUnit.id,
+        profileId: target.id,
+        ankiNoteId: binding.ankiNoteId,
+        deckName: target.deckName,
+        modelName: target.modelName,
+      });
+      setPendingMoveProfiles((current) => {
+        const next = { ...current };
+        delete next[item.lexicalUnit.id];
+        return next;
+      });
+      setNotice(`Moved Anki note ${binding.ankiNoteId} to ${target.deckName} and updated its pinned profile.`);
+      await load();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Could not move the Anki note.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addExportProfile(): Promise<void> {
+    const catalog = currentCatalogSnapshot();
+    const deck = catalog?.decks[0];
+    const model = catalog?.models[0];
+    if (!deck || !model) {
+      setError("Refresh the live Anki catalog before adding another export profile.");
+      return;
+    }
+
+    const profile: ExportProfile = {
+      id: crypto.randomUUID(),
+      name: `Profile ${settings.exportProfiles.length + 1}`,
+      deckName: deck.name,
+      deckId: String(deck.id),
+      modelName: model.name,
+      modelId: String(model.id),
+      mode: "collector-managed",
+    };
+    await persistSettings({
+      ...settings,
+      exportProfiles: [...settings.exportProfiles, profile],
+    });
+    setNotice("Export profile added. Choose its deck and note type below.");
+  }
+
+  async function updateExportProfile(
+    profileId: string,
+    changes: Partial<ExportProfile>,
+  ): Promise<void> {
+    const exportProfiles = settings.exportProfiles.map((profile) =>
+      profile.id === profileId ? { ...profile, ...changes, id: profile.id } : profile
+    );
+    await persistSettings({ ...settings, exportProfiles });
+  }
+
+  async function removeExportProfile(profileId: string): Promise<void> {
+    if (profileId === settings.fallbackProfileId) {
+      setError("Choose a different fallback profile before deleting this one.");
+      return;
+    }
+    if (settings.languageRoutes.some((route) => route.profileId === profileId)) {
+      setError("Remove language routes that use this profile before deleting it.");
+      return;
+    }
+    if (Object.values(exportBindings).some((binding) => binding.profileId === profileId)) {
+      setError("This profile is pinned to collected items. Reassign those items before deleting it.");
+      return;
+    }
+
+    await persistSettings({
+      ...settings,
+      exportProfiles: settings.exportProfiles.filter((profile) => profile.id !== profileId),
+    });
+    setNotice("Export profile removed.");
+  }
+
+  async function saveLanguageRoute(): Promise<void> {
+    const language = routeLanguage.trim().toLowerCase();
+    if (!language || language === "und") {
+      setError("Enter a concrete language code such as he, sr, or es.");
+      return;
+    }
+    if (!settings.exportProfiles.some((profile) => profile.id === routeProfileId)) {
+      setError("Choose a valid export profile for this language.");
+      return;
+    }
+
+    const languageRoutes = [
+      ...settings.languageRoutes.filter((route) => route.language !== language),
+      { language, profileId: routeProfileId },
+    ].sort((left, right) => left.language.localeCompare(right.language));
+
+    await persistSettings({ ...settings, languageRoutes });
+    setRouteLanguage("");
+    setNotice(`Default export route for ${language} saved.`);
+  }
+
+  async function removeLanguageRoute(language: string): Promise<void> {
+    await persistSettings({
+      ...settings,
+      languageRoutes: settings.languageRoutes.filter((route) => route.language !== language),
+    });
+    setNotice(`Language route ${language} removed.`);
   }
 
   function currentCatalogSnapshot(): AnkiCatalogSnapshot | null {
