@@ -177,9 +177,32 @@ function App(): React.ReactElement {
       repository.listExportBindings(),
       loadSettings(),
     ]);
+
+    const completedBindings = await Promise.all(loadedBindings.map(async (binding) => {
+      if (
+        binding.ankiNoteId === undefined
+        || (binding.deckName !== undefined && binding.modelName !== undefined)
+      ) {
+        return binding;
+      }
+
+      const profile = loadedSettings.exportProfiles.find(
+        (candidate) => candidate.id === binding.profileId,
+      );
+      if (!profile) return binding;
+
+      const completed: ExportBinding = {
+        ...binding,
+        deckName: binding.deckName ?? profile.deckName,
+        modelName: binding.modelName ?? profile.modelName,
+      };
+      await repository.setExportBinding(completed);
+      return completed;
+    }));
+
     setItems(loadedItems);
     setExportBindings(Object.fromEntries(
-      loadedBindings.map((binding) => [binding.lexicalUnitId, binding]),
+      completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
     ));
     setActiveId((current) => (
       current && loadedItems.some((item) => item.lexicalUnit.id === current)
