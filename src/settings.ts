@@ -128,3 +128,76 @@ export async function saveSettings(settings: CollectorSettings): Promise<void> {
   const normalized = migrateSettings(settings);
   await chrome.storage.local.set({ collectorSettings: normalized });
 }
+
+
+export interface SettingsMergeResult {
+  settings: CollectorSettings;
+  conflicts: string[];
+}
+
+function sameProfile(left: ExportProfile, right: ExportProfile): boolean {
+  return left.id === right.id
+    && left.name === right.name
+    && left.deckName === right.deckName
+    && left.deckId === right.deckId
+    && left.modelName === right.modelName
+    && left.modelId === right.modelId
+    && left.mode === right.mode;
+}
+
+function sameSettings(left: CollectorSettings, right: CollectorSettings): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function mergeSettingsForRestore(
+  currentValue: CollectorSettings,
+  incomingValue: CollectorSettings,
+): SettingsMergeResult {
+  const current = migrateSettings(currentValue);
+  const incoming = migrateSettings(incomingValue);
+
+  if (sameSettings(current, DEFAULT_SETTINGS)) {
+    return { settings: incoming, conflicts: [] };
+  }
+
+  const conflicts: string[] = [];
+  const profiles = new Map(current.exportProfiles.map((profile) => [profile.id, profile]));
+
+  for (const incomingProfile of incoming.exportProfiles) {
+    const local = profiles.get(incomingProfile.id);
+    if (!local) {
+      profiles.set(incomingProfile.id, incomingProfile);
+      continue;
+    }
+    if (!sameProfile(local, incomingProfile)) {
+      conflicts.push(
+        `Export profile conflict: "${incomingProfile.name}" uses profile id ${incomingProfile.id}, which already has different local configuration.`,
+      );
+    }
+  }
+
+  const routes = new Map(current.languageRoutes.map((route) => [route.language, route]));
+  for (const incomingRoute of incoming.languageRoutes) {
+    const local = routes.get(incomingRoute.language);
+    if (!local) {
+      routes.set(incomingRoute.language, incomingRoute);
+      continue;
+    }
+    if (local.profileId !== incomingRoute.profileId) {
+      conflicts.push(
+        `Language route conflict: ${incomingRoute.language} already routes to a different local export profile.`,
+      );
+    }
+  }
+
+  return {
+    settings: {
+      ...current,
+      exportProfiles: [...profiles.values()],
+      languageRoutes: [...routes.values()].sort(
+        (left, right) => left.language.localeCompare(right.language),
+      ),
+    },
+    conflicts,
+  };
+}
