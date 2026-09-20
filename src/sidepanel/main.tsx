@@ -530,15 +530,34 @@ function App(): React.ReactElement {
       return;
     }
 
+    const legacyCustom = ready.filter((item) => {
+      const binding = exportBindings[item.lexicalUnit.id];
+      if (!binding?.ankiNoteId) return false;
+      const profile = settings.exportProfiles.find(
+        (candidate) => candidate.id === binding.profileId,
+      );
+      return profile?.mode === "mapped-user-model";
+    });
+    const exportable = ready.filter((item) => !legacyCustom.includes(item));
+
+    if (exportable.length === 0) {
+      setError(
+        legacyCustom.length > 0
+          ? "These existing Anki cards use custom note types. Collector will leave them unchanged for now."
+          : "No Ready cards can be exported.",
+      );
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
     setExportOutcomes({});
-    setExportProgress({ completed: 0, total: ready.length });
+    setExportProgress({ completed: 0, total: exportable.length });
 
     try {
       const report = await exportBatch(
-        ready,
+        exportable,
         settings,
         new Map(Object.values(exportBindings).map((binding) => [binding.lexicalUnitId, binding])),
         new AnkiClient(),
@@ -551,6 +570,9 @@ function App(): React.ReactElement {
       ));
 
       const parts = [`${report.exported} exported`];
+      if (legacyCustom.length > 0) {
+        parts.push(`${legacyCustom.length} existing custom-card${legacyCustom.length === 1 ? "" : "s"} skipped`);
+      }
       if (report.failed > 0) parts.push(`${report.failed} failed`);
       if (report.warnings > 0) parts.push(`${report.warnings} local warning${report.warnings === 1 ? "" : "s"}`);
 
