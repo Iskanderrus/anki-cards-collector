@@ -13,11 +13,13 @@ interface LegacyCollectorSettings {
   sourceUrlMode?: SourceUrlMode;
 }
 
+export const COLLECTOR_MANAGED_MODEL_NAME = "Collector Basic";
+
 const DEFAULT_PROFILE: ExportProfile = {
   id: LEGACY_DEFAULT_PROFILE_ID,
   name: "Collector default",
   deckName: "Collector Inbox",
-  modelName: "Collector Basic",
+  modelName: COLLECTOR_MANAGED_MODEL_NAME,
   mode: "collector-managed",
 };
 
@@ -31,6 +33,65 @@ export const DEFAULT_SETTINGS: CollectorSettings = {
 
 function normalizeLanguage(language: string): string {
   return language.trim().toLowerCase() || "und";
+}
+
+export function managedProfileIdForDeck(deckName: string): string {
+  return `collector-deck:${encodeURIComponent(deckName.trim() || "Collector Inbox")}`;
+}
+
+function managedProfileForDeck(
+  deckName: string,
+  deckId?: string,
+): ExportProfile {
+  const normalizedDeck = deckName.trim() || "Collector Inbox";
+  return {
+    id: managedProfileIdForDeck(normalizedDeck),
+    name: normalizedDeck,
+    deckName: normalizedDeck,
+    ...(deckId ? { deckId } : {}),
+    modelName: COLLECTOR_MANAGED_MODEL_NAME,
+    mode: "collector-managed",
+  };
+}
+
+export function ensureManagedProfileForDeck(
+  settings: CollectorSettings,
+  deckName: string,
+  deckId?: string,
+): { settings: CollectorSettings; profile: ExportProfile } {
+  const normalizedDeck = deckName.trim() || "Collector Inbox";
+  const existing = settings.exportProfiles.find(
+    (profile) =>
+      profile.mode === "collector-managed"
+      && profile.modelName === COLLECTOR_MANAGED_MODEL_NAME
+      && profile.deckName === normalizedDeck,
+  );
+
+  if (existing) {
+    const profile = deckId && existing.deckId !== deckId
+      ? { ...existing, deckId }
+      : existing;
+    const exportProfiles = profile === existing
+      ? settings.exportProfiles
+      : settings.exportProfiles.map((candidate) =>
+          candidate.id === existing.id ? profile : candidate
+        );
+    return {
+      settings: exportProfiles === settings.exportProfiles
+        ? settings
+        : { ...settings, exportProfiles },
+      profile,
+    };
+  }
+
+  const profile = managedProfileForDeck(normalizedDeck, deckId);
+  return {
+    settings: {
+      ...settings,
+      exportProfiles: [...settings.exportProfiles, profile],
+    },
+    profile,
+  };
 }
 
 function normalizedProfiles(value: unknown): ExportProfile[] {
@@ -79,47 +140,87 @@ function normalizedRoutes(value: unknown, profileIds: Set<string>): LanguageRout
   return [...routes.values()].sort((left, right) => left.language.localeCompare(right.language));
 }
 
+function repairManagedRouting(settings: CollectorSettings): CollectorSettings {
+  let repaired = {
+    ...settings,
+    exportProfiles: [...settings.exportProfiles],
+    languageRoutes: [...settings.languageRoutes],
+  };
+
+  const profile = (profileId: string) =>
+    repaired.exportProfiles.find((candidate) => candidate.id === profileId);
+
+  const ensureFor = (source: ExportProfile): ExportProfile => {
+    const ensured = ensureManagedProfileForDeck(repaired, source.deckName, source.deckId);
+    repaired = ensured.settings;
+    return ensured.profile;
+  };
+
+  const fallback = profile(repaired.fallbackProfileId);
+  if (!fallback || fallback.mode !== "collector-managed") {
+    const source = fallback ?? repaired.exportProfiles[0] ?? DEFAULT_PROFILE;
+    repaired.fallbackProfileId = ensureFor(source).id;
+  }
+
+  repaired.languageRoutes = repaired.languageRoutes.map((route) => {
+    const source = profile(route.profileId);
+    if (!source || source.mode === "collector-managed") return route;
+    return {
+      language: route.language,
+      profileId: ensureFor(source).id,
+    };
+  });
+
+  return repaired;
+}
+
 export function migrateSettings(value: unknown): CollectorSettings {
   const raw = value && typeof value === "object"
     ? value as Partial<CollectorSettings> & LegacyCollectorSettings
     : {};
 
   let exportProfiles = normalizedProfiles(raw.exportProfiles);
+
   if (exportProfiles.length === 0) {
     const deckName = String(raw.deckName ?? DEFAULT_PROFILE.deckName).trim() || DEFAULT_PROFILE.deckName;
     const modelName = String(raw.modelName ?? DEFAULT_PROFILE.modelName).trim() || DEFAULT_PROFILE.modelName;
-    exportProfiles = [{
-      ...DEFAULT_PROFILE,
-      deckName,
-      modelName,
-      mode: modelName === DEFAULT_PROFILE.modelName
-        ? "collector-managed"
-        : "mapped-user-model",
-    }];
+
+    if (modelName === COLLECTOR_MANAGED_MODEL_NAME) {
+      exportProfiles = [{ ...DEFAULT_PROFILE, deckName }];
+    } else {
+      // Preserve the old user-owned destination for already-exported bindings,
+      // but never make it the destination for new/unbound cards.
+      exportProfiles = [{
+        ...DEFAULT_PROFILE,
+        name: "Legacy Anki destination",
+        deckName,
+        modelName,
+        mode: "mapped-user-model",
+      }];
+    }
   }
 
   const profileIds = new Set(exportProfiles.map((profile) => profile.id));
-  const fallbackProfileId = profileIds.has(String(raw.fallbackProfileId ?? ""))
+  const requestedFallback = profileIds.has(String(raw.fallbackProfileId ?? ""))
     ? String(raw.fallbackProfileId)
     : exportProfiles[0]!.id;
 
-  return {
+  const migrated: CollectorSettings = {
     defaultLanguage: normalizeLanguage(String(raw.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage)),
     sourceUrlMode: raw.sourceUrlMode === "query" || raw.sourceUrlMode === "none"
       ? raw.sourceUrlMode
       : "sanitized",
     exportProfiles,
     languageRoutes: normalizedRoutes(raw.languageRoutes, profileIds),
-    fallbackProfileId,
+    fallbackProfileId: requestedFallback,
   };
+
+  return repairManagedRouting(migrated);
 }
 
 export async function loadSettings(): Promise<CollectorSettings> {
   const stored = await chrome.storage.local.get("collectorSettings");
   const settings = migrateSettings(stored.collectorSettings);
-
-  // Persist the normalized profile-based schema so legacy deck/model settings are
-  // deterministically migrated after the first ACCP-013 load.
   await chrome.storage.local.set({ collectorSettings: settings });
   return settings;
 }
@@ -128,7 +229,6 @@ export async function saveSettings(settings: CollectorSettings): Promise<void> {
   const normalized = migrateSettings(settings);
   await chrome.storage.local.set({ collectorSettings: normalized });
 }
-
 
 export interface SettingsMergeResult {
   settings: CollectorSettings;
@@ -172,7 +272,7 @@ export function mergeSettingsForRestore(
     }
     if (!sameProfile(local, incomingProfile)) {
       conflicts.push(
-        `Export profile conflict: "${incomingProfile.name}" uses profile id ${incomingProfile.id}, which already has different local configuration.`,
+        `Export destination conflict: "${incomingProfile.deckName}" already has different local configuration.`,
       );
     }
   }
@@ -186,19 +286,19 @@ export function mergeSettingsForRestore(
     }
     if (local.profileId !== incomingRoute.profileId) {
       conflicts.push(
-        `Language route conflict: ${incomingRoute.language} already routes to a different local export profile.`,
+        `Language route conflict: ${incomingRoute.language} already uses a different Anki deck.`,
       );
     }
   }
 
   return {
-    settings: {
+    settings: migrateSettings({
       ...current,
       exportProfiles: [...profiles.values()],
       languageRoutes: [...routes.values()].sort(
         (left, right) => left.language.localeCompare(right.language),
       ),
-    },
+    }),
     conflicts,
   };
 }
