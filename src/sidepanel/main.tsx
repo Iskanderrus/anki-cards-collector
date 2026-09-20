@@ -652,9 +652,17 @@ function App(): React.ReactElement {
     lexicalUnitId: string,
     deckName: string,
   ): Promise<void> {
+    const existing = exportBindings[lexicalUnitId];
+
+    if (existing?.state === "reserved") {
+      setError(
+        "A previous Anki export may already have reached this card. Retry Send ready to Anki to reconcile it before changing the deck.",
+      );
+      return;
+    }
+
     if (deckName === "auto") {
-      const existing = exportBindings[lexicalUnitId];
-      if (existing?.ankiNoteId !== undefined) {
+      if (existing?.ankiNoteId !== undefined || existing?.state === "exported") {
         setError("This card is already in Anki. Use “Move to another deck…” instead.");
         return;
       }
@@ -665,8 +673,7 @@ function App(): React.ReactElement {
     }
 
     const profile = await ensureDeckProfile(deckName);
-    const existing = exportBindings[lexicalUnitId];
-    if (existing?.ankiNoteId !== undefined) {
+    if (existing?.ankiNoteId !== undefined || existing?.state === "exported") {
       setPendingMoveDecks((current) => ({ ...current, [lexicalUnitId]: deckName }));
       return;
     }
@@ -674,6 +681,7 @@ function App(): React.ReactElement {
     await repository.setExportBinding({
       lexicalUnitId,
       profileId: profile.id,
+      state: "override",
       deckName: profile.deckName,
       modelName: profile.modelName,
     });
@@ -1463,6 +1471,7 @@ function App(): React.ReactElement {
             : null;
           const legacyCustomNote =
             binding?.ankiNoteId !== undefined && boundProfile?.mode === "mapped-user-model";
+          const reconciliationPending = binding?.state === "reserved";
           const currentDeckName = route?.profile.deckName ?? binding?.deckName ?? "";
           const pendingMoveDeckName = pendingMoveDecks[unit.id] ?? currentDeckName;
 
@@ -1558,7 +1567,11 @@ function App(): React.ReactElement {
                       )}
                     </div>
 
-                    {legacyCustomNote ? (
+                    {reconciliationPending ? (
+                      <div className="legacy-note-warning" role="status">
+                        Previous export needs confirmation. Send Ready cards to Anki again before changing this deck.
+                      </div>
+                    ) : legacyCustomNote ? (
                       <div className="legacy-note-warning" role="status">
                         This existing Anki card uses a custom note type. Collector will leave it unchanged for now.
                       </div>
