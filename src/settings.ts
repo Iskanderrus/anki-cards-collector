@@ -159,7 +159,11 @@ function repairManagedRouting(settings: CollectorSettings): CollectorSettings {
   const fallback = profile(repaired.fallbackProfileId);
   if (!fallback || fallback.mode !== "collector-managed") {
     const source = fallback ?? repaired.exportProfiles[0] ?? DEFAULT_PROFILE;
-    repaired.fallbackProfileId = ensureFor(source).id;
+    const managedFallback = ensureFor(source);
+    repaired = {
+      ...repaired,
+      fallbackProfileId: managedFallback.id,
+    };
   }
 
   repaired.languageRoutes = repaired.languageRoutes.map((route) => {
