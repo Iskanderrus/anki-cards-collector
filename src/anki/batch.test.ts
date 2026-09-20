@@ -110,7 +110,14 @@ describe("exportBatch profile routing", () => {
       undefined,
     );
 
-    expect(persisted.map((binding) => [binding.lexicalUnitId, binding.profileId])).toEqual([
+    const reservations = persisted.filter((binding) => binding.ankiNoteId === undefined);
+    const completed = persisted.filter((binding) => binding.ankiNoteId !== undefined);
+    expect(reservations.map((binding) => [binding.lexicalUnitId, binding.profileId])).toEqual([
+      ["he-one", "he-profile"],
+      ["sr-one", "sr-profile"],
+      ["es-one", "fallback-profile"],
+    ]);
+    expect(completed.map((binding) => [binding.lexicalUnitId, binding.profileId])).toEqual([
       ["he-one", "he-profile"],
       ["sr-one", "sr-profile"],
       ["es-one", "fallback-profile"],
@@ -168,16 +175,32 @@ describe("exportBatch profile routing", () => {
     });
   });
 
-  it("reports a local binding persistence warning without calling Anki export a failure", async () => {
+  it("keeps the destination reservation when saving the final note id fails", async () => {
+    const persisted: ExportBinding[] = [];
+    let writes = 0;
+    const exportClient = client({ upsert: vi.fn(async () => 4242) });
+
     const report = await exportBatch(
       [item("he-one", "שלום", "he")],
       settings,
       new Map(),
-      client({ upsert: vi.fn(async () => 4242) }),
-      async () => {
-        throw new Error("IndexedDB unavailable");
+      exportClient,
+      async (binding) => {
+        writes += 1;
+        if (writes === 2) throw new Error("IndexedDB unavailable");
+        persisted.push(binding);
       },
     );
+
+    expect(exportClient.upsert).toHaveBeenCalledOnce();
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      lexicalUnitId: "he-one",
+      profileId: "he-profile",
+      deckName: "Hebrew RU",
+      modelName: "Collector Basic",
+    });
+    expect(persisted[0]?.ankiNoteId).toBeUndefined();
 
     expect(report).toMatchObject({
       total: 1,
@@ -190,6 +213,27 @@ describe("exportBatch profile routing", () => {
       noteId: 4242,
       profileId: "he-profile",
       deckName: "Hebrew RU",
+    });
+  });
+
+  it("does not mutate Anki when the destination reservation cannot be persisted", async () => {
+    const exportClient = client();
+
+    const report = await exportBatch(
+      [item("he-one", "שלום", "he")],
+      settings,
+      new Map(),
+      exportClient,
+      async () => {
+        throw new Error("IndexedDB unavailable");
+      },
+    );
+
+    expect(exportClient.upsert).not.toHaveBeenCalled();
+    expect(report).toMatchObject({ total: 1, exported: 0, failed: 1, warnings: 0 });
+    expect(report.results[0]).toMatchObject({
+      kind: "failed",
+      error: "IndexedDB unavailable",
     });
   });
 
