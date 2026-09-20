@@ -99,3 +99,39 @@ Use at least one real deck that contains existing cards and confirm:
 - model distribution is plausible;
 - representative front/back matches what Anki shows;
 - inspection does not change scheduling, fields, templates, or deck placement.
+
+
+## Implemented boundary
+
+ACCP-017 implements deck analysis as a read-only evidence workflow:
+
+- `findCards(deck:"…")` discovers matching card IDs;
+- IDs are normalized, deduplicated, sorted deterministically, and reduced to a bounded evenly-spaced sample before card content is requested;
+- the default `cardsInfo` sample bound is **24 cards**;
+- large-deck UI explicitly reports that sampling is bounded;
+- distribution counts are counts **within the inspected sample**, never a claim about the whole deck;
+- representative cards are selected deterministically per sampled `modelName + card ordinal`, with a bounded representative count per model;
+- cards missing or malformed between `findCards` and `cardsInfo` are skipped and reported as unavailable evidence rather than failing the whole inspection;
+- no model is selected automatically from frequency.
+
+The side panel exposes one small **Inspect** action beside a configured language deck. The resulting evidence panel shows:
+
+- total matching card count from `findCards`;
+- sampled/inspected counts;
+- sampled model distribution;
+- representative front/back content returned by Anki;
+- card template ordinal when available;
+- CSS character count as metadata.
+
+Representative front/back HTML is shown inside a sandboxed iframe with a restrictive CSP. Scripts and external resource/network loading are blocked. CSS is treated as read-only preview evidence and is never copied into Collector configuration.
+
+## Safety invariant
+
+Deck analysis owns no mutation methods. The browser acceptance verifies that clicking **Inspect** produces only:
+
+```text
+findCards
+cardsInfo
+```
+
+for the analysis operation and does not call deck/card/model mutation actions.
