@@ -717,6 +717,30 @@ function App(): React.ReactElement {
     setNotice("Export profile added. Choose its deck and note type below.");
   }
 
+  async function createSavedProfileDeck(profile: ExportProfile): Promise<void> {
+    if (catalogState.kind !== "live") {
+      setError("Refresh the live Anki catalog before creating a saved deck.");
+      return;
+    }
+    if (catalogState.snapshot.decks.some((deck) => deck.name === profile.deckName)) {
+      setNotice(`${profile.deckName} already exists in Anki.`);
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await new AnkiClient().createDeck(profile.deckName);
+      setNotice(`Created Anki deck ${profile.deckName} explicitly.`);
+      await refreshAnkiCatalog();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Could not create the Anki deck.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateExportProfile(
     profileId: string,
     changes: Partial<ExportProfile>,
@@ -1270,6 +1294,17 @@ function App(): React.ReactElement {
                     Mode: {profile.mode === "collector-managed" ? "Collector-managed note type" : "Mapped user note type"}
                     {profile.id === settings.fallbackProfileId ? " · fallback" : ""}
                   </div>
+
+                  {catalogState.kind === "live" && !catalogState.snapshot.decks.some((deck) => deck.name === profile.deckName) && (
+                    <button
+                      className="ghost"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void createSavedProfileDeck(profile)}
+                    >
+                      Create saved deck in Anki
+                    </button>
+                  )}
 
                   {settings.exportProfiles.length > 1 && (
                     <button
