@@ -223,10 +223,23 @@ function validateItems(items: CollectedItem[]): CollectedItem[] {
 function readExportBinding(value: unknown, path: string): ExportBinding {
   const record = asRecord(value, path);
   const ankiNoteId = readOptionalAnkiNoteId(record, path);
+  const rawState = record.state;
+  const state =
+    rawState === undefined
+      ? (ankiNoteId === undefined ? "reserved" : "exported")
+      : rawState;
+
+  if (state !== "override" && state !== "reserved" && state !== "exported") {
+    throw new Error(`${path}.state is not supported.`);
+  }
+  if (state === "exported" && ankiNoteId === undefined) {
+    throw new Error(`${path}.state cannot be exported without an ankiNoteId.`);
+  }
 
   return {
     lexicalUnitId: readString(record, "lexicalUnitId", path),
     profileId: readString(record, "profileId", path),
+    state,
     ...(ankiNoteId === undefined ? {} : { ankiNoteId }),
     ...(readOptionalString(record, "deckName", path) === undefined
       ? {}
@@ -245,6 +258,7 @@ function legacyBindings(items: CollectedItem[]): ExportBinding[] {
       : [{
           lexicalUnitId: item.lexicalUnit.id,
           profileId: LEGACY_DEFAULT_PROFILE_ID,
+          state: "exported",
           ankiNoteId: item.lexicalUnit.ankiNoteId,
           updatedAt: item.lexicalUnit.updatedAt,
         }]
