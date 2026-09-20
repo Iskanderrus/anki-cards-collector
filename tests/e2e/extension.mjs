@@ -26,6 +26,121 @@ assert.ok(
   "Duolingo subdomain access must be optional.",
 );
 
+const ankiRequests = [];
+let nextAnkiNoteId = 9000;
+
+const collectorFields = [
+  "CollectorID",
+  "Prompt",
+  "Answer",
+  "CardKind",
+  "Why",
+  "Canonical",
+  "Observed",
+  "Expression",
+  "Context",
+  "Note",
+  "Source",
+];
+
+const ankiServer = createServer(async (request, response) => {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  ankiRequests.push(body);
+
+  const action = body.action;
+  const params = body.params ?? {};
+  let result = null;
+  let error = null;
+
+  switch (action) {
+    case "version":
+      result = 6;
+      break;
+    case "deckNamesAndIds":
+      result = {
+        "Collector Inbox": 1,
+        "Hebrew RU": 2,
+        "Serbian RU": 3,
+      };
+      break;
+    case "modelNamesAndIds":
+      result = {
+        "Collector Basic": 10,
+        "Hebrew Existing": 11,
+      };
+      break;
+    case "modelFieldNames":
+      result = params.modelName === "Collector Basic"
+        ? collectorFields
+        : ["Hebrew", "Russian"];
+      break;
+    case "modelFieldsOnTemplates":
+      result = params.modelName === "Collector Basic"
+        ? { Recognition: [["Prompt"], ["Prompt", "Answer", "Context", "Note"]] }
+        : { Recognition: [["Hebrew"], ["Hebrew", "Russian"]] };
+      break;
+    case "modelTemplates":
+      result = params.modelName === "Collector Basic"
+        ? {
+            Recognition: {
+              Front: "{{Prompt}}",
+              Back: "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>",
+            },
+          }
+        : {
+            Recognition: {
+              Front: "{{Hebrew}}",
+              Back: "{{FrontSide}}<hr>{{Russian}}",
+            },
+          };
+      break;
+    case "modelStyling":
+      result = { css: ".card { font-size: 22px; }" };
+      break;
+    case "deckNames":
+      result = ["Collector Inbox", "Hebrew RU", "Serbian RU"];
+      break;
+    case "modelNames":
+      result = ["Collector Basic", "Hebrew Existing"];
+      break;
+    case "notesInfo":
+      result = (params.notes ?? []).map((noteId) => ({ noteId }));
+      break;
+    case "findNotes":
+      result = [];
+      break;
+    case "addNote":
+      nextAnkiNoteId += 1;
+      result = nextAnkiNoteId;
+      break;
+    case "updateNoteFields":
+    case "modelFieldAdd":
+    case "updateModelTemplates":
+    case "updateModelStyling":
+    case "changeDeck":
+      result = null;
+      break;
+    case "findCards":
+      result = [7001];
+      break;
+    default:
+      error = `Unexpected AnkiConnect action in E2E fixture: ${action}`;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+  });
+  response.end(JSON.stringify({ result, error }));
+});
+
+await new Promise((resolveListen, rejectListen) => {
+  ankiServer.once("error", rejectListen);
+  ankiServer.listen(8765, "127.0.0.1", resolveListen);
+});
+
 const server = createServer((request, response) => {
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 
@@ -634,6 +749,82 @@ try {
     "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
+  // ACCP-013 browser acceptance: configure two live-deck profiles and export
+  // two Ready languages in one batch through different destinations.
+  await panel.bringToFront();
+  await panel.locator(".settings").evaluate((details) => {
+    if (details instanceof HTMLDetailsElement) details.open = true;
+  });
+  await clickPanelButton(panel, "Refresh from Anki");
+  await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
+
+  let profileCards = panel.locator(".export-profile-card");
+  assert.equal(await profileCards.count(), 1);
+  const hebrewProfile = profileCards.nth(0);
+  await hebrewProfile.getByLabel("Profile name").fill("Hebrew");
+  await hebrewProfile.getByLabel("Anki deck").selectOption({ label: "Hebrew RU" });
+
+  await clickPanelButton(panel, "Add profile");
+  profileCards = panel.locator(".export-profile-card");
+  await assert.poll(async () => profileCards.count()).then((count) => assert.equal(count, 2));
+  const serbianProfile = profileCards.nth(1);
+  await serbianProfile.getByLabel("Profile name").fill("Serbian");
+  await serbianProfile.getByLabel("Anki deck").selectOption({ label: "Serbian RU" });
+
+  const routeEditor = panel.locator(".language-route-editor");
+  const routeLanguageInput = routeEditor.getByPlaceholder("he, sr, es…");
+  const routeProfileSelect = routeEditor.getByLabel("Profile");
+
+  await routeLanguageInput.fill("he");
+  await routeProfileSelect.selectOption({ label: "Hebrew" });
+  await clickPanelButton(panel, "Save route");
+  await panel.locator(".language-route-row", { hasText: "he → Hebrew" }).waitFor();
+
+  await routeLanguageInput.fill("sr");
+  await routeProfileSelect.selectOption({ label: "Serbian" });
+  await clickPanelButton(panel, "Save route");
+  await panel.locator(".language-route-row", { hasText: "sr → Serbian" }).waitFor();
+
+  const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
+  await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
+  await firstRoutingCard.getByRole("button", { name: "Save" }).click();
+  await firstRoutingCard.getByRole("button", { name: "Ready" }).click();
+  await firstRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  const secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
+  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
+  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
+  await secondRoutingCard.getByRole("button", { name: "Ready" }).click();
+  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
+
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
+
+  const addNotes = ankiRequests.filter((request) => request.action === "addNote");
+  assert.equal(addNotes.length, 2, "Mixed Ready batch should create two routed Anki notes.");
+  const deckByCanonical = Object.fromEntries(
+    addNotes.map((request) => [
+      request.params.note.fields.Canonical,
+      request.params.note.deckName,
+    ]),
+  );
+  assert.equal(deckByCanonical["Aunque llueva"], "Hebrew RU");
+  assert.equal(deckByCanonical["Context menu phrase"], "Serbian RU");
+
+  assert.match(
+    await firstRoutingCard.locator(".export-destination").innerText(),
+    /Hebrew.*Hebrew RU/s,
+    "Hebrew item should display its resolved/pinned Hebrew destination.",
+  );
+  assert.match(
+    await secondRoutingCard.locator(".export-destination").innerText(),
+    /Serbian.*Serbian RU/s,
+    "Serbian item should display its resolved/pinned Serbian destination.",
+  );
+
   const accessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -676,6 +867,9 @@ try {
   console.log("Browser extension capture, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
-  await new Promise((resolveClose) => server.close(resolveClose));
+  await Promise.all([
+    new Promise((resolveClose) => server.close(resolveClose)),
+    new Promise((resolveClose) => ankiServer.close(resolveClose)),
+  ]);
   await rm(userDataDir, { recursive: true, force: true });
 }
