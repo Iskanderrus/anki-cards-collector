@@ -1171,10 +1171,10 @@ function App(): React.ReactElement {
       </div>
 
       <details className="settings">
-        <summary>Settings & fallback exports</summary>
+        <summary>Settings & Anki</summary>
         <div className="settings-grid">
           <label>
-            Language code
+            Capture language
             <input
               value={settings.defaultLanguage}
               placeholder="es, sr, he…"
@@ -1187,9 +1187,9 @@ function App(): React.ReactElement {
           <div className="anki-catalog">
             <div className="anki-catalog-head">
               <div>
-                <strong>Live Anki catalog</strong>
+                <strong>Anki connection</strong>
                 <div className="setting-help">
-                  Read-only discovery. Refreshing does not create decks, change note types, or update cards.
+                  Refresh to load your Anki decks. Refreshing does not change anything in Anki.
                 </div>
               </div>
               <button
@@ -1206,13 +1206,13 @@ function App(): React.ReactElement {
               {catalogState.kind === "idle" && "Not checked yet."}
               {catalogState.kind === "loading" && "Reading decks and note types from Anki…"}
               {catalogState.kind === "live" && (
-                <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"} · {catalogState.snapshot.models.length} note type{catalogState.snapshot.models.length === 1 ? "" : "s"}</>
+                <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"}</>
               )}
               {catalogState.kind === "stale" && (
-                <>Showing the last successful catalog. Refresh failed: {catalogState.error}</>
+                <>Showing the last loaded decks. Refresh failed: {catalogState.error}</>
               )}
               {catalogState.kind === "unavailable" && (
-                <>Anki catalog unavailable: {catalogState.error}</>
+                <>Could not connect to Anki: {catalogState.error}</>
               )}
             </div>
           </div>
@@ -1299,7 +1299,7 @@ function App(): React.ReactElement {
 
               return (
                 <div className="language-deck-row fallback-deck-row">
-                  <strong>Other</strong>
+                  <strong>Other languages</strong>
                   <select
                     aria-label="Anki deck for other languages"
                     value={deckName}
