@@ -10,6 +10,11 @@ const LEGACY_V1_SCHEMA = {
   occurrences: "&id, lexicalUnitId, capturedAt",
 } as const;
 
+const LEGACY_V2_SCHEMA = {
+  lexicalUnits: "&id, &contentKey, status, updatedAt",
+  occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+} as const;
+
 interface LegacyLexicalUnitV1 {
   id: string;
   contentKey: string;
@@ -116,6 +121,58 @@ describe("CollectorDatabase migration baseline", () => {
     const listed = await new CaptureRepository(current).list();
     expect(listed[0]?.lexicalUnit).toEqual(expectedUnit);
     expect(listed[0]?.occurrences).toEqual([expectedOccurrence]);
+
+    current.close();
+  });
+
+  it("migrates a frozen v2 exported note into an export binding without changing note identity", async () => {
+    const name = `collector-v2-migration-${crypto.randomUUID()}`;
+    databaseNames.push(name);
+
+    const unit: LexicalUnit = {
+      id: "legacy-v2-unit",
+      contentKey: "he::שלום",
+      canonicalText: "שלום",
+      normalizedCanonicalText: "שלום",
+      language: "he",
+      note: "",
+      status: "ready",
+      createdAt: "2026-08-01T10:00:00Z",
+      updatedAt: "2026-08-02T10:00:00Z",
+      ankiNoteId: 9191,
+    };
+    const occurrence: Occurrence = {
+      id: "legacy-v2-occ",
+      lexicalUnitId: unit.id,
+      surfaceText: "שלום",
+      normalizedSurfaceText: "שלום",
+      context: "שלום עולם",
+      source: {
+        kind: "duolingo",
+        adapter: "duolingo-visible-backfill",
+        url: "https://www.duolingo.com/lesson",
+        title: "Duolingo",
+      },
+      capturedAt: "2026-08-01T10:00:00Z",
+    };
+
+    const legacy = new Dexie(name);
+    legacy.version(2).stores(LEGACY_V2_SCHEMA);
+    await legacy.open();
+    await legacy.table<LexicalUnit>("lexicalUnits").add(unit);
+    await legacy.table<Occurrence>("occurrences").add(occurrence);
+    legacy.close();
+
+    const current = new CollectorDatabase(name);
+    await current.open();
+
+    expect(await current.lexicalUnits.get(unit.id)).toEqual(unit);
+    expect(await current.exportBindings.get(unit.id)).toEqual({
+      lexicalUnitId: unit.id,
+      profileId: LEGACY_DEFAULT_PROFILE_ID,
+      ankiNoteId: 9191,
+      updatedAt: unit.updatedAt,
+    });
 
     current.close();
   });
