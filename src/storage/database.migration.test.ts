@@ -15,6 +15,12 @@ const LEGACY_V2_SCHEMA = {
   occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
 } as const;
 
+const LEGACY_V3_SCHEMA = {
+  lexicalUnits: "&id, &contentKey, status, updatedAt",
+  occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+  exportBindings: "&lexicalUnitId, profileId, ankiNoteId",
+} as const;
+
 interface LegacyLexicalUnitV1 {
   id: string;
   contentKey: string;
@@ -114,6 +120,7 @@ describe("CollectorDatabase migration baseline", () => {
     expect(await current.exportBindings.get(legacyUnit.id)).toEqual({
       lexicalUnitId: legacyUnit.id,
       profileId: LEGACY_DEFAULT_PROFILE_ID,
+      state: "exported",
       ankiNoteId: 4242,
       updatedAt: legacyUnit.updatedAt,
     });
@@ -170,10 +177,53 @@ describe("CollectorDatabase migration baseline", () => {
     expect(await current.exportBindings.get(unit.id)).toEqual({
       lexicalUnitId: unit.id,
       profileId: LEGACY_DEFAULT_PROFILE_ID,
+      state: "exported",
       ankiNoteId: 9191,
       updatedAt: unit.updatedAt,
     });
 
     current.close();
   });
+
+  it("migrates pre-state v3 bindings conservatively to reserved/exported lifecycle states", async () => {
+    const name = `collector-v3-binding-state-${crypto.randomUUID()}`;
+    databaseNames.push(name);
+
+    const legacy = new Dexie(name);
+    legacy.version(3).stores(LEGACY_V3_SCHEMA);
+    await legacy.open();
+    await legacy.table("exportBindings").bulkAdd([
+      {
+        lexicalUnitId: "reserved-unit",
+        profileId: "he-profile",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        updatedAt: "2026-09-20T10:00:00Z",
+      },
+      {
+        lexicalUnitId: "exported-unit",
+        profileId: "he-profile",
+        ankiNoteId: 5151,
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        updatedAt: "2026-09-20T10:00:00Z",
+      },
+    ]);
+    legacy.close();
+
+    const current = new CollectorDatabase(name);
+    await current.open();
+
+    expect(await current.exportBindings.get("reserved-unit")).toMatchObject({
+      state: "reserved",
+      ankiNoteId: undefined,
+    });
+    expect(await current.exportBindings.get("exported-unit")).toMatchObject({
+      state: "exported",
+      ankiNoteId: 5151,
+    });
+
+    current.close();
+  });
+
 });
