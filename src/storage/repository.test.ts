@@ -243,4 +243,132 @@ describe("CaptureRepository", () => {
     await repository.restoreBackup(backup);
     expect((await repository.list())[0]?.occurrences).toHaveLength(1);
   });
+
+  it("persists and clears per-item export bindings independently of lexical identity", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      ankiNoteId: 4242,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      ankiNoteId: 4242,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    await repository.clearExportBinding(captured.lexicalUnit.id);
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toBeNull();
+    expect((await repository.list())[0]?.lexicalUnit.id).toBe(captured.lexicalUnit.id);
+  });
+
+  it("refuses canonical consolidation when units are pinned to different export profiles", async () => {
+    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
+
+    await repository.setExportBinding({
+      lexicalUnitId: canonical.lexicalUnit.id,
+      profileId: "profile-a",
+    });
+    await repository.setExportBinding({
+      lexicalUnitId: observed.lexicalUnit.id,
+      profileId: "profile-b",
+    });
+
+    await expect(repository.update(observed.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: observed.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    })).rejects.toThrow("different export destinations");
+
+    expect(await repository.list()).toHaveLength(2);
+  });
+
+  it("moves a compatible binding with the surviving lexical unit during consolidation", async () => {
+    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
+
+    await repository.setExportBinding({
+      lexicalUnitId: observed.lexicalUnit.id,
+      profileId: "profile-a",
+      ankiNoteId: 6060,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    const consolidated = await repository.update(observed.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: observed.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    });
+
+    expect(consolidated.lexicalUnit.id).toBe(observed.lexicalUnit.id);
+    expect(await repository.getExportBinding(observed.lexicalUnit.id)).toMatchObject({
+      profileId: "profile-a",
+      ankiNoteId: 6060,
+    });
+    expect(await repository.getExportBinding(canonical.lexicalUnit.id)).toBeNull();
+  });
+
+  it("restores export bindings idempotently and rejects a conflicting local destination", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    const backup: BackupDocument = {
+      version: 3,
+      exportedAt: "2026-09-20T10:00:00Z",
+      settings: DEFAULT_SETTINGS,
+      items: [captured],
+      exportBindings: [{
+        lexicalUnitId: captured.lexicalUnit.id,
+        profileId: DEFAULT_SETTINGS.fallbackProfileId,
+        ankiNoteId: 5151,
+        deckName: "Collector Inbox",
+        modelName: "Collector Basic",
+        updatedAt: "2026-09-20T10:00:00Z",
+      }],
+    };
+
+    expect(await repository.previewRestore(backup)).toMatchObject({
+      exportBindingsAdded: 1,
+      conflicts: [],
+    });
+    await repository.restoreBackup(backup);
+    expect(await repository.previewRestore(backup)).toMatchObject({
+      exportBindingsAdded: 0,
+      exportBindingsSkipped: 1,
+      conflicts: [],
+    });
+
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "other-profile",
+      ankiNoteId: 9999,
+      deckName: "Other",
+      modelName: "Collector Basic",
+    });
+    const preview = await repository.previewRestore(backup);
+    expect(preview.conflicts.join("\n")).toContain("Export binding conflict");
+  });
+
+  it("deleting a lexical unit also deletes its export binding", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "profile-a",
+    });
+
+    await repository.remove(captured.lexicalUnit.id);
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toBeNull();
+  });
+
 });
