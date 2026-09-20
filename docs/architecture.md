@@ -80,6 +80,7 @@ Occurrence
 ExportBinding
   lexicalUnitId
   profileId
+  state = override | reserved | exported
   optional Anki note id
   deck/model snapshot
   updatedAt
@@ -113,7 +114,7 @@ Export first resolves an `ExportProfile` for each Ready item:
 2. language route;
 3. fallback profile.
 
-Ready items are then grouped by profile so one batch can safely target several decks. Before the first Anki mutation for an unbound item, Collector persists a destination reservation containing the profile plus deck/model snapshot. A successful export fills the Anki note ID into that binding. This prevents a cross-system partial failure from leaving a newly created Anki note without a durable route pin. Later route or profile-default changes therefore do not silently reinterpret or move that note.
+Ready items are grouped by their **resolved destination identity** (profile ID + resolved deck + resolved model + ownership mode), not merely by profile ID. This keeps an older pinned snapshot separate from the current definition of the same profile. Before the first Anki mutation for an unbound item, Collector persists a `reserved` destination binding containing the profile plus deck/model snapshot. A successful export upgrades it to `exported` and fills the Anki note ID. If the final local write fails or the network outcome is uncertain, the `reserved` state remains authoritative: the user cannot clear or reroute that destination until a retry reconciles it against Anki. This prevents a cross-system partial failure from leaving a newly created Anki note with a silently reinterpreted local destination. Later route or profile-default changes therefore do not silently reinterpret or move that note.
 
 For a Collector-managed profile, the Anki upsert path is:
 
@@ -127,7 +128,7 @@ For a Collector-managed profile, the Anki upsert path is:
 
 Changing an exported item's deck is a separate explicit operation. ACCP-013 permits that move only when the note type remains the same; note-type changes wait for ACCP-014 compatibility/mapping validation. The move is compensating: if Anki moves successfully but the new local binding cannot be saved, Collector attempts to move the note back to the original deck and reports a hard divergence if even that rollback fails.
 
-User-owned note types are not treated as Collector-managed. They can be inspected by the live catalog, but export through them is blocked until ACCP-014 supplies explicit field mapping. Collector does not add fields or rewrite templates/CSS merely because such a model exists.
+User-owned note types are not treated as Collector-managed. Profile ownership parsing is fail-closed: missing or unknown mode values are rejected rather than upgraded to mutating ownership. Even a syntactically `collector-managed` profile may enter schema mutation only when its model identity is the recognized Collector-owned `Collector Basic`. User-owned models can be inspected by the live catalog, but export through them is blocked until ACCP-014 supplies explicit field mapping. Collector does not add fields or rewrite templates/CSS merely because such a model exists.
 
 The Collector ID is intentionally a first-class field of the Collector-managed model. Human-readable text can change; identity should not.
 
@@ -156,4 +157,6 @@ The collector assumes partial failure is normal.
 - An Anki note was deleted externally: the next export falls back to lookup / create while retaining the resolved profile.
 - A configured deck disappears: export fails usefully instead of silently recreating it. The side panel may create the saved deck only through an explicit user action after a live catalog refresh.
 - A profile or language route changes: already-exported notes keep their pinned binding snapshot until the user performs an explicit move.
+- A local note-ID write or export response is uncertain after Anki mutation: the destination remains `reserved`, and destination changes are blocked until retry/reconciliation.
+- Backup/settings data contains an unknown export-profile ownership mode: restore/settings normalization fails closed before any Anki schema mutation.
 - A source adapter stops matching: generic capture remains available.
