@@ -114,6 +114,63 @@ label {
   line-height: 1.4;
   color: color-mix(in srgb, CanvasText 70%, transparent);
 }
+
+.language-decks {
+  display: grid;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+}
+.language-deck-row,
+.language-deck-add {
+  display: grid;
+  grid-template-columns: minmax(42px, auto) minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+}
+.language-deck-add {
+  grid-template-columns: minmax(72px, .55fr) minmax(0, 1fr) auto;
+  padding-top: 3px;
+}
+.language-deck-row strong {
+  font-size: 12px;
+}
+.fallback-deck-row {
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  padding-top: 9px;
+}
+.export-destination.compact {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  padding-top: 8px;
+}
+.export-destination-head {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+}
+.destination-change summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 62%, transparent);
+}
+.destination-change-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+}
+.destination-change > select {
+  margin-top: 7px;
+}
+.legacy-note-warning {
+  font-size: 11px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 65%, transparent);
+}
 .restore-preview {
   display: grid;
   gap: 9px;
