@@ -298,6 +298,45 @@ async function stopVisibleDuolingoSession(): Promise<{
   };
 }
 
+async function stageAutoTerminatedDuolingoSession(
+  message: {
+    sessionId?: string;
+    evidence?: BatchCaptureEvidence[];
+    reason?: string;
+  },
+  tabId: number | undefined,
+): Promise<{
+  foundCount: number;
+  staged: ReturnType<typeof stagedSummary>;
+}> {
+  const settings = await loadSettings();
+  const evidence = message.evidence ?? [];
+  const sessionId = String(message.sessionId ?? "").trim();
+  if (!sessionId) throw new Error("Automatic Duolingo session handoff is missing a session id.");
+
+  const staged = await stageVisibleEvidence(
+    evidence,
+    settings.sourceUrlMode,
+    `duolingo-session-${sessionId}`,
+  );
+
+  if (tabId !== undefined && visibleSessionTabId === tabId) {
+    visibleSessionTabId = null;
+  }
+
+  chrome.runtime.sendMessage({
+    type: "DUOLINGO_VISIBLE_SESSION_AUTO_STAGED",
+    reason: message.reason ?? "automatic-termination",
+    foundCount: evidence.length,
+    staged,
+  }).catch(() => undefined);
+
+  return {
+    foundCount: evidence.length,
+    staged,
+  };
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "collect-selection",
@@ -346,7 +385,14 @@ if (__COLLECTOR_E2E__) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "DUOLINGO_VISIBLE_SESSION_TERMINATED") {
+    void stageAutoTerminatedDuolingoSession(message, sender.tab?.id)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
   if (message?.type === "COLLECT_ACTIVE_SELECTION") {
     void (async () => {
       try {
