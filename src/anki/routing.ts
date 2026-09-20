@@ -4,6 +4,7 @@ import type {
   ExportBinding,
   ExportProfile,
 } from "../core/types";
+import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
 
 export interface ResolvedExportRoute {
   profile: ExportProfile;
@@ -64,9 +65,12 @@ export function resolveExportRoute(
 }
 
 export function validateProfileForCurrentExport(profile: ExportProfile): void {
-  if (profile.mode !== "collector-managed") {
+  if (
+    profile.mode !== "collector-managed"
+    || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
+  ) {
     throw new Error(
-      `This existing Anki destination uses a custom note type that Collector cannot update safely yet.`,
+      `This Anki destination uses a note type that Collector cannot update safely.`,
     );
   }
 }
