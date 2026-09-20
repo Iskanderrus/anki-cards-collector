@@ -198,6 +198,7 @@ describe("exportBatch profile routing", () => {
     expect(persisted[0]).toMatchObject({
       lexicalUnitId: "he-one",
       profileId: "he-profile",
+      state: "reserved",
       deckName: "Hebrew RU",
       modelName: "Collector Basic",
     });
@@ -342,6 +343,70 @@ describe("exportBatch profile routing", () => {
 
   it("keeps old pinned and current destinations separate when the current item is first", async () => {
     await verifyPinnedAndCurrentProfileStaySeparated("new-first");
+  });
+
+
+  it("reconciles a surviving reservation without allowing destination reinterpretation", async () => {
+    const current = item("he-one", "שלום", "he");
+    const writes: ExportBinding[] = [];
+    let persistCalls = 0;
+    const firstClient = client({ upsert: vi.fn(async () => 4242) });
+
+    const first = await exportBatch(
+      [current],
+      settings,
+      new Map(),
+      firstClient,
+      async (binding) => {
+        persistCalls += 1;
+        if (persistCalls === 2) throw new Error("final binding write failed");
+        writes.push(binding);
+      },
+    );
+
+    expect(first.results[0]?.kind).toBe("exported_untracked");
+    const reservation = writes.at(-1)!;
+    expect(reservation).toMatchObject({
+      state: "reserved",
+      profileId: "he-profile",
+      deckName: "Hebrew RU",
+      modelName: "Collector Basic",
+    });
+    expect(reservation.ankiNoteId).toBeUndefined();
+
+    const secondClient = client({ upsert: vi.fn(async () => 4242) });
+    const reconciledWrites: ExportBinding[] = [];
+
+    const second = await exportBatch(
+      [current],
+      settings,
+      new Map([[current.lexicalUnit.id, reservation]]),
+      secondClient,
+      async (binding) => {
+        reconciledWrites.push(binding);
+      },
+    );
+
+    expect(secondClient.upsert).toHaveBeenCalledWith(
+      current,
+      expect.objectContaining({
+        id: "he-profile",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+      }),
+      undefined,
+    );
+    expect(reconciledWrites).toEqual([
+      expect.objectContaining({
+        lexicalUnitId: "he-one",
+        profileId: "he-profile",
+        state: "exported",
+        ankiNoteId: 4242,
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+      }),
+    ]);
+    expect(second).toMatchObject({ exported: 1, failed: 0, warnings: 0 });
   });
 
 });
