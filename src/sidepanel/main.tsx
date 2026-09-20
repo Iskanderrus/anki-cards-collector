@@ -1308,7 +1308,7 @@ function App(): React.ReactElement {
               );
               const deckName = profile?.deckName ?? "";
               const missing = catalogState.kind === "live"
-                && deckName
+                && Boolean(deckName)
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
@@ -1387,7 +1387,7 @@ function App(): React.ReactElement {
               );
               const deckName = fallback?.deckName ?? "";
               const missing = catalogState.kind === "live"
-                && deckName
+                && Boolean(deckName)
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
