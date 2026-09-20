@@ -36,5 +36,9 @@
   },
   "side_panel": {
     "default_path": "sidepanel.html"
-  }
+  },
+  "optional_host_permissions": [
+    "https://duolingo.com/*",
+    "https://*.duolingo.com/*"
+  ]
 }

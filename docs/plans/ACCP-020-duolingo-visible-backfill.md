@@ -4,6 +4,35 @@
 
 Use the ACCP-019 staging pipeline to collect useful language evidence from Duolingo material that is actually rendered to the user.
 
+## Implementation status
+
+Implemented as a specialized visible-DOM extractor plus an explicitly activated content-script session.
+
+- one-shot scan injects the existing on-demand content script, reads only rendered lesson/review nodes, and immediately hands the evidence to ACCP-019 staging;
+- session mode starts only after the user clicks **Start backfill session**;
+- the session uses a temporary `MutationObserver` in that tab to accumulate newly rendered visible evidence while the user navigates manually;
+- observation is supported only while recognizable lesson/review/challenge study DOM is present, not merely while the tab remains on a Duolingo hostname;
+- same-document SPA navigation that removes the supported study context terminates the observer and hands the accumulated session evidence to ACCP-019 staging before the live session is discarded;
+- explicit **Stop & stage session** uses the same staging semantics;
+- page teardown makes the same preservation handoff on a best-effort basis before the content context disappears;
+- no persistent manifest content script or required Duolingo host permission is added;
+- Duolingo is declared only in `optional_host_permissions`;
+- the first explicit scan/session activation asks Chrome for Duolingo page access;
+- granting page access does not start background collection: extraction still runs only for a one-shot scan or an explicitly active session;
+- staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki;
+- the staged batch is mirrored in versioned `chrome.storage.session` so MV3 service-worker suspension cannot erase it;
+- live-session ownership is mirrored separately as `tabId + sessionId`, so worker revival can address the original Duolingo tab even when another tab is active;
+- restored live ownership is validated against that exact content-script session before use; stale owner records are cleared;
+- worker revival reconstructs the in-memory pipeline by rerunning `stageBatch()` against the current corpus, so dispositions are recalculated rather than persisted as stale classifications;
+- session storage remains transient and is not part of IndexedDB backups or Anki export.
+
+The side panel exposes the minimal ACCP-020 controls plus two read-only evidence views for acceptance/debugging:
+
+- **Live session evidence** mirrors the active content-script buffer while a backfill session is running.
+- **Staged evidence** shows evidence already handed to ACCP-019.
+
+Stopping a session clears the live view and moves the accumulated evidence through ACCP-019 staging. Neither preview can edit, accept, or commit candidates. Full staged-candidate review/edit/bulk import remains ACCP-021.
+
 ## Dependencies
 
 - ACCP-019.
@@ -26,11 +55,15 @@ As the user manually moves through review/lesson material, Collector may inspect
 
 The user can stop the session at any time.
 
+Explicit stop is acknowledgement-driven: the content script freezes/disconnects the live buffer but keeps it reachable, background stages and persists it, and only a successful staging acknowledgement lets the content script discard the session. A staging persistence failure therefore leaves the same frozen buffer available for retry.
+
 The session also stops when:
 
 - the tab navigates away from supported Duolingo context;
 - extension context is torn down;
 - the session expires according to a conservative implementation timeout if one is needed.
+
+Automatic termination is not cancellation: evidence already accumulated in the session must be preserved and staged through ACCP-019 exactly as with an explicit stop.
 
 ## Extraction rules
 
@@ -45,6 +78,17 @@ Each candidate should include:
 
 Filter obvious UI chrome where reliable.
 
+Candidate safety rules:
+- normalize the full candidate text before enforcing the 240-character lexical-candidate limit;
+- reject over-limit candidate nodes rather than truncating aggregate wrappers into lexical items;
+- when a configured language is known, require matching `lang` metadata on the candidate or an ancestor; undeclared explicit-selector nodes are ignored rather than assumed to be target-language;
+- evidence keeps the language assigned when it was observed; later Settings changes must not relabel an active session's accumulated evidence.
+
+Context must remain target-language evidence, not a concatenation of the whole challenge UI:
+- sentence/phrase candidates use their own visible target text as context;
+- word/token candidates inherit the nearest clean target-language sentence when one is identifiable;
+- otherwise fall back to the candidate text itself rather than prompt text, answer choices, or controls.
+
 Do not attempt semantic translation or lemma inference in the source adapter.
 
 ## DOM strategy
@@ -54,6 +98,15 @@ Keep selectors isolated in the Duolingo adapter and fixture tests.
 A broken specialized selector should degrade to safer generic visible-text behavior or an empty result, not broad page scraping.
 
 Avoid depending on obfuscated/private internal application state.
+
+## Matching-pairs handling
+
+Matching-pairs exercises can render keyboard shortcut numbers in an outer `[lang]` wrapper around the actual target word. Generic language-marked DOM therefore uses a leaf-only fallback:
+
+- explicit sentence/token/story selectors run first;
+- generic `[lang]` elements are considered only when they do not contain another useful target-language `[lang]` descendant;
+- wrapper shortcut numbers are never stripped heuristically from text, because digits may be legitimate study content;
+- isolated matching-pair vocabulary keeps the clean target word itself as context unless a reliable target-language sentence exists.
 
 ## Session dedupe
 
@@ -77,6 +130,8 @@ Must not:
 
 The session is explicit, local, temporary, and limited to visible content.
 
+The optional Duolingo origin permission may remain granted after the first approval, as Chrome permissions normally do. That permission only allows on-demand script injection; it does not install a persistent content script or start collection automatically.
+
 ## Tests
 
 Use deterministic HTML/DOM fixtures for:
@@ -86,8 +141,14 @@ Use deterministic HTML/DOM fixtures for:
 - DOM replacement/re-render;
 - repeated text;
 - irrelevant navigation/UI labels;
+- undeclared source-language text beside declared target-language material;
+- over-limit target-language wrappers;
 - session start/stop;
-- navigation away;
+- same-document SPA navigation away from supported study context, including proof that a candidate unique to that session survives in the staged batch;
+- changing the configured language while a session is active;
+- actual extension service-worker termination/restart after staging, verifying staged evidence survives while corpus data remains unchanged;
+- actual worker restart during an active session followed by switching to another tab, verifying status/stop still target the original session owner;
+- injected staged-session persistence failure during explicit Stop, verifying the frozen live buffer remains reachable and the retry succeeds;
 - no-candidate page.
 
 Browser E2E should verify the observer only runs after explicit activation.

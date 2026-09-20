@@ -31,6 +31,9 @@ await Promise.all([
     platform: "browser",
     target: "chrome120",
     sourcemap,
+    define: {
+      __COLLECTOR_E2E__: JSON.stringify(e2e),
+    },
   }),
   build({
     entryPoints: ["src/sidepanel/main.tsx"],

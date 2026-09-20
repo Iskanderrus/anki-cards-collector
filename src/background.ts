@@ -1,5 +1,6 @@
 declare const __COLLECTOR_E2E__: boolean;
 
+import { BatchCapturePipeline, type BatchCaptureEvidence, type BatchCaptureResult } from "./capture/batch";
 import { sanitizeSourceUrl } from "./capture/source-url";
 import type { CaptureDraft, SourceUrlMode } from "./core/types";
 import { loadSettings } from "./settings";
@@ -7,8 +8,254 @@ import { repository } from "./storage/repository";
 
 type CaptureResponse = { ok: true; draft: CaptureDraft | null } | { ok: false; error: string };
 
+interface VisibleSessionStatus {
+  active: boolean;
+  sessionId?: string;
+  candidateCount: number;
+  startedAt?: string;
+}
+
+type VisibleContentResponse =
+  | {
+      ok: true;
+      evidence?: BatchCaptureEvidence[];
+      status?: VisibleSessionStatus;
+      sessionId?: string;
+      supported?: boolean;
+    }
+  | { ok: false; error: string };
+
+const batchPipeline = new BatchCapturePipeline(repository);
+const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
+const VISIBLE_SESSION_OWNER_KEY = "collectorVisibleSessionOwnerV1";
+
+interface StoredStagedBatch {
+  version: 1;
+  batchId: string;
+  evidence: BatchCaptureEvidence[];
+}
+
+interface StoredVisibleSessionOwner {
+  version: 1;
+  tabId: number;
+  sessionId: string;
+}
+
+let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
+let stagedBatchQueue: Promise<void> = Promise.resolve();
+let failNextStagedBatchPersistenceForE2E = false;
+
+function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
+  return {
+    ...evidence,
+    source: { ...evidence.source },
+    adapterMetadata: evidence.adapterMetadata ? { ...evidence.adapterMetadata } : undefined,
+  };
+}
+
+function evidenceFromResult(result: BatchCaptureResult): BatchCaptureEvidence[] {
+  return result.candidates.flatMap((candidate) =>
+    Array.from(
+      { length: Math.max(1, candidate.duplicateCount) },
+      () => cloneEvidence(asEvidence(candidate)),
+    )
+  );
+}
+
+function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<StoredStagedBatch>;
+  if (candidate.version !== 1 || typeof candidate.batchId !== "string" || !candidate.batchId.trim()) {
+    return false;
+  }
+  if (!Array.isArray(candidate.evidence)) return false;
+
+  return candidate.evidence.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const evidence = item as Partial<BatchCaptureEvidence>;
+    return typeof evidence.surfaceText === "string"
+      && typeof evidence.context === "string"
+      && typeof evidence.language === "string"
+      && typeof evidence.capturedAt === "string"
+      && Boolean(evidence.source)
+      && typeof evidence.source?.kind === "string"
+      && typeof evidence.source?.adapter === "string"
+      && typeof evidence.source?.url === "string"
+      && typeof evidence.source?.title === "string";
+  });
+}
+
+async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
+  const stored = await chrome.storage.session.get(STAGED_BATCH_SESSION_KEY);
+  const value = stored[STAGED_BATCH_SESSION_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredStagedBatch(value)) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    return null;
+  }
+
+  return {
+    version: 1,
+    batchId: value.batchId,
+    evidence: value.evidence.map(cloneEvidence),
+  };
+}
+
+async function persistStagedBatch(result: BatchCaptureResult | null): Promise<void> {
+  if (__COLLECTOR_E2E__ && failNextStagedBatchPersistenceForE2E) {
+    failNextStagedBatchPersistenceForE2E = false;
+    throw new Error("Injected staged-session persistence failure.");
+  }
+
+  if (!result || result.candidates.length === 0) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    return;
+  }
+
+  const payload: StoredStagedBatch = {
+    version: 1,
+    batchId: result.batchId,
+    evidence: evidenceFromResult(result),
+  };
+  await chrome.storage.session.set({ [STAGED_BATCH_SESSION_KEY]: payload });
+}
+
+function withStagedBatchLock<T>(operation: () => Promise<T>): Promise<T> {
+  const run = stagedBatchQueue.then(operation, operation);
+  stagedBatchQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> {
+  const active = batchPipeline.getActiveBatch();
+  if (active) return active;
+
+  const stored = await loadStoredStagedBatch();
+  if (!stored) return null;
+
+  return batchPipeline.stageBatch(stored.batchId, stored.evidence);
+}
+
+async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
+  return withStagedBatchLock(() => restoreStagedBatchUnlocked());
+}
+
+function isStoredVisibleSessionOwner(value: unknown): value is StoredVisibleSessionOwner {
+  if (!value || typeof value !== "object") return false;
+  const owner = value as Partial<StoredVisibleSessionOwner>;
+  return owner.version === 1
+    && Number.isInteger(owner.tabId)
+    && (owner.tabId ?? -1) >= 0
+    && typeof owner.sessionId === "string"
+    && owner.sessionId.trim().length > 0;
+}
+
+async function loadVisibleSessionOwner(): Promise<StoredVisibleSessionOwner | null> {
+  if (visibleSessionOwner) return visibleSessionOwner;
+
+  const stored = await chrome.storage.session.get(VISIBLE_SESSION_OWNER_KEY);
+  const value = stored[VISIBLE_SESSION_OWNER_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredVisibleSessionOwner(value)) {
+    await chrome.storage.session.remove(VISIBLE_SESSION_OWNER_KEY);
+    return null;
+  }
+
+  visibleSessionOwner = { ...value };
+  return visibleSessionOwner;
+}
+
+async function persistVisibleSessionOwner(tabId: number, sessionId: string): Promise<StoredVisibleSessionOwner> {
+  const owner: StoredVisibleSessionOwner = {
+    version: 1,
+    tabId,
+    sessionId,
+  };
+  await chrome.storage.session.set({ [VISIBLE_SESSION_OWNER_KEY]: owner });
+  visibleSessionOwner = owner;
+  return owner;
+}
+
+async function clearVisibleSessionOwner(
+  expected?: Pick<StoredVisibleSessionOwner, "tabId" | "sessionId">,
+): Promise<void> {
+  const current = await loadVisibleSessionOwner();
+  if (expected && current
+    && (current.tabId !== expected.tabId || current.sessionId !== expected.sessionId)) {
+    return;
+  }
+
+  visibleSessionOwner = null;
+  await chrome.storage.session.remove(VISIBLE_SESSION_OWNER_KEY);
+}
+
+interface ValidatedVisibleSessionOwner {
+  owner: StoredVisibleSessionOwner;
+  response: Extract<VisibleContentResponse, { ok: true }>;
+}
+
+async function validateVisibleSessionOwner(): Promise<ValidatedVisibleSessionOwner | null> {
+  const owner = await loadVisibleSessionOwner();
+  if (!owner) return null;
+
+  try {
+    const response = await chrome.tabs.sendMessage(owner.tabId, {
+      type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+    }) as VisibleContentResponse;
+
+    if (response?.ok
+      && response.status?.active
+      && response.status.sessionId === owner.sessionId) {
+      return { owner, response };
+    }
+  } catch {
+    // The owner tab/content context disappeared. The stored owner is stale.
+  }
+
+  await clearVisibleSessionOwner(owner);
+  return null;
+}
+
+async function discoverVisibleSessionOnActiveTab(): Promise<ValidatedVisibleSessionOwner | null> {
+  const tabId = await activeTabId();
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+    }) as VisibleContentResponse;
+
+    if (!response?.ok || !response.status?.active || !response.status.sessionId) {
+      return null;
+    }
+
+    const owner = await persistVisibleSessionOwner(tabId, response.status.sessionId);
+    return { owner, response };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveVisibleSessionOwner(): Promise<ValidatedVisibleSessionOwner | null> {
+  return await validateVisibleSessionOwner() ?? await discoverVisibleSessionOnActiveTab();
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Capture failed.";
+}
+
+async function injectContentScript(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"],
+  });
+}
+
+async function activeTabId(): Promise<number> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === undefined) throw new Error("No active browser tab.");
+  return tab.id;
 }
 
 async function collectFromTab(
@@ -16,10 +263,7 @@ async function collectFromTab(
   language: string,
   sourceUrlMode: SourceUrlMode,
 ): Promise<void> {
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["content.js"],
-  });
+  await injectContentScript(tabId);
 
   const response = await chrome.tabs.sendMessage(tabId, {
     type: "CAPTURE_SELECTION",
@@ -37,6 +281,269 @@ async function collectFromTab(
     },
   });
   chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
+}
+
+function stagedSummary(result: BatchCaptureResult | null) {
+  if (!result) {
+    return {
+      batchId: null,
+      candidateCount: 0,
+      dispositions: {
+        new: 0,
+        "already-represented": 0,
+        "repeated-evidence": 0,
+        "needs-review": 0,
+      },
+    };
+  }
+
+  return {
+    batchId: result.batchId,
+    candidateCount: result.candidates.length,
+    dispositions: {
+      new: result.candidates.filter((candidate) => candidate.disposition === "new").length,
+      "already-represented": result.candidates.filter(
+        (candidate) => candidate.disposition === "already-represented",
+      ).length,
+      "repeated-evidence": result.candidates.filter(
+        (candidate) => candidate.disposition === "repeated-evidence",
+      ).length,
+      "needs-review": result.candidates.filter(
+        (candidate) => candidate.disposition === "needs-review",
+      ).length,
+    },
+  };
+}
+
+function asEvidence(candidate: BatchCaptureResult["candidates"][number]): BatchCaptureEvidence {
+  return {
+    surfaceText: candidate.surfaceText,
+    context: candidate.context,
+    language: candidate.language,
+    source: candidate.source,
+    capturedAt: candidate.capturedAt,
+    adapterMetadata: candidate.adapterMetadata,
+  };
+}
+
+async function stageVisibleEvidence(
+  evidence: readonly BatchCaptureEvidence[],
+  sourceUrlMode: SourceUrlMode,
+  requestedBatchId: string,
+) {
+  return withStagedBatchLock(async () => {
+    const existing = await restoreStagedBatchUnlocked();
+    const previousEvidence = existing ? evidenceFromResult(existing) : [];
+    const prepared = evidence.map((candidate) => ({
+      ...cloneEvidence(candidate),
+      // Preserve the immutable language attached when the evidence was observed.
+      // Settings may change while a session is active.
+      language: candidate.language.trim().toLowerCase() || "und",
+      source: {
+        ...candidate.source,
+        url: sanitizeSourceUrl(candidate.source.url, sourceUrlMode),
+      },
+    }));
+
+    const merged = [...previousEvidence, ...prepared];
+    const result = await batchPipeline.stageBatch(
+      existing?.batchId ?? requestedBatchId,
+      merged,
+    );
+
+    try {
+      await persistStagedBatch(result);
+    } catch (error) {
+      if (existing) {
+        await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+      } else {
+        batchPipeline.discard();
+      }
+      throw error;
+    }
+
+    return stagedSummary(result);
+  });
+}
+
+async function scanVisibleDuolingo(): Promise<{
+  foundCount: number;
+  staged: ReturnType<typeof stagedSummary>;
+}> {
+  const tabId = await activeTabId();
+  const settings = await loadSettings();
+  await injectContentScript(tabId);
+
+  const response = await chrome.tabs.sendMessage(tabId, {
+    type: "DUOLINGO_SCAN_VISIBLE",
+    language: settings.defaultLanguage,
+  }) as VisibleContentResponse;
+
+  if (!response?.ok) throw new Error(response?.error ?? "Could not scan visible Duolingo material.");
+
+  const evidence = response.evidence ?? [];
+  const staged = await stageVisibleEvidence(
+    evidence,
+    settings.sourceUrlMode,
+    `duolingo-visible-${crypto.randomUUID()}`,
+  );
+
+  return { foundCount: evidence.length, staged };
+}
+
+async function startVisibleDuolingoSession(): Promise<{
+  status: VisibleSessionStatus;
+  staged: ReturnType<typeof stagedSummary>;
+  liveEvidence: BatchCaptureEvidence[];
+}> {
+  const existing = await resolveVisibleSessionOwner();
+  if (existing) {
+    return {
+      status: existing.response.status!,
+      staged: stagedSummary(await currentStagedBatch()),
+      liveEvidence: existing.response.evidence ?? [],
+    };
+  }
+
+  const tabId = await activeTabId();
+  const settings = await loadSettings();
+  await injectContentScript(tabId);
+
+  const response = await chrome.tabs.sendMessage(tabId, {
+    type: "DUOLINGO_START_VISIBLE_SESSION",
+    language: settings.defaultLanguage,
+  }) as VisibleContentResponse;
+
+  if (!response?.ok || !response.status?.active || !response.status.sessionId) {
+    throw new Error(response?.ok ? "Could not start Duolingo backfill." : response?.error);
+  }
+
+  try {
+    await persistVisibleSessionOwner(tabId, response.status.sessionId);
+  } catch (error) {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "DUOLINGO_CANCEL_VISIBLE_SESSION",
+      sessionId: response.status.sessionId,
+    }).catch(() => undefined);
+    throw error;
+  }
+
+  return {
+    status: response.status,
+    staged: stagedSummary(await currentStagedBatch()),
+    liveEvidence: response.evidence ?? [],
+  };
+}
+
+async function visibleDuolingoSessionStatus(): Promise<{
+  supported: boolean;
+  status: VisibleSessionStatus;
+  staged: ReturnType<typeof stagedSummary>;
+  liveEvidence: BatchCaptureEvidence[];
+}> {
+  const resolved = await resolveVisibleSessionOwner();
+  if (resolved) {
+    return {
+      supported: resolved.response.supported === true,
+      status: resolved.response.status!,
+      staged: stagedSummary(await currentStagedBatch()),
+      liveEvidence: resolved.response.evidence ?? [],
+    };
+  }
+
+  return {
+    supported: false,
+    status: { active: false, candidateCount: 0 },
+    staged: stagedSummary(await currentStagedBatch()),
+    liveEvidence: [],
+  };
+}
+
+async function stopVisibleDuolingoSession(): Promise<{
+  foundCount: number;
+  status: VisibleSessionStatus;
+  staged: ReturnType<typeof stagedSummary>;
+}> {
+  const resolved = await resolveVisibleSessionOwner();
+  if (!resolved) throw new Error("No active Duolingo backfill session.");
+
+  const { owner } = resolved;
+  const settings = await loadSettings();
+  const response = await chrome.tabs.sendMessage(owner.tabId, {
+    type: "DUOLINGO_PREPARE_STOP_VISIBLE_SESSION",
+  }) as VisibleContentResponse;
+
+  if (!response?.ok) throw new Error(response?.error ?? "Could not prepare Duolingo backfill for staging.");
+  if (response.sessionId !== owner.sessionId) {
+    throw new Error("Duolingo backfill session ownership changed before staging.");
+  }
+
+  const evidence = response.evidence ?? [];
+  const staged = await stageVisibleEvidence(
+    evidence,
+    settings.sourceUrlMode,
+    `duolingo-session-${owner.sessionId}`,
+  );
+
+  const confirmation = await chrome.tabs.sendMessage(owner.tabId, {
+    type: "DUOLINGO_CONFIRM_STOP_VISIBLE_SESSION",
+    sessionId: owner.sessionId,
+  }) as VisibleContentResponse;
+
+  if (!confirmation?.ok || confirmation.status?.active) {
+    throw new Error(
+      confirmation?.ok
+        ? "Duolingo backfill staging succeeded, but the live session could not be finalized."
+        : confirmation?.error ?? "Could not finalize Duolingo backfill.",
+    );
+  }
+
+  await clearVisibleSessionOwner(owner);
+
+  return {
+    foundCount: evidence.length,
+    status: confirmation.status ?? { active: false, candidateCount: evidence.length },
+    staged,
+  };
+}
+
+async function stageAutoTerminatedDuolingoSession(
+  message: {
+    sessionId?: string;
+    evidence?: BatchCaptureEvidence[];
+    reason?: string;
+  },
+  tabId: number | undefined,
+): Promise<{
+  foundCount: number;
+  staged: ReturnType<typeof stagedSummary>;
+}> {
+  const settings = await loadSettings();
+  const evidence = message.evidence ?? [];
+  const sessionId = String(message.sessionId ?? "").trim();
+  if (!sessionId) throw new Error("Automatic Duolingo session handoff is missing a session id.");
+
+  const staged = await stageVisibleEvidence(
+    evidence,
+    settings.sourceUrlMode,
+    `duolingo-session-${sessionId}`,
+  );
+
+  if (tabId !== undefined) {
+    await clearVisibleSessionOwner({ tabId, sessionId });
+  }
+
+  chrome.runtime.sendMessage({
+    type: "DUOLINGO_VISIBLE_SESSION_AUTO_STAGED",
+    reason: message.reason ?? "automatic-termination",
+    foundCount: evidence.length,
+    staged,
+  }).catch(() => undefined);
+
+  return {
+    foundCount: evidence.length,
+    staged,
+  };
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -74,6 +581,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 if (__COLLECTOR_E2E__) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE") {
+      failNextStagedBatchPersistenceForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type !== "E2E_CONTEXT_MENU_CLICK") return false;
 
     const tabId = Number(message.tabId);
@@ -87,25 +600,67 @@ if (__COLLECTOR_E2E__) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "COLLECT_ACTIVE_SELECTION") return false;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "DUOLINGO_VISIBLE_SESSION_TERMINATED") {
+    void stageAutoTerminatedDuolingoSession(message, sender.tab?.id)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
 
-  void (async () => {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id === undefined) throw new Error("No active browser tab.");
+  if (message?.type === "COLLECT_ACTIVE_SELECTION") {
+    void (async () => {
+      try {
+        const tabId = await activeTabId();
+        const settings = await loadSettings();
+        await collectFromTab(
+          tabId,
+          message.language ?? settings.defaultLanguage,
+          settings.sourceUrlMode,
+        );
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: errorMessage(error) });
+      }
+    })();
 
-      const settings = await loadSettings();
-      await collectFromTab(
-        tab.id,
-        message.language ?? settings.defaultLanguage,
-        settings.sourceUrlMode,
-      );
-      sendResponse({ ok: true });
-    } catch (error) {
-      sendResponse({ ok: false, error: errorMessage(error) });
-    }
-  })();
+    return true;
+  }
 
-  return true;
+  if (message?.type === "DUOLINGO_SCAN_ACTIVE") {
+    void scanVisibleDuolingo()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "DUOLINGO_START_ACTIVE_SESSION") {
+    void startVisibleDuolingoSession()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "DUOLINGO_GET_ACTIVE_SESSION_STATUS") {
+    void visibleDuolingoSessionStatus()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "DUOLINGO_STOP_ACTIVE_SESSION") {
+    void stopVisibleDuolingoSession()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "GET_STAGED_BATCH") {
+    void currentStagedBatch()
+      .then((batch) => sendResponse({ ok: true, batch }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  return false;
 });

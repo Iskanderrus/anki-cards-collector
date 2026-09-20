@@ -282,3 +282,61 @@ summary:focus-visible {
 .occurrence-selection strong {
   color: CanvasText;
 }
+
+
+.backfill-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.backfill-toolbar { align-items: center; }
+.backfill-status {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+}
+.backfill-status strong { color: CanvasText; }
+
+
+.staged-preview {
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  padding-top: 8px;
+}
+.staged-preview summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.staged-preview-list {
+  display: grid;
+  gap: 7px;
+  margin: 8px 0;
+}
+.staged-candidate {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 9px;
+  padding: 8px 9px;
+  background: color-mix(in srgb, CanvasText 3%, transparent);
+}
+.staged-candidate-head {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  justify-content: space-between;
+}
+.staged-candidate-text {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.staged-candidate-context {
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, CanvasText 72%, transparent);
+  overflow-wrap: anywhere;
+}
