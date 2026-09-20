@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnkiClient } from "./client";
-import {
-  LEGACY_DEFAULT_PROFILE_ID,
-  type CollectedItem,
-  type ExportProfile,
-} from "../core/types";
+import type { CollectedItem, ExportProfile } from "../core/types";
 
 function profile(): ExportProfile {
   return {
@@ -396,7 +392,7 @@ describe("AnkiClient", () => {
     expect(actions).not.toContain("createDeck");
   });
 
-  it("retains explicit legacy/default fallback deck creation", async () => {
+  it("refuses a missing deck for the default profile instead of creating it implicitly", async () => {
     const actions: string[] = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as {
@@ -405,28 +401,47 @@ describe("AnkiClient", () => {
       };
       actions.push(request.action);
 
-      const resultByAction: Record<string, unknown> = {
-        deckNames: [],
-        createDeck: 123,
-        modelNames: [],
-        createModel: 456,
-      };
-      return new Response(JSON.stringify({
-        result: resultByAction[request.action] ?? null,
-        error: null,
-      }), { status: 200 });
+      const result = request.action === "deckNames" ? [] : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
     }) as unknown as typeof fetch;
 
     const fallback: ExportProfile = {
-      id: LEGACY_DEFAULT_PROFILE_ID,
+      id: "collector-default",
       name: "Collector default",
       deckName: "Collector Inbox",
       modelName: "Collector Basic",
       mode: "collector-managed",
     };
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(fallback);
-    expect(actions).toEqual(["deckNames", "createDeck", "modelNames", "createModel"]);
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(fallback),
+    ).rejects.toThrow("create this saved deck explicitly");
+
+    expect(actions).toEqual(["deckNames"]);
+    expect(actions).not.toContain("createDeck");
+  });
+
+  it("creates a deck only through the explicit createDeck action", async () => {
+    const requests: Array<{ action: string; version: number; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        version: number;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      return new Response(JSON.stringify({ result: 123, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).createDeck("Collector Inbox"),
+    ).resolves.toBe(123);
+
+    expect(requests).toEqual([{
+      action: "createDeck",
+      version: 6,
+      params: { deck: "Collector Inbox" },
+    }]);
   });
 
   it("moves all cards of an existing note through an explicit changeDeck action", async () => {
