@@ -109,3 +109,21 @@ Record only:
 - whether any old custom-note card was left unchanged as expected.
 
 Do not publish private study text or corpus backups.
+
+
+## Final live acceptance — 2026-09-20
+
+Status: **PASSED** on real Anki Desktop + AnkiConnect.
+
+Verified without publishing private study text:
+
+- Anki connection succeeded and live deck discovery loaded 7 decks;
+- language routing was configured for Spanish, Hebrew, and Serbian against real destination decks;
+- the simplified `language → Anki deck` UI was clear enough to use without exposing internal export-profile concepts;
+- one bulk **Send ready to Anki** operation completed successfully with 4 exportable Ready items;
+- a real Collector-managed Anki note was inspected after export and contained the expected Collector fields, including stable Collector ID, prompt/answer, card kind, canonical/observed form, context, and note metadata;
+- already-linked custom-note cards remained protected from unsafe rewriting;
+- destination pinning / deliberate move behavior was exercised successfully during acceptance;
+- no unexpected deck or user-owned note-type mutation was observed.
+
+The screenshots used during acceptance are intentionally not attached to the public repository because they contain study content.
