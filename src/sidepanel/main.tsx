@@ -1417,7 +1417,13 @@ function App(): React.ReactElement {
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
-          const pendingMoveProfileId = pendingMoveProfiles[unit.id] ?? binding?.profileId;
+          const boundProfile = binding
+            ? settings.exportProfiles.find((profile) => profile.id === binding.profileId)
+            : null;
+          const legacyCustomNote =
+            binding?.ankiNoteId !== undefined && boundProfile?.mode === "mapped-user-model";
+          const currentDeckName = route?.profile.deckName ?? binding?.deckName ?? "";
+          const pendingMoveDeckName = pendingMoveDecks[unit.id] ?? currentDeckName;
 
           return (
             <article
@@ -1500,49 +1506,70 @@ function App(): React.ReactElement {
                   {selectedOccurrence?.context && <p className="context">{selectedOccurrence.context}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
 
-                  <div className="export-destination">
+                  <div className="export-destination compact">
                     <div className="export-destination-head">
-                      <strong>Destination</strong>
-                      <span className="setting-help">
-                        {route
-                          ? `${route.profile.name} → ${route.profile.deckName} · ${route.profile.modelName}`
-                          : "No valid export route"}
+                      <span>
+                        <strong>Anki:</strong>{" "}
+                        {currentDeckName || "choose a deck in Settings"}
                       </span>
+                      {binding?.ankiNoteId !== undefined && (
+                        <span className="setting-help">note {binding.ankiNoteId}</span>
+                      )}
                     </div>
-                    <label>
-                      {binding?.ankiNoteId !== undefined ? "Pinned profile" : "Routing override"}
-                      <select
-                        value={
-                          binding?.ankiNoteId !== undefined
-                            ? pendingMoveProfileId ?? binding.profileId
-                            : binding?.profileId ?? "auto"
-                        }
-                        onChange={(event) => void setItemProfileOverride(unit.id, event.target.value)}
-                      >
-                        {binding?.ankiNoteId === undefined && (
-                          <option value="auto">
-                            Automatic{route ? ` — ${route.profile.name}` : ""}
-                          </option>
+
+                    {legacyCustomNote ? (
+                      <div className="legacy-note-warning" role="status">
+                        This existing Anki card uses a custom note type. Collector will leave it unchanged for now.
+                      </div>
+                    ) : currentCatalogSnapshot() ? (
+                      <details className="destination-change">
+                        <summary>
+                          {binding?.ankiNoteId !== undefined ? "Move to another deck…" : "Change deck…"}
+                        </summary>
+
+                        {binding?.ankiNoteId !== undefined ? (
+                          <div className="destination-change-row">
+                            <select
+                              aria-label={`Move ${unit.canonicalText} to Anki deck`}
+                              value={pendingMoveDeckName}
+                              onChange={(event) => setPendingMoveDecks((current) => ({
+                                ...current,
+                                [unit.id]: event.target.value,
+                              }))}
+                            >
+                              {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === pendingMoveDeckName) && pendingMoveDeckName && (
+                                <option value={pendingMoveDeckName}>{pendingMoveDeckName} (current)</option>
+                              )}
+                              {currentCatalogSnapshot()?.decks.map((deck) => (
+                                <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                              ))}
+                            </select>
+                            {pendingMoveDeckName && pendingMoveDeckName !== currentDeckName && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void moveExportedItem(item, pendingMoveDeckName)}
+                              >
+                                Move
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <select
+                            aria-label={`Anki deck override for ${unit.canonicalText}`}
+                            value={binding ? currentDeckName : "auto"}
+                            onChange={(event) => void setItemDeckOverride(unit.id, event.target.value)}
+                          >
+                            <option value="auto">
+                              Use language rule{route ? ` — ${route.profile.deckName}` : ""}
+                            </option>
+                            {currentCatalogSnapshot()?.decks.map((deck) => (
+                              <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                            ))}
+                          </select>
                         )}
-                        {settings.exportProfiles.map((profile) => (
-                          <option key={profile.id} value={profile.id}>{profile.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    {binding?.ankiNoteId !== undefined && pendingMoveProfileId && pendingMoveProfileId !== binding.profileId && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void moveExportedItem(item, pendingMoveProfileId)}
-                      >
-                        Move exported note
-                      </button>
-                    )}
-                    {binding?.ankiNoteId !== undefined && (
-                      <span className="setting-help">
-                        Anki note {binding.ankiNoteId} is pinned; language/fallback changes will not move it.
-                      </span>
-                    )}
+                      </details>
+                    ) : null}
                   </div>
 
                   {proposal.occurrenceSelection && item.occurrences.length > 1 && (
