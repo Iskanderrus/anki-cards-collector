@@ -663,7 +663,8 @@ function App(): React.ReactElement {
       setError("Moving to a mapped user note type requires ACCP-014.");
       return;
     }
-    if (currentProfile.modelName !== target.modelName) {
+    const currentModelName = binding.modelName ?? currentProfile.modelName;
+    if (currentModelName !== target.modelName) {
       setError("Changing an exported note's note type requires ACCP-014 mapping. Only same-note-type deck moves are allowed here.");
       return;
     }
@@ -769,12 +770,13 @@ function App(): React.ReactElement {
       return;
     }
 
-    const languageRoutes = [
-      ...settings.languageRoutes.filter((route) => route.language !== language),
-      { language, profileId: routeProfileId },
-    ].sort((left, right) => left.language.localeCompare(right.language));
-
-    await persistSettings((current) => ({ ...current, languageRoutes }));
+    await persistSettings((current) => ({
+      ...current,
+      languageRoutes: [
+        ...current.languageRoutes.filter((route) => route.language !== language),
+        { language, profileId: routeProfileId },
+      ].sort((left, right) => left.language.localeCompare(right.language)),
+    }));
     setRouteLanguage("");
     setNotice(`Default export route for ${language} saved.`);
   }
