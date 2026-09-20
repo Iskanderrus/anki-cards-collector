@@ -1700,7 +1700,12 @@ function App(): React.ReactElement {
                     )}
                     <button
                       className="ghost danger"
-                      disabled={busy}
+                      disabled={busy || reconciliationPending}
+                      title={
+                        reconciliationPending
+                          ? "Retry Send ready to Anki before deleting this item."
+                          : undefined
+                      }
                       onClick={() => void repository.remove(unit.id).then(load)}
                     >
                       Delete
