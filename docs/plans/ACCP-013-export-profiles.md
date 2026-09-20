@@ -115,7 +115,8 @@ The ACCP-013 implementation uses:
 - profile-grouped batch export with per-profile failure isolation;
 - explicit same-note-type deck moves for exported notes, with rollback to the original deck if saving the new local binding fails;
 - backup v3 including profiles/routes/bindings with conflict-safe merge restore;
-- live-catalog deck choices for added profiles;
+- live-catalog deck choices for profiles;
+- no implicit Anki deck creation during export; a missing saved destination can be created only through the explicit side-panel action after a live refresh;
 - Collector-managed model export only until ACCP-014 mapping exists.
 
 The implementation intentionally does **not** infer that an arbitrary discovered note type is Collector-owned. Existing user note types remain read-only inspection data until ACCP-014.
