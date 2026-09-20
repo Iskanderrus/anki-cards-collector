@@ -110,9 +110,10 @@ The ACCP-013 implementation uses:
 - deterministic migration of legacy global deck/model settings into `collector-default`;
 - migration of existing `ankiNoteId` values into bindings without changing the note ID;
 - binding → language route → fallback resolution;
-- binding deck/model snapshots for already-exported items;
+- a destination reservation (profile + deck/model snapshot) persisted before the first Anki mutation, so a cross-system partial failure cannot leave a new Anki note without a durable route pin;
+- binding deck/model snapshots for reserved and already-exported items;
 - profile-grouped batch export with per-profile failure isolation;
-- explicit same-note-type deck moves for exported notes;
+- explicit same-note-type deck moves for exported notes, with rollback to the original deck if saving the new local binding fails;
 - backup v3 including profiles/routes/bindings with conflict-safe merge restore;
 - live-catalog deck choices for added profiles;
 - Collector-managed model export only until ACCP-014 mapping exists.
