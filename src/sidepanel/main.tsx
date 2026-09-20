@@ -1118,47 +1118,157 @@ function App(): React.ReactElement {
             </div>
           </div>
 
-          <label>
-            Anki deck
-            <select
-              value={settings.deckName}
-              onChange={(event) => void persistSettings({ ...settings, deckName: event.target.value })}
-            >
-              {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === settings.deckName) && (
-                <option value={settings.deckName}>
-                  {settings.deckName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                </option>
-              )}
-              {currentCatalogSnapshot()?.decks.map((deck) => (
-                <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
-              ))}
-            </select>
-          </label>
+          <div className="export-profiles">
+            <div className="anki-catalog-head">
+              <div>
+                <strong>Export profiles</strong>
+                <div className="setting-help">
+                  Each profile is a reusable Anki destination. ACCP-013 currently exports only through Collector-managed note types; user-owned note-type mapping arrives in ACCP-014.
+                </div>
+              </div>
+              <button className="ghost" type="button" disabled={busy} onClick={() => void addExportProfile()}>
+                Add profile
+              </button>
+            </div>
 
-          <label>
-            Anki note type
-            <select
-              value={settings.modelName}
-              onChange={(event) => {
-                const modelName = event.target.value;
-                void persistSettings({ ...settings, modelName });
-                if (currentCatalogSnapshot()?.models.some((model) => model.name === modelName)) {
-                  void inspectAnkiModel(modelName);
-                } else {
-                  setModelState({ kind: "idle" });
-                }
-              }}
-            >
-              {!currentCatalogSnapshot()?.models.some((model) => model.name === settings.modelName) && (
-                <option value={settings.modelName}>
-                  {settings.modelName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
-                </option>
-              )}
-              {currentCatalogSnapshot()?.models.map((model) => (
-                <option key={String(model.id)} value={model.name}>{model.name}</option>
+            <label>
+              Fallback profile
+              <select
+                value={settings.fallbackProfileId}
+                onChange={(event) => void persistSettings({
+                  ...settings,
+                  fallbackProfileId: event.target.value,
+                })}
+              >
+                {settings.exportProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="export-profile-list">
+              {settings.exportProfiles.map((profile) => (
+                <article className="export-profile-card" key={profile.id}>
+                  <label>
+                    Profile name
+                    <input
+                      value={profile.name}
+                      onChange={(event) => void updateExportProfile(profile.id, {
+                        name: event.target.value || "Unnamed profile",
+                      })}
+                    />
+                  </label>
+
+                  <label>
+                    Anki deck
+                    <select
+                      value={profile.deckName}
+                      onChange={(event) => {
+                        const deckName = event.target.value;
+                        const deck = currentCatalogSnapshot()?.decks.find((candidate) => candidate.name === deckName);
+                        void updateExportProfile(profile.id, {
+                          deckName,
+                          ...(deck ? { deckId: String(deck.id) } : { deckId: undefined }),
+                        });
+                      }}
+                    >
+                      {!currentCatalogSnapshot()?.decks.some((deck) => deck.name === profile.deckName) && (
+                        <option value={profile.deckName}>
+                          {profile.deckName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
+                        </option>
+                      )}
+                      {currentCatalogSnapshot()?.decks.map((deck) => (
+                        <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Anki note type
+                    <select
+                      value={profile.modelName}
+                      onChange={(event) => {
+                        const modelName = event.target.value;
+                        const model = currentCatalogSnapshot()?.models.find((candidate) => candidate.name === modelName);
+                        void updateExportProfile(profile.id, {
+                          modelName,
+                          ...(model ? { modelId: String(model.id) } : { modelId: undefined }),
+                        });
+                        if (model) void inspectAnkiModel(modelName);
+                      }}
+                    >
+                      {!currentCatalogSnapshot()?.models.some((model) => model.name === profile.modelName) && (
+                        <option value={profile.modelName}>
+                          {profile.modelName} {currentCatalogSnapshot() ? "(saved · not in live Anki)" : "(saved)"}
+                        </option>
+                      )}
+                      {currentCatalogSnapshot()?.models.map((model) => (
+                        <option key={String(model.id)} value={model.name}>{model.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="setting-help">
+                    Mode: {profile.mode === "collector-managed" ? "Collector-managed note type" : "Mapped user note type"}
+                    {profile.id === settings.fallbackProfileId ? " · fallback" : ""}
+                  </div>
+
+                  {settings.exportProfiles.length > 1 && (
+                    <button
+                      className="ghost danger"
+                      type="button"
+                      disabled={busy || profile.id === settings.fallbackProfileId}
+                      onClick={() => void removeExportProfile(profile.id)}
+                    >
+                      Remove profile
+                    </button>
+                  )}
+                </article>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
+
+          <div className="language-routes">
+            <strong>Language routing</strong>
+            <div className="setting-help">
+              Ready items use a pinned item binding first, then a language route, then the fallback profile.
+            </div>
+            {settings.languageRoutes.map((route) => {
+              const profile = settings.exportProfiles.find((candidate) => candidate.id === route.profileId);
+              return (
+                <div className="language-route-row" key={route.language}>
+                  <span><strong>{route.language}</strong> → {profile?.name ?? "missing profile"}</span>
+                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+            <div className="language-route-editor">
+              <label>
+                Language code
+                <input
+                  value={routeLanguage}
+                  placeholder="he, sr, es…"
+                  onChange={(event) => setRouteLanguage(event.target.value)}
+                />
+              </label>
+              <label>
+                Profile
+                <select
+                  value={routeProfileId}
+                  onChange={(event) => setRouteProfileId(event.target.value)}
+                >
+                  {settings.exportProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" disabled={busy} onClick={() => void saveLanguageRoute()}>
+                Save route
+              </button>
+            </div>
+          </div>
 
           {modelState.kind !== "idle" && (
             <div className="anki-model-inspector" aria-live="polite">
@@ -1233,6 +1343,8 @@ function App(): React.ReactElement {
                 <span>{restorePreview.occurrencesAdded} occurrences to add</span>
                 <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
                 <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
+                <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
+                <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
               </div>
 
               {restorePreview.conflicts.length > 0 && (
@@ -1270,6 +1382,9 @@ function App(): React.ReactElement {
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = proposeLearningCard(item);
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
+          const binding = exportBindings[unit.id];
+          const route = resolvedRoute(item);
+          const pendingMoveProfileId = pendingMoveProfiles[unit.id] ?? binding?.profileId;
 
           return (
             <article
@@ -1352,6 +1467,51 @@ function App(): React.ReactElement {
                   {selectedOccurrence?.context && <p className="context">{selectedOccurrence.context}</p>}
                   {unit.note && <p className="learner-note">{unit.note}</p>}
 
+                  <div className="export-destination">
+                    <div className="export-destination-head">
+                      <strong>Destination</strong>
+                      <span className="setting-help">
+                        {route
+                          ? `${route.profile.name} → ${route.profile.deckName} · ${route.profile.modelName}`
+                          : "No valid export route"}
+                      </span>
+                    </div>
+                    <label>
+                      {binding?.ankiNoteId !== undefined ? "Pinned profile" : "Routing override"}
+                      <select
+                        value={
+                          binding?.ankiNoteId !== undefined
+                            ? pendingMoveProfileId ?? binding.profileId
+                            : binding?.profileId ?? "auto"
+                        }
+                        onChange={(event) => void setItemProfileOverride(unit.id, event.target.value)}
+                      >
+                        {binding?.ankiNoteId === undefined && (
+                          <option value="auto">
+                            Automatic{route ? ` — ${route.profile.name}` : ""}
+                          </option>
+                        )}
+                        {settings.exportProfiles.map((profile) => (
+                          <option key={profile.id} value={profile.id}>{profile.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {binding?.ankiNoteId !== undefined && pendingMoveProfileId && pendingMoveProfileId !== binding.profileId && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void moveExportedItem(item, pendingMoveProfileId)}
+                      >
+                        Move exported note
+                      </button>
+                    )}
+                    {binding?.ankiNoteId !== undefined && (
+                      <span className="setting-help">
+                        Anki note {binding.ankiNoteId} is pinned; language/fallback changes will not move it.
+                      </span>
+                    )}
+                  </div>
+
                   {proposal.occurrenceSelection && item.occurrences.length > 1 && (
                     <div className="occurrence-selection">
                       <strong>
@@ -1395,7 +1555,7 @@ function App(): React.ReactElement {
                   )}
                   {exportOutcome?.kind === "exported" && (
                     <div className="item-export-result success" role="status">
-                      Exported to Anki note {exportOutcome.noteId}.
+                      Exported to {exportOutcome.deckName}, Anki note {exportOutcome.noteId}.
                     </div>
                   )}
 
