@@ -366,6 +366,32 @@ try {
   await clickPanelButton(panel, "Start backfill session");
   await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
 
+  const liveStatusBeforeWorkerRestart = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  );
+  assert.equal(liveStatusBeforeWorkerRestart?.ok, true);
+  assert.equal(liveStatusBeforeWorkerRestart?.status?.active, true);
+  const liveSessionId = liveStatusBeforeWorkerRestart.status.sessionId;
+  assert.equal(typeof liveSessionId, "string");
+
+  // Live-session ownership must survive a worker restart even after another tab
+  // becomes active. The restarted worker must validate and address the recorded
+  // Duolingo owner tab rather than falling back to the current tab.
+  await stopExtensionServiceWorker(context, panel, extensionId);
+  await panel.waitForTimeout(100);
+  await contentPage.bringToFront();
+
+  const liveStatusAfterWorkerRestart = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  );
+  assert.equal(liveStatusAfterWorkerRestart?.ok, true);
+  assert.equal(liveStatusAfterWorkerRestart?.status?.active, true);
+  assert.equal(
+    liveStatusAfterWorkerRestart.status.sessionId,
+    liveSessionId,
+    "Worker restart must recover the original Duolingo session owner.",
+  );
+
   await duolingoPage.evaluate(() => {
     const challenge = document.querySelector("#challenge");
     if (!challenge) throw new Error("Duolingo E2E challenge fixture is missing.");
@@ -404,6 +430,31 @@ try {
   // Switch away from the originating tab before stopping. The service worker must
   // still address the Duolingo tab that owns the explicit session.
   await contentPage.bringToFront();
+
+  const injectPersistenceFailure = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE" }),
+  );
+  assert.equal(injectPersistenceFailure?.ok, true);
+
+  await clickPanelButton(panel, "Stop & stage session");
+  await panel.locator(".notice.error", { hasText: "Injected staged-session persistence failure." }).waitFor();
+
+  const statusAfterFailedExplicitStop = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  );
+  assert.equal(statusAfterFailedExplicitStop?.ok, true);
+  assert.equal(
+    statusAfterFailedExplicitStop?.status?.active,
+    true,
+    "Failed staging persistence must leave the explicit-stop session reachable for retry.",
+  );
+  assert.equal(statusAfterFailedExplicitStop.status.sessionId, liveSessionId);
+  assert.equal(
+    statusAfterFailedExplicitStop.status.candidateCount,
+    6,
+    "Failed explicit Stop must retain the frozen six-candidate live buffer.",
+  );
+
   await clickPanelButton(panel, "Stop & stage session");
   await panel.getByRole("button", { name: "Start backfill session" }).waitFor();
   await panel.locator(".backfill-status", { hasText: "staged candidate" }).waitFor();
