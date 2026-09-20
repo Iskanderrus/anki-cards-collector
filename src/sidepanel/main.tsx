@@ -63,11 +63,48 @@ function safePreviewCss(css: string): string {
   return css.replace(/<\/style/gi, "<\\/style");
 }
 
+function sanitizeRepresentativeHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  template.content
+    .querySelectorAll("script, iframe, object, embed, link, meta, base, form")
+    .forEach((node) => node.remove());
+
+  const urlAttributes = new Set([
+    "action",
+    "formaction",
+    "href",
+    "poster",
+    "src",
+    "srcset",
+  ]);
+
+  for (const element of template.content.querySelectorAll("*")) {
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (!urlAttributes.has(name)) continue;
+
+      const value = attribute.value.trim().toLowerCase();
+      if (!value.startsWith("data:") && !value.startsWith("blob:")) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  }
+
+  return template.innerHTML;
+}
+
 function representativePreviewDocument(
   card: RepresentativeAnkiCard,
   side: "question" | "answer",
 ): string {
-  const body = side === "question" ? card.question : card.answer;
+  const rawBody = side === "question" ? card.question : card.answer;
+  const body = sanitizeRepresentativeHtml(rawBody);
   return `<!doctype html>
 <html>
 <head>
