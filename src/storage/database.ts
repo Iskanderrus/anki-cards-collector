@@ -67,6 +67,7 @@ export class CollectorDatabase extends Dexie {
           : [{
               lexicalUnitId: unit.id,
               profileId: LEGACY_DEFAULT_PROFILE_ID,
+              state: "exported",
               ankiNoteId: unit.ankiNoteId,
               updatedAt: unit.updatedAt,
             }]
@@ -75,6 +76,24 @@ export class CollectorDatabase extends Dexie {
       if (bindings.length > 0) {
         await transaction.table("exportBindings").bulkPut(bindings);
       }
+    });
+
+    this.version(4).stores({
+      lexicalUnits: "&id, &contentKey, status, updatedAt",
+      occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+      exportBindings: "&lexicalUnitId, profileId, state, ankiNoteId",
+    }).upgrade(async (transaction) => {
+      await transaction.table("exportBindings").toCollection().modify(
+        (value: Record<string, unknown>) => {
+          if (
+            value.state !== "override"
+            && value.state !== "reserved"
+            && value.state !== "exported"
+          ) {
+            value.state = value.ankiNoteId === undefined ? "reserved" : "exported";
+          }
+        },
+      );
     });
   }
 }
