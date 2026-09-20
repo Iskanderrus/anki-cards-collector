@@ -27,6 +27,7 @@ Click **Inspect** beside that deck.
 Verify:
 
 - the panel names the selected deck;
+- if the selected deck has subdecks, their matching cards are part of the Anki deck-search scope;
 - it reports the total matching card count;
 - it reports how many cards were sampled/inspected;
 - one or more existing note-type/model names are shown;
