@@ -766,7 +766,8 @@ try {
 
   await clickPanelButton(panel, "Add profile");
   profileCards = panel.locator(".export-profile-card");
-  await assert.poll(async () => profileCards.count()).then((count) => assert.equal(count, 2));
+  await profileCards.nth(1).waitFor();
+  assert.equal(await profileCards.count(), 2);
   const serbianProfile = profileCards.nth(1);
   await serbianProfile.getByLabel("Profile name").fill("Serbian");
   await serbianProfile.getByLabel("Anki deck").selectOption({ label: "Serbian RU" });
