@@ -31,6 +31,8 @@ export interface RestorePreview {
   occurrencesAdded: number;
   occurrencesUpdated: number;
   occurrencesSkipped: number;
+  exportBindingsAdded: number;
+  exportBindingsSkipped: number;
   conflicts: string[];
 }
 
@@ -40,6 +42,7 @@ interface RestorePlan {
   lexicalUnitsToUpdate: LexicalUnit[];
   occurrencesToAdd: Occurrence[];
   occurrencesToUpdate: Occurrence[];
+  exportBindingsToAdd: ExportBinding[];
 }
 
 function occurrenceFingerprint(occurrence: Occurrence): string {
@@ -71,6 +74,7 @@ function buildRestorePlan(
   backup: BackupDocument,
   localUnits: LexicalUnit[],
   localOccurrences: Occurrence[],
+  localBindings: ExportBinding[],
 ): RestorePlan {
   const preview: RestorePreview = {
     lexicalUnitsAdded: 0,
@@ -79,12 +83,15 @@ function buildRestorePlan(
     occurrencesAdded: 0,
     occurrencesUpdated: 0,
     occurrencesSkipped: 0,
+    exportBindingsAdded: 0,
+    exportBindingsSkipped: 0,
     conflicts: [],
   };
   const lexicalUnitsToAdd: LexicalUnit[] = [];
   const lexicalUnitsToUpdate: LexicalUnit[] = [];
   const occurrencesToAdd: Occurrence[] = [];
   const occurrencesToUpdate: Occurrence[] = [];
+  const exportBindingsToAdd: ExportBinding[] = [];
 
   const unitsById = new Map(localUnits.map((unit) => [unit.id, unit]));
   const unitsByContentKey = new Map(localUnits.map((unit) => [unit.contentKey, unit]));
@@ -169,12 +176,44 @@ function buildRestorePlan(
     }
   }
 
+  const bindingsByUnitId = new Map(
+    localBindings.map((binding) => [binding.lexicalUnitId, binding]),
+  );
+
+  for (const incoming of backup.exportBindings) {
+    if (conflictedUnitIds.has(incoming.lexicalUnitId)) continue;
+
+    const current = bindingsByUnitId.get(incoming.lexicalUnitId);
+    if (!current) {
+      exportBindingsToAdd.push(incoming);
+      preview.exportBindingsAdded += 1;
+      bindingsByUnitId.set(incoming.lexicalUnitId, incoming);
+      continue;
+    }
+
+    const same =
+      current.profileId === incoming.profileId
+      && current.ankiNoteId === incoming.ankiNoteId
+      && current.deckName === incoming.deckName
+      && current.modelName === incoming.modelName;
+
+    if (same) {
+      preview.exportBindingsSkipped += 1;
+      continue;
+    }
+
+    preview.conflicts.push(
+      `Export binding conflict: ${incoming.lexicalUnitId} already has a different local destination or Anki note.`,
+    );
+  }
+
   return {
     preview,
     lexicalUnitsToAdd,
     lexicalUnitsToUpdate,
     occurrencesToAdd,
     occurrencesToUpdate,
+    exportBindingsToAdd,
   };
 }
 
@@ -521,11 +560,12 @@ export class CaptureRepository {
   }
 
   async previewRestore(backup: BackupDocument): Promise<RestorePreview> {
-    const [localUnits, localOccurrences] = await Promise.all([
+    const [localUnits, localOccurrences, localBindings] = await Promise.all([
       this.database.lexicalUnits.toArray(),
       this.database.occurrences.toArray(),
+      this.database.exportBindings.toArray(),
     ]);
-    return buildRestorePlan(backup, localUnits, localOccurrences).preview;
+    return buildRestorePlan(backup, localUnits, localOccurrences, localBindings).preview;
   }
 
   async restoreBackup(backup: BackupDocument): Promise<RestorePreview> {
@@ -535,12 +575,14 @@ export class CaptureRepository {
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
+      this.database.exportBindings,
       async () => {
-        const [localUnits, localOccurrences] = await Promise.all([
+        const [localUnits, localOccurrences, localBindings] = await Promise.all([
           this.database.lexicalUnits.toArray(),
           this.database.occurrences.toArray(),
+          this.database.exportBindings.toArray(),
         ]);
-        const plan = buildRestorePlan(backup, localUnits, localOccurrences);
+        const plan = buildRestorePlan(backup, localUnits, localOccurrences, localBindings);
 
         if (plan.preview.conflicts.length > 0) {
           throw new Error(`Backup has ${plan.preview.conflicts.length} conflict(s). Resolve them before restoring.`);
@@ -557,6 +599,9 @@ export class CaptureRepository {
         }
         for (const occurrence of plan.occurrencesToUpdate) {
           await this.database.occurrences.put(occurrence);
+        }
+        for (const binding of plan.exportBindingsToAdd) {
+          await this.database.exportBindings.add(binding);
         }
 
         completedPreview = plan.preview;
