@@ -970,6 +970,27 @@ try {
     "Inspecting a deck must not mutate Anki.",
   );
 
+  assert.equal(
+    await analysisPanel.locator(".anki-preview-frame").evaluateAll((frames) =>
+      frames.every((frame) => frame instanceof HTMLIFrameElement && Boolean(frame.title))
+    ),
+    true,
+    "Every sandboxed representative preview must have an accessible title.",
+  );
+
+  const analysisAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .exclude(".anki-preview-frame")
+    .analyze();
+  assert.equal(
+    analysisAccessibility.violations.length,
+    0,
+    `Deck-analysis accessibility violations:\n${JSON.stringify(analysisAccessibility.violations, null, 2)}`,
+  );
+
+  await analysisPanel.getByRole("button", { name: "Close" }).click();
+  await analysisPanel.waitFor({ state: "detached" });
+
   const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
   await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
