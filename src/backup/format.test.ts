@@ -52,6 +52,7 @@ function binding(): ExportBinding {
   return {
     lexicalUnitId: "unit-1",
     profileId: "es-profile",
+    state: "exported",
     ankiNoteId: 4242,
     deckName: "Spanish RU",
     modelName: "Collector Basic",
@@ -115,6 +116,7 @@ describe("backup format", () => {
     expect(backup.exportBindings).toEqual([{
       lexicalUnitId: "legacy-unit",
       profileId: "collector-default",
+      state: "exported",
       ankiNoteId: 777,
       updatedAt: "2026-09-18T11:00:00Z",
     }]);
@@ -173,4 +175,50 @@ describe("backup format", () => {
       "normalizedSurfaceText does not match surfaceText",
     );
   });
+
+  it.each([
+    ["missing", undefined],
+    ["unknown", "mapped-user-modle"],
+  ])("rejects a %s export profile mode in a v3 backup", (_label, mode) => {
+    const rawSettings = settings() as unknown as Record<string, unknown>;
+    const profiles = structuredClone(settings().exportProfiles) as Array<Record<string, unknown>>;
+    if (mode === undefined) {
+      delete profiles[0]!.mode;
+    } else {
+      profiles[0]!.mode = mode;
+    }
+    rawSettings.exportProfiles = profiles;
+
+    expect(() => parseBackup(JSON.stringify({
+      version: 3,
+      exportedAt: "2026-09-20T10:00:00Z",
+      items: [sampleItem()],
+      exportBindings: [],
+      settings: rawSettings,
+    }))).toThrow("unsupported ownership mode");
+  });
+
+  it("conservatively interprets a pre-state v3 binding without a note id as reserved", () => {
+    const raw = JSON.parse(serializeBackup(
+      [sampleItem()],
+      settings(),
+      [],
+      "2026-09-20T10:00:00Z",
+    )) as Record<string, unknown>;
+    raw.exportBindings = [{
+      lexicalUnitId: "unit-1",
+      profileId: "es-profile",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+      updatedAt: "2026-09-20T10:00:00Z",
+    }];
+
+    const parsed = parseBackup(JSON.stringify(raw));
+    expect(parsed.exportBindings[0]).toMatchObject({
+      lexicalUnitId: "unit-1",
+      state: "reserved",
+      deckName: "Spanish RU",
+    });
+  });
+
 });
