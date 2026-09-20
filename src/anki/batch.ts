@@ -73,6 +73,15 @@ function failedOutcome(item: CollectedItem, error: unknown): ExportItemOutcome {
   };
 }
 
+function resolvedDestinationKey(profile: ExportProfile): string {
+  return JSON.stringify([
+    profile.id,
+    profile.deckName,
+    profile.modelName,
+    profile.mode,
+  ]);
+}
+
 export async function exportBatch(
   items: CollectedItem[],
   settings: CollectorSettings,
@@ -102,9 +111,10 @@ export async function exportBatch(
 
   const groups = new Map<string, RoutedItem[]>();
   for (const entry of routed) {
-    const values = groups.get(entry.profile.id) ?? [];
+    const key = resolvedDestinationKey(entry.profile);
+    const values = groups.get(key) ?? [];
     values.push(entry);
-    groups.set(entry.profile.id, values);
+    groups.set(key, values);
   }
 
   for (const entries of groups.values()) {
@@ -131,15 +141,14 @@ export async function exportBatch(
         let effectiveBinding = binding;
         const needsReservation =
           binding?.ankiNoteId === undefined
-          && (
-            binding?.deckName !== profile.deckName
-            || binding?.modelName !== profile.modelName
-          );
+          && binding?.state !== "reserved"
+          && binding?.state !== "exported";
 
         if (needsReservation) {
           const reserved: ExportBinding = {
             lexicalUnitId: id,
             profileId: profile.id,
+            state: "reserved",
             deckName: profile.deckName,
             modelName: profile.modelName,
             updatedAt: new Date().toISOString(),
@@ -157,6 +166,7 @@ export async function exportBatch(
         const persisted: ExportBinding = {
           lexicalUnitId: id,
           profileId: profile.id,
+          state: "exported",
           ankiNoteId: noteId,
           deckName: profile.deckName,
           modelName: profile.modelName,
