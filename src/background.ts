@@ -43,6 +43,7 @@ interface StoredVisibleSessionOwner {
 
 let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
+let failNextStagedBatchPersistenceForE2E = false;
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
   return {
@@ -102,6 +103,11 @@ async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
 }
 
 async function persistStagedBatch(result: BatchCaptureResult | null): Promise<void> {
+  if (__COLLECTOR_E2E__ && failNextStagedBatchPersistenceForE2E) {
+    failNextStagedBatchPersistenceForE2E = false;
+    throw new Error("Injected staged-session persistence failure.");
+  }
+
   if (!result || result.candidates.length === 0) {
     await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
     return;
@@ -575,6 +581,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 if (__COLLECTOR_E2E__) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE") {
+      failNextStagedBatchPersistenceForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type !== "E2E_CONTEXT_MENU_CLICK") return false;
 
     const tabId = Number(message.tabId);
