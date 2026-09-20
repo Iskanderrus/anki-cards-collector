@@ -152,11 +152,12 @@ function sameSettings(left: CollectorSettings, right: CollectorSettings): boolea
 export function mergeSettingsForRestore(
   currentValue: CollectorSettings,
   incomingValue: CollectorSettings,
+  hasLocalCorpusState = false,
 ): SettingsMergeResult {
   const current = migrateSettings(currentValue);
   const incoming = migrateSettings(incomingValue);
 
-  if (sameSettings(current, DEFAULT_SETTINGS)) {
+  if (!hasLocalCorpusState && sameSettings(current, DEFAULT_SETTINGS)) {
     return { settings: incoming, conflicts: [] };
   }
 
