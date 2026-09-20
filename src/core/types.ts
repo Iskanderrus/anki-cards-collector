@@ -63,9 +63,12 @@ export interface LanguageRoute {
   profileId: string;
 }
 
+export type ExportBindingState = "override" | "reserved" | "exported";
+
 export interface ExportBinding {
   lexicalUnitId: string;
   profileId: string;
+  state: ExportBindingState;
   ankiNoteId?: number;
   deckName?: string;
   modelName?: string;
