@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { AnkiClient } from "./client";
-import type { CollectedItem, CollectorSettings } from "../core/types";
+import type { CollectedItem, ExportProfile } from "../core/types";
 
-function settings(): CollectorSettings {
+function profile(): ExportProfile {
   return {
-    defaultLanguage: "es",
+    id: "collector",
+    name: "Collector",
     deckName: "Collector",
     modelName: "Collector",
-    sourceUrlMode: "sanitized",
+    mode: "collector-managed",
   };
 }
 
@@ -78,7 +79,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(9001);
     expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
@@ -110,7 +111,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(9001);
     expect(actions).toEqual(["notesInfo", "findNotes", "addNote"]);
@@ -132,7 +133,7 @@ describe("AnkiClient", () => {
     }) as unknown as typeof fetch;
 
     await expect(
-      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings()),
+      new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile()),
     ).rejects.toThrow("Collection is not available");
     expect(actions).toEqual(["notesInfo"]);
   });
@@ -153,7 +154,7 @@ describe("AnkiClient", () => {
       return new Response(JSON.stringify({ result, error: null }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), settings());
+    const noteId = await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(item(), profile());
 
     expect(noteId).toBe(4242);
     expect(actions.map(({ action }) => action)).toEqual(["notesInfo", "updateNoteFields"]);
@@ -209,7 +210,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(profile());
 
     expect(actions.filter((action) => action === "modelFieldAdd")).toHaveLength(6);
     expect(actions).toContain("updateModelTemplates");
@@ -243,7 +244,7 @@ describe("AnkiClient", () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(profile());
 
     expect(actions).not.toContain("updateModelTemplates");
     expect(actions).not.toContain("updateModelStyling");
@@ -343,7 +344,7 @@ describe("AnkiClient", () => {
       return new Response(JSON.stringify({ result, error: null }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(value, settings());
+    await new AnkiClient("http://127.0.0.1:8765", fetcher).upsert(value, profile());
 
     const update = requests.find(({ action }) => action === "updateNoteFields");
     expect(update?.params).toMatchObject({
