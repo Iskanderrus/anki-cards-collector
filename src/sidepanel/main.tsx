@@ -541,11 +541,13 @@ function App(): React.ReactElement {
     const exportable = ready.filter((item) => !legacyCustom.includes(item));
 
     if (exportable.length === 0) {
-      setError(
-        legacyCustom.length > 0
-          ? "These existing Anki cards use custom note types. Collector will leave them unchanged for now."
-          : "No Ready cards can be exported.",
-      );
+      if (legacyCustom.length > 0) {
+        setNotice(
+          `${legacyCustom.length} existing Anki card${legacyCustom.length === 1 ? "" : "s"} use custom note types and were left unchanged.`,
+        );
+      } else {
+        setError("No Ready cards can be exported.");
+      }
       return;
     }
 
