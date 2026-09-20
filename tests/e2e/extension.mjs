@@ -877,7 +877,7 @@ try {
   await newLanguage.fill("he");
   await newLanguageDeck.selectOption({ label: "Hebrew RU" });
   await clickPanelButton(panel, "Add language");
-  const hebrewRoute = panel.locator(".language-deck-row", { hasText: "he" });
+  const hebrewRoute = panel.locator('.language-deck-row[data-language="he"]');
   await hebrewRoute.waitFor();
   assert.equal(
     await hebrewRoute.getByLabel("Anki deck for he").inputValue(),
@@ -887,7 +887,7 @@ try {
   await newLanguage.fill("sr");
   await newLanguageDeck.selectOption({ label: "Serbian RU" });
   await clickPanelButton(panel, "Add language");
-  const serbianRoute = panel.locator(".language-deck-row", { hasText: "sr" });
+  const serbianRoute = panel.locator('.language-deck-row[data-language="sr"]');
   await serbianRoute.waitFor();
   assert.equal(
     await serbianRoute.getByLabel("Anki deck for sr").inputValue(),
