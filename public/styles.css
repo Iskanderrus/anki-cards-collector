@@ -213,6 +213,7 @@ label {
 .anki-preview-frame {
   width: 100%;
   min-height: 92px;
+  pointer-events: none;
   border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
   border-radius: 6px;
   background: Canvas;
