@@ -64,6 +64,16 @@ export function resolveExportRoute(
   return { profile: fallback, source: "fallback", binding: null };
 }
 
+export function assertDestinationChangeReconciled(
+  binding: ExportBinding | null | undefined,
+): void {
+  if (binding?.state === "reserved") {
+    throw new Error(
+      "A previous Anki export may already have reached this card. Retry export before changing its destination.",
+    );
+  }
+}
+
 export function validateProfileForCurrentExport(profile: ExportProfile): void {
   if (
     profile.mode !== "collector-managed"
