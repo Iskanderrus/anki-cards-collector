@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BackupDocument } from "../backup/format";
+import { DEFAULT_SETTINGS } from "../settings";
 import type { CaptureDraft } from "../core/types";
 import { CollectorDatabase } from "./database";
 import { CaptureRepository } from "./repository";
@@ -183,8 +184,10 @@ describe("CaptureRepository", () => {
 
   it("restores a current backup idempotently and skips duplicate occurrences", async () => {
     const backup: BackupDocument = {
-      version: 2,
+      version: 3,
       exportedAt: "2026-09-19T10:00:00Z",
+      settings: DEFAULT_SETTINGS,
+      exportBindings: [],
       items: [{
         lexicalUnit: {
           id: "unit-restore",
