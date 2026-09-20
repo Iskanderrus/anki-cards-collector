@@ -1,5 +1,6 @@
 import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
+import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
 
 interface AnkiResponse<T> {
   result: T;
@@ -94,6 +95,15 @@ export class AnkiClient {
   }
 
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
+    if (
+      profile.mode !== "collector-managed"
+      || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
+    ) {
+      throw new Error(
+        `Collector refuses to modify Anki note type "${profile.modelName}" because it is not the recognized Collector-managed model.`,
+      );
+    }
+
     const decks = await this.invoke<string[]>("deckNames");
     if (!decks.includes(profile.deckName)) {
       throw new Error(
