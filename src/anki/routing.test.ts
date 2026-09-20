@@ -31,7 +31,7 @@ const settings: CollectorSettings = {
       id: "he-profile",
       name: "Hebrew",
       deckName: "Hebrew New Default",
-      modelName: "Collector Basic v2",
+      modelName: "Collector Basic",
       mode: "collector-managed",
     },
     {
@@ -58,6 +58,7 @@ describe("resolveExportRoute", () => {
     const binding: ExportBinding = {
       lexicalUnitId: "unit-1",
       profileId: "he-profile",
+      state: "override",
       updatedAt: "2026-09-20T00:00:00Z",
     };
 
@@ -71,6 +72,7 @@ describe("resolveExportRoute", () => {
     const binding: ExportBinding = {
       lexicalUnitId: "unit-1",
       profileId: "he-profile",
+      state: "exported",
       ankiNoteId: 4242,
       deckName: "Hebrew Original",
       modelName: "Collector Basic",
@@ -88,6 +90,7 @@ describe("resolveExportRoute", () => {
     const binding: ExportBinding = {
       lexicalUnitId: "unit-1",
       profileId: "missing",
+      state: "exported",
       ankiNoteId: 4242,
       deckName: "Hebrew Original",
       modelName: "Collector Basic",
@@ -101,6 +104,7 @@ describe("resolveExportRoute", () => {
     const binding: ExportBinding = {
       lexicalUnitId: "unit-1",
       profileId: "he-profile",
+      state: "reserved",
       deckName: "Hebrew Reserved",
       modelName: "Collector Basic",
       updatedAt: "2026-09-20T00:00:00Z",
