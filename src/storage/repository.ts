@@ -228,6 +228,8 @@ function compatibleBindings(
     && right.ankiNoteId !== undefined
     && left.ankiNoteId !== right.ankiNoteId
   ) return false;
+  if (left.deckName && right.deckName && left.deckName !== right.deckName) return false;
+  if (left.modelName && right.modelName && left.modelName !== right.modelName) return false;
   return true;
 }
 
