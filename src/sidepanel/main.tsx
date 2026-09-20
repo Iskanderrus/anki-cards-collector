@@ -1328,27 +1328,29 @@ function App(): React.ReactElement {
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
                   </select>
-                  <button
-                    className="ghost"
-                    type="button"
-                    disabled={catalogState.kind !== "live" || missing}
-                    onClick={() => void inspectAnkiDeck(deckName)}
-                  >
-                    Inspect
-                  </button>
-                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
-                    Remove
-                  </button>
-                  {missing && (
+                  <div className="language-deck-actions">
                     <button
                       className="ghost"
                       type="button"
-                      disabled={busy}
-                      onClick={() => void createSavedDeck(deckName)}
+                      disabled={catalogState.kind !== "live" || missing}
+                      onClick={() => void inspectAnkiDeck(deckName)}
                     >
-                      Create deck
+                      Inspect
                     </button>
-                  )}
+                    <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
+                      Remove
+                    </button>
+                    {missing && (
+                      <button
+                        className="ghost"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void createSavedDeck(deckName)}
+                      >
+                        Create deck
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1405,24 +1407,26 @@ function App(): React.ReactElement {
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
                   </select>
-                  <button
-                    className="ghost"
-                    type="button"
-                    disabled={catalogState.kind !== "live" || missing}
-                    onClick={() => void inspectAnkiDeck(deckName)}
-                  >
-                    Inspect
-                  </button>
-                  {missing && (
+                  <div className="language-deck-actions">
                     <button
                       className="ghost"
                       type="button"
-                      disabled={busy}
-                      onClick={() => void createSavedDeck(deckName)}
+                      disabled={catalogState.kind !== "live" || missing}
+                      onClick={() => void inspectAnkiDeck(deckName)}
                     >
-                      Create deck
+                      Inspect
                     </button>
-                  )}
+                    {missing && (
+                      <button
+                        className="ghost"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void createSavedDeck(deckName)}
+                      >
+                        Create deck
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })()}
