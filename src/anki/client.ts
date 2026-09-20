@@ -1,8 +1,4 @@
-import {
-  LEGACY_DEFAULT_PROFILE_ID,
-  type CollectedItem,
-  type ExportProfile,
-} from "../core/types";
+import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 
 interface AnkiResponse<T> {
@@ -100,12 +96,9 @@ export class AnkiClient {
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
     const decks = await this.invoke<string[]>("deckNames");
     if (!decks.includes(profile.deckName)) {
-      if (profile.id !== LEGACY_DEFAULT_PROFILE_ID) {
-        throw new Error(
-          `Anki deck "${profile.deckName}" is not available. Refresh the live catalog and choose an existing deck.`,
-        );
-      }
-      await this.invoke("createDeck", { deck: profile.deckName });
+      throw new Error(
+        `Anki deck "${profile.deckName}" is not available. Refresh the live catalog, choose an existing deck, or create this saved deck explicitly.`,
+      );
     }
 
     const models = await this.invoke<string[]>("modelNames");
@@ -221,6 +214,12 @@ export class AnkiClient {
         tags: ["anki-cards-collector", `collector::${proposal.cardKind}`],
       },
     });
+  }
+
+  async createDeck(deckName: string): Promise<number> {
+    const normalized = deckName.trim();
+    if (!normalized) throw new Error("Deck name cannot be empty.");
+    return this.invoke<number>("createDeck", { deck: normalized });
   }
 
   async moveNoteToDeck(noteId: number, deckName: string): Promise<void> {
