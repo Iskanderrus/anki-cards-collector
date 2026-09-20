@@ -249,6 +249,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: captured.lexicalUnit.id,
       profileId: "es-profile",
+      state: "exported",
       ankiNoteId: 4242,
       deckName: "Spanish RU",
       modelName: "Collector Basic",
@@ -274,10 +275,12 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: canonical.lexicalUnit.id,
       profileId: "profile-a",
+      state: "override",
     });
     await repository.setExportBinding({
       lexicalUnitId: observed.lexicalUnit.id,
       profileId: "profile-b",
+      state: "override",
     });
 
     await expect(repository.update(observed.lexicalUnit.id, {
@@ -299,6 +302,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: observed.lexicalUnit.id,
       profileId: "profile-a",
+      state: "exported",
       ankiNoteId: 6060,
       deckName: "Spanish RU",
       modelName: "Collector Basic",
@@ -331,6 +335,7 @@ describe("CaptureRepository", () => {
       exportBindings: [{
         lexicalUnitId: captured.lexicalUnit.id,
         profileId: DEFAULT_SETTINGS.fallbackProfileId,
+        state: "exported",
         ankiNoteId: 5151,
         deckName: "Collector Inbox",
         modelName: "Collector Basic",
@@ -352,6 +357,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: captured.lexicalUnit.id,
       profileId: "other-profile",
+      state: "exported",
       ankiNoteId: 9999,
       deckName: "Other",
       modelName: "Collector Basic",
@@ -365,6 +371,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: captured.lexicalUnit.id,
       profileId: "profile-a",
+      state: "override",
     });
 
     await repository.remove(captured.lexicalUnit.id);
@@ -379,6 +386,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: canonical.lexicalUnit.id,
       profileId: "profile-a",
+      state: "exported",
       ankiNoteId: 1111,
       deckName: "Spanish Old",
       modelName: "Collector Basic",
@@ -386,6 +394,7 @@ describe("CaptureRepository", () => {
     await repository.setExportBinding({
       lexicalUnitId: observed.lexicalUnit.id,
       profileId: "profile-a",
+      state: "exported",
       ankiNoteId: 1111,
       deckName: "Spanish New",
       modelName: "Collector Basic",
