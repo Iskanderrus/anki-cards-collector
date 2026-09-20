@@ -107,8 +107,13 @@ function normalizedProfiles(value: unknown): ExportProfile[] {
     const name = String(profile.name ?? "").trim();
     const deckName = String(profile.deckName ?? "").trim();
     const modelName = String(profile.modelName ?? "").trim();
-    const mode = profile.mode === "mapped-user-model" ? "mapped-user-model" : "collector-managed";
     if (!id || !name || !deckName || !modelName || ids.has(id)) continue;
+
+    if (profile.mode !== "collector-managed" && profile.mode !== "mapped-user-model") {
+      throw new Error(
+        `Export destination "${name || id}" has an unsupported ownership mode.`,
+      );
+    }
 
     ids.add(id);
     profiles.push({
@@ -118,7 +123,7 @@ function normalizedProfiles(value: unknown): ExportProfile[] {
       ...(profile.deckId ? { deckId: String(profile.deckId) } : {}),
       modelName,
       ...(profile.modelId ? { modelId: String(profile.modelId) } : {}),
-      mode,
+      mode: profile.mode,
     });
   }
 
