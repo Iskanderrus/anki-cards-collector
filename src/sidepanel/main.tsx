@@ -1337,6 +1337,9 @@ function App(): React.ReactElement {
             })()}
           </div>
 
+          <details className="advanced-settings">
+            <summary>Advanced</summary>
+            <div className="advanced-settings-grid">
           {modelState.kind !== "idle" && (
             <div className="anki-model-inspector" aria-live="polite">
               {modelState.kind === "loading" && <span>Inspecting note type…</span>}
@@ -1432,6 +1435,8 @@ function App(): React.ReactElement {
               </div>
             </div>
           )}
+            </div>
+          </details>
         </div>
       </details>
 
