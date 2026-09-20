@@ -467,4 +467,28 @@ describe("AnkiClient", () => {
     ]);
   });
 
+
+  it("refuses schema mutation for an arbitrary model even when mode claims collector-managed", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      return new Response(JSON.stringify({ result: null, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const unsafe: ExportProfile = {
+      id: "unsafe",
+      name: "Unsafe",
+      deckName: "Hebrew RU",
+      modelName: "My Existing Hebrew Model",
+      mode: "collector-managed",
+    };
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(unsafe),
+    ).rejects.toThrow("not the recognized Collector-managed model");
+
+    expect(actions).toEqual([]);
+  });
+
 });
