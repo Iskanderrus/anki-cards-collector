@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
@@ -167,6 +167,7 @@ function App(): React.ReactElement {
   });
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
+  const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -570,15 +571,25 @@ function App(): React.ReactElement {
     }
   }
 
-  async function persistSettings(next: CollectorSettings): Promise<void> {
-    await saveSettings(next);
-    const normalized = await loadSettings();
-    setSettings(normalized);
-    setRouteProfileId((current) =>
-      normalized.exportProfiles.some((profile) => profile.id === current)
-        ? current
-        : normalized.fallbackProfileId
-    );
+  async function persistSettings(
+    update: (current: CollectorSettings) => CollectorSettings,
+  ): Promise<CollectorSettings> {
+    let resolved = settings;
+    const run = settingsMutationQueue.current.then(async () => {
+      const current = await loadSettings();
+      await saveSettings(update(current));
+      resolved = await loadSettings();
+      setSettings(resolved);
+      setRouteProfileId((selected) =>
+        resolved.exportProfiles.some((profile) => profile.id === selected)
+          ? selected
+          : resolved.fallbackProfileId
+      );
+    });
+
+    settingsMutationQueue.current = run.then(() => undefined, () => undefined);
+    await run;
+    return resolved;
   }
 
   function resolvedRoute(item: CollectedItem) {
@@ -707,10 +718,10 @@ function App(): React.ReactElement {
       ...(liveManagedModel ? { modelId: String(liveManagedModel.id) } : {}),
       mode: "collector-managed",
     };
-    await persistSettings({
-      ...settings,
-      exportProfiles: [...settings.exportProfiles, profile],
-    });
+    await persistSettings((current) => ({
+      ...current,
+      exportProfiles: [...current.exportProfiles, profile],
+    }));
     setNotice("Export profile added. Choose its deck and note type below.");
   }
 
@@ -718,10 +729,12 @@ function App(): React.ReactElement {
     profileId: string,
     changes: Partial<ExportProfile>,
   ): Promise<void> {
-    const exportProfiles = settings.exportProfiles.map((profile) =>
-      profile.id === profileId ? { ...profile, ...changes, id: profile.id } : profile
-    );
-    await persistSettings({ ...settings, exportProfiles });
+    await persistSettings((current) => ({
+      ...current,
+      exportProfiles: current.exportProfiles.map((profile) =>
+        profile.id === profileId ? { ...profile, ...changes, id: profile.id } : profile
+      ),
+    }));
   }
 
   async function removeExportProfile(profileId: string): Promise<void> {
@@ -738,10 +751,10 @@ function App(): React.ReactElement {
       return;
     }
 
-    await persistSettings({
-      ...settings,
-      exportProfiles: settings.exportProfiles.filter((profile) => profile.id !== profileId),
-    });
+    await persistSettings((current) => ({
+      ...current,
+      exportProfiles: current.exportProfiles.filter((profile) => profile.id !== profileId),
+    }));
     setNotice("Export profile removed.");
   }
 
@@ -761,16 +774,16 @@ function App(): React.ReactElement {
       { language, profileId: routeProfileId },
     ].sort((left, right) => left.language.localeCompare(right.language));
 
-    await persistSettings({ ...settings, languageRoutes });
+    await persistSettings((current) => ({ ...current, languageRoutes }));
     setRouteLanguage("");
     setNotice(`Default export route for ${language} saved.`);
   }
 
   async function removeLanguageRoute(language: string): Promise<void> {
-    await persistSettings({
-      ...settings,
-      languageRoutes: settings.languageRoutes.filter((route) => route.language !== language),
-    });
+    await persistSettings((current) => ({
+      ...current,
+      languageRoutes: current.languageRoutes.filter((route) => route.language !== language),
+    }));
     setNotice(`Language route ${language} removed.`);
   }
 
@@ -1146,7 +1159,10 @@ function App(): React.ReactElement {
             <input
               value={settings.defaultLanguage}
               placeholder="es, sr, he…"
-              onChange={(event) => void persistSettings({ ...settings, defaultLanguage: event.target.value || "und" })}
+              onChange={(event) => {
+                const defaultLanguage = event.target.value || "und";
+                void persistSettings((current) => ({ ...current, defaultLanguage }));
+              }}
             />
           </label>
           <div className="anki-catalog">
@@ -1199,10 +1215,10 @@ function App(): React.ReactElement {
               Fallback profile
               <select
                 value={settings.fallbackProfileId}
-                onChange={(event) => void persistSettings({
-                  ...settings,
-                  fallbackProfileId: event.target.value,
-                })}
+                onChange={(event) => {
+                  const fallbackProfileId = event.target.value;
+                  void persistSettings((current) => ({ ...current, fallbackProfileId }));
+                }}
               >
                 {settings.exportProfiles.map((profile) => (
                   <option key={profile.id} value={profile.id}>{profile.name}</option>
@@ -1350,10 +1366,10 @@ function App(): React.ReactElement {
             Source URL retention
             <select
               value={settings.sourceUrlMode}
-              onChange={(event) => void persistSettings({
-                ...settings,
-                sourceUrlMode: event.target.value as SourceUrlMode,
-              })}
+              onChange={(event) => {
+                const sourceUrlMode = event.target.value as SourceUrlMode;
+                void persistSettings((current) => ({ ...current, sourceUrlMode }));
+              }}
             >
               <option value="sanitized">Origin + path only (default)</option>
               <option value="query">Keep non-tracking query parameters</option>
