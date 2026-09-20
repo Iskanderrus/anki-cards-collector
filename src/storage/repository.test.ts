@@ -371,4 +371,36 @@ describe("CaptureRepository", () => {
     expect(await repository.getExportBinding(captured.lexicalUnit.id)).toBeNull();
   });
 
+
+  it("refuses consolidation when the same profile id has conflicting pinned destination snapshots", async () => {
+    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
+
+    await repository.setExportBinding({
+      lexicalUnitId: canonical.lexicalUnit.id,
+      profileId: "profile-a",
+      ankiNoteId: 1111,
+      deckName: "Spanish Old",
+      modelName: "Collector Basic",
+    });
+    await repository.setExportBinding({
+      lexicalUnitId: observed.lexicalUnit.id,
+      profileId: "profile-a",
+      ankiNoteId: 1111,
+      deckName: "Spanish New",
+      modelName: "Collector Basic",
+    });
+
+    await expect(repository.update(observed.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: observed.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    })).rejects.toThrow("different export destinations");
+
+    expect(await repository.list()).toHaveLength(2);
+  });
+
 });
