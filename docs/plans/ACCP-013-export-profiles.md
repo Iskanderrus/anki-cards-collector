@@ -99,3 +99,22 @@ Backups must preserve the information necessary to restore safe routing/bindings
 ## Manual acceptance
 
 Use at least two real destination decks in one Ready batch and verify each item reaches the intended deck without changing the user's note-type schema.
+
+
+## Implemented boundary
+
+The ACCP-013 implementation uses:
+
+- versioned `CollectorSettings` with reusable export profiles, language routes, and one fallback profile;
+- IndexedDB v3 `exportBindings` keyed by lexical-unit ID;
+- deterministic migration of legacy global deck/model settings into `collector-default`;
+- migration of existing `ankiNoteId` values into bindings without changing the note ID;
+- binding → language route → fallback resolution;
+- binding deck/model snapshots for already-exported items;
+- profile-grouped batch export with per-profile failure isolation;
+- explicit same-note-type deck moves for exported notes;
+- backup v3 including profiles/routes/bindings with conflict-safe merge restore;
+- live-catalog deck choices for added profiles;
+- Collector-managed model export only until ACCP-014 mapping exists.
+
+The implementation intentionally does **not** infer that an arbitrary discovered note type is Collector-owned. Existing user note types remain read-only inspection data until ACCP-014.
