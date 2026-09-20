@@ -117,7 +117,7 @@ describe("moveExportedNote", () => {
       },
       exportClient,
       async () => undefined,
-    )).rejects.toThrow("requires ACCP-014");
+    )).rejects.toThrow("can only move the card between decks while keeping the same note type");
 
     expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
     expect(exportClient.moveNoteToDeck).not.toHaveBeenCalled();
