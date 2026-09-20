@@ -292,7 +292,7 @@ try {
   await panel.locator(".settings").evaluate((details) => {
     if (details instanceof HTMLDetailsElement) details.open = true;
   });
-  const languageInput = panel.locator("label").filter({ hasText: "Language code" }).locator("input");
+  const languageInput = panel.getByPlaceholder("es, sr, he…");
   await languageInput.fill("he");
   await panel.waitForFunction(async () => {
     const stored = await chrome.storage.local.get("collectorSettings");
