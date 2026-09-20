@@ -90,7 +90,7 @@ On a Duolingo **Select the matching pairs** screen:
 
 These cases are primarily automated, but can be spot-checked if a real Duolingo flow exposes them:
 
-1. Start a backfill session in a lesson/review and navigate through Duolingo's SPA to Home/Profile without a full page reload. Confirm **Backfill active** ends and no Home/Profile DOM is collected.
+1. Start a backfill session in a lesson/review, observe at least one new candidate, and navigate through Duolingo's SPA to Home/Profile without pressing **Stop & stage session**. Confirm **Backfill active** ends, no Home/Profile DOM is collected, and the previously observed session candidate remains present in staged evidence.
 2. If a visible target-language wrapper contains a very large aggregate block, confirm Collector does not truncate it into a lexical candidate.
 3. Start a Hebrew session, collect visible evidence, change Collector's language setting before stopping, then stop the session. Confirm the accumulated evidence remains tagged `he`.
 4. Confirm source-language prompt text without matching `lang` metadata is not stamped as target-language evidence when the configured language is known.
