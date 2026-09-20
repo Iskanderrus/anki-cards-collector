@@ -35,13 +35,11 @@ export function resolveExportRoute(
       );
     }
 
-    const profile = binding.ankiNoteId === undefined
-      ? configuredProfile
-      : {
-          ...configuredProfile,
-          deckName: binding.deckName ?? configuredProfile.deckName,
-          modelName: binding.modelName ?? configuredProfile.modelName,
-        };
+    const profile = {
+      ...configuredProfile,
+      deckName: binding.deckName ?? configuredProfile.deckName,
+      modelName: binding.modelName ?? configuredProfile.modelName,
+    };
 
     return { profile, source: "binding", binding };
   }
