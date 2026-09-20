@@ -174,4 +174,32 @@ describe("settings migration", () => {
     expect(result.conflicts.join("\n")).toContain("Language route conflict");
   });
 
+
+  it("keeps the canonical default profile when local corpus state already depends on it", () => {
+    const incoming = migrateSettings({
+      defaultLanguage: "he",
+      exportProfiles: [{
+        id: "he-profile",
+        name: "Hebrew",
+        deckName: "Hebrew RU",
+        modelName: "Collector Basic",
+        mode: "collector-managed",
+      }],
+      languageRoutes: [{ language: "he", profileId: "he-profile" }],
+      fallbackProfileId: "he-profile",
+    });
+
+    const result = mergeSettingsForRestore(DEFAULT_SETTINGS, incoming, true);
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.settings.fallbackProfileId).toBe(LEGACY_DEFAULT_PROFILE_ID);
+    expect(result.settings.exportProfiles.map((profile) => profile.id)).toEqual([
+      LEGACY_DEFAULT_PROFILE_ID,
+      "he-profile",
+    ]);
+    expect(result.settings.languageRoutes).toEqual([
+      { language: "he", profileId: "he-profile" },
+    ]);
+  });
+
 });
