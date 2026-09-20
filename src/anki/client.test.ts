@@ -386,7 +386,7 @@ describe("AnkiClient", () => {
 
     await expect(
       new AnkiClient("http://127.0.0.1:8765", fetcher).ensureDeckAndModel(addedProfile),
-    ).rejects.toThrow("Refresh the live catalog and choose an existing deck");
+    ).rejects.toThrow("create this saved deck explicitly");
 
     expect(actions).toEqual(["deckNames"]);
     expect(actions).not.toContain("createDeck");
