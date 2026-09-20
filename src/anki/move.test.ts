@@ -21,6 +21,7 @@ const targetProfile: ExportProfile = {
 const binding: ExportBinding = {
   lexicalUnitId: "unit-1",
   profileId: "old-profile",
+  state: "exported",
   ankiNoteId: 4242,
   deckName: "Hebrew Old",
   modelName: "Collector Basic",
