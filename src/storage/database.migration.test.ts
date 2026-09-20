@@ -214,10 +214,9 @@ describe("CollectorDatabase migration baseline", () => {
     const current = new CollectorDatabase(name);
     await current.open();
 
-    expect(await current.exportBindings.get("reserved-unit")).toMatchObject({
-      state: "reserved",
-      ankiNoteId: undefined,
-    });
+    const reserved = await current.exportBindings.get("reserved-unit");
+    expect(reserved).toMatchObject({ state: "reserved" });
+    expect(reserved).not.toHaveProperty("ankiNoteId");
     expect(await current.exportBindings.get("exported-unit")).toMatchObject({
       state: "exported",
       ankiNoteId: 5151,
