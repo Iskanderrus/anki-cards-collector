@@ -639,17 +639,56 @@ export class CaptureRepository {
   }
 
   async setExportBinding(binding: Omit<ExportBinding, "updatedAt"> & { updatedAt?: string }): Promise<void> {
-    const lexicalUnit = await this.database.lexicalUnits.get(binding.lexicalUnitId);
-    if (!lexicalUnit) throw new Error("Collected item no longer exists.");
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.exportBindings,
+      async () => {
+        const lexicalUnit = await this.database.lexicalUnits.get(binding.lexicalUnitId);
+        if (!lexicalUnit) throw new Error("Collected item no longer exists.");
 
-    await this.database.exportBindings.put({
-      ...binding,
-      updatedAt: binding.updatedAt ?? new Date().toISOString(),
-    });
+        const current = await this.database.exportBindings.get(binding.lexicalUnitId);
+        if (current?.state === "reserved") {
+          const sameDestination =
+            current.profileId === binding.profileId
+            && current.deckName === binding.deckName
+            && current.modelName === binding.modelName;
+          const validReconciliation =
+            sameDestination
+            && (
+              binding.state === "reserved"
+              || (binding.state === "exported" && binding.ankiNoteId !== undefined)
+            );
+
+          if (!validReconciliation) {
+            throw new Error(
+              "Cannot change a reserved Anki identity before reconciliation completes.",
+            );
+          }
+        }
+
+        await this.database.exportBindings.put({
+          ...binding,
+          updatedAt: binding.updatedAt ?? new Date().toISOString(),
+        });
+      },
+    );
   }
 
   async clearExportBinding(lexicalUnitId: string): Promise<void> {
-    await this.database.exportBindings.delete(lexicalUnitId);
+    await this.database.transaction(
+      "rw",
+      this.database.exportBindings,
+      async () => {
+        const current = await this.database.exportBindings.get(lexicalUnitId);
+        if (current?.state === "reserved") {
+          throw new Error(
+            "Cannot clear a reserved Anki identity before reconciliation completes.",
+          );
+        }
+        await this.database.exportBindings.delete(lexicalUnitId);
+      },
+    );
   }
 
   async setStatus(id: string, status: ReviewStatus): Promise<void> {
