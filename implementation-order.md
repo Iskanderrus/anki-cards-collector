@@ -15,7 +15,8 @@ The following work is already part of the current baseline:
 - **ACCP-010** — final extension brand/icon asset system;
 - **ACCP-015** — UX/export planning baseline and repository implementation order;
 - **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata;
-- **ACCP-019** — source-agnostic staged batch capture, deterministic dedupe/classification, and transactional corpus commit.
+- **ACCP-019** — source-agnostic staged batch capture, deterministic dedupe/classification, and transactional corpus commit;
+- **ACCP-020** — opt-in Duolingo visible lesson backfill with MV3-safe staged/session lifecycle.
 
 ---
 
@@ -38,16 +39,6 @@ Replaces the unsafe single-global-deck assumption and defines persisted routing/
 Depends on completed ACCP-016.
 
 Can run in parallel with much of ACCP-013.
-
-### ACCP-020 — Duolingo visible lesson backfill
-
-Depends on ACCP-019.
-
-Implements one-shot visible scan plus explicitly started/stopped visible-DOM session capture.
-
-It can run in parallel with the Anki profile work because it only produces staged source evidence.
-
----
 
 ## Gate C — interaction shell and canonical review
 
@@ -125,19 +116,18 @@ From the current baseline, when one linear order is needed:
 
 1. ACCP-013 — export profiles / multi-deck routing
 2. ACCP-017 — deck/model analysis + existing-card preview
-3. ACCP-020 — Duolingo visible lesson backfill
-4. ACCP-011 — sidebar redesign
-5. ACCP-003 — canonicalization workflow
-6. ACCP-014 — existing note type mapping
-7. ACCP-018 — guided export-profile setup
-8. ACCP-021 — batch backfill review/import
-9. ACCP-012 — onboarding/user journey
-10. ACCP-004 — explicit merge/split
-11. ACCP-005 — learning-card policy v2
-12. ACCP-006 — morphology assistance
-13. ACCP-007 — learning-value decision
+3. ACCP-011 — sidebar redesign
+4. ACCP-003 — canonicalization workflow
+5. ACCP-014 — existing note type mapping
+6. ACCP-018 — guided export-profile setup
+7. ACCP-021 — batch backfill review/import
+8. ACCP-012 — onboarding/user journey
+9. ACCP-004 — explicit merge/split
+10. ACCP-005 — learning-card policy v2
+11. ACCP-006 — morphology assistance
+12. ACCP-007 — learning-value decision
 
-ACCP-019 is now foundation work. ACCP-017, ACCP-020, and much of ACCP-013 can proceed in parallel once their respective contracts are stable.
+ACCP-019 and ACCP-020 are now foundation/source work. ACCP-013 is the next linear merge gate; ACCP-017 can still proceed independently from its ACCP-016 dependency.
 
 ---
 
