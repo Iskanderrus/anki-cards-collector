@@ -111,7 +111,8 @@ ACCP-017 implements deck analysis as a read-only evidence workflow:
 - large-deck UI explicitly reports that sampling is bounded;
 - distribution counts are counts **within the inspected sample**, never a claim about the whole deck;
 - representative cards are selected deterministically per sampled `modelName + card ordinal`, with a bounded representative count per model;
-- cards missing or malformed between `findCards` and `cardsInfo` are skipped and reported as unavailable evidence rather than failing the whole inspection;
+- Anki deck-search semantics are preserved, including cards in subdecks of the selected deck;
+- cards missing, malformed, or moved outside the selected deck/subdeck scope between `findCards` and `cardsInfo` are skipped and reported as unavailable evidence rather than failing the whole inspection;
 - no model is selected automatically from frequency.
 
 The side panel exposes one small **Inspect** action beside a configured language deck. The resulting evidence panel shows:
