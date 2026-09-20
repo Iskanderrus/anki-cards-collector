@@ -412,4 +412,122 @@ describe("CaptureRepository", () => {
     expect(await repository.list()).toHaveLength(2);
   });
 
+
+  it("refuses deletion while a reserved Anki identity is awaiting reconciliation", async () => {
+    const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    await expect(
+      repository.remove(captured.lexicalUnit.id),
+    ).rejects.toThrow("awaiting reconciliation");
+
+    const items = await repository.list();
+    expect(items).toHaveLength(1);
+    expect(items[0]?.lexicalUnit.id).toBe(captured.lexicalUnit.id);
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: captured.lexicalUnit.id,
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+  });
+
+  it("blocks canonical consolidation when the edited unit has a reserved external identity", async () => {
+    const reserved = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const collision = await repository.capture(draft("tener", "Quiero tener tiempo."));
+
+    await repository.setExportBinding({
+      lexicalUnitId: reserved.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    await expect(repository.update(reserved.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: reserved.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    })).rejects.toThrow("awaiting reconciliation");
+
+    const items = await repository.list();
+    expect(items.map((item) => item.lexicalUnit.id).sort()).toEqual(
+      [reserved.lexicalUnit.id, collision.lexicalUnit.id].sort(),
+    );
+    expect(await repository.getExportBinding(reserved.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: reserved.lexicalUnit.id,
+      state: "reserved",
+    });
+    expect(await repository.getExportBinding(collision.lexicalUnit.id)).toBeNull();
+  });
+
+  it("blocks consolidation when both units hold independent reserved identities", async () => {
+    const first = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const second = await repository.capture(draft("tener", "Quiero tener tiempo."));
+
+    for (const lexicalUnitId of [first.lexicalUnit.id, second.lexicalUnit.id]) {
+      await repository.setExportBinding({
+        lexicalUnitId,
+        profileId: "es-profile",
+        state: "reserved",
+        deckName: "Spanish RU",
+        modelName: "Collector Basic",
+      });
+    }
+
+    await expect(repository.update(first.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    })).rejects.toThrow("awaiting reconciliation");
+
+    expect(await repository.list()).toHaveLength(2);
+    expect(await repository.getExportBinding(first.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: first.lexicalUnit.id,
+      state: "reserved",
+    });
+    expect(await repository.getExportBinding(second.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: second.lexicalUnit.id,
+      state: "reserved",
+    });
+  });
+
+  it("allows a reserved item to be edited when its Collector ID is retained", async () => {
+    const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: captured.lexicalUnit.id,
+      profileId: "es-profile",
+      state: "reserved",
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    const updated = await repository.update(captured.lexicalUnit.id, {
+      canonicalText: "tener ganas",
+      language: "es",
+      note: "Edited without collision.",
+      occurrenceId: captured.occurrences[0]!.id,
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
+    });
+
+    expect(updated.lexicalUnit.id).toBe(captured.lexicalUnit.id);
+    expect(await repository.getExportBinding(captured.lexicalUnit.id)).toMatchObject({
+      lexicalUnitId: captured.lexicalUnit.id,
+      state: "reserved",
+    });
+  });
+
 });
