@@ -13,7 +13,12 @@ import type {
 } from "../core/types";
 import type { RestorePreview } from "../storage/repository";
 import { repository } from "../storage/repository";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  mergeSettingsForRestore,
+  saveSettings,
+} from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
 import { resolveExportRoute } from "../anki/routing";
@@ -840,12 +845,19 @@ function App(): React.ReactElement {
     try {
       const backup = parseBackup(await file.text());
       const preview = await repository.previewRestore(backup);
+      const settingsMerge = backup.settings
+        ? mergeSettingsForRestore(settings, backup.settings)
+        : { settings, conflicts: [] };
+      const combinedPreview = {
+        ...preview,
+        conflicts: [...preview.conflicts, ...settingsMerge.conflicts],
+      };
       setPendingBackup(backup);
-      setRestorePreview(preview);
+      setRestorePreview(combinedPreview);
 
-      if (preview.conflicts.length > 0) {
+      if (combinedPreview.conflicts.length > 0) {
         setError(
-          `Backup has ${preview.conflicts.length} conflict${preview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
+          `Backup has ${combinedPreview.conflicts.length} conflict${combinedPreview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
         );
       } else {
         setNotice("Backup validated. Review the dry-run counts before restoring.");
@@ -869,11 +881,25 @@ function App(): React.ReactElement {
     setError("");
     setNotice("");
 
+    const settingsMerge = pendingBackup.settings
+      ? mergeSettingsForRestore(settings, pendingBackup.settings)
+      : { settings, conflicts: [] };
+    if (settingsMerge.conflicts.length > 0) {
+      setError("Backup routing configuration conflicts with current local settings.");
+      setBusy(false);
+      return;
+    }
+
+    const previousSettings = settings;
+    let settingsChanged = false;
+
     try {
-      const result = await repository.restoreBackup(pendingBackup);
       if (pendingBackup.settings) {
-        await saveSettings(pendingBackup.settings);
+        await saveSettings(settingsMerge.settings);
+        settingsChanged = true;
       }
+
+      const result = await repository.restoreBackup(pendingBackup);
       clearRestorePreview();
       await load();
 
@@ -889,6 +915,17 @@ function App(): React.ReactElement {
           : `Backup restored: ${result.lexicalUnitsAdded} items added, ${result.lexicalUnitsUpdated} updated, ${result.occurrencesAdded} occurrences added.`,
       );
     } catch (restoreError) {
+      if (settingsChanged) {
+        try {
+          await saveSettings(previousSettings);
+          setSettings(previousSettings);
+        } catch {
+          setError(
+            "Backup restore failed and Collector could not restore the previous routing settings. Reopen Settings before exporting.",
+          );
+          return;
+        }
+      }
       setError(restoreError instanceof Error ? restoreError.message : "Backup restore failed.");
     } finally {
       setBusy(false);
