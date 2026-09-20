@@ -22,7 +22,10 @@ import {
 } from "../settings";
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
-import { resolveExportRoute } from "../anki/routing";
+import {
+  assertDestinationChangeReconciled,
+  resolveExportRoute,
+} from "../anki/routing";
 import { moveExportedNote } from "../anki/move";
 import {
   AnkiCatalogService,
@@ -654,9 +657,13 @@ function App(): React.ReactElement {
   ): Promise<void> {
     const existing = exportBindings[lexicalUnitId];
 
-    if (existing?.state === "reserved") {
+    try {
+      assertDestinationChangeReconciled(existing);
+    } catch (reconcileError) {
       setError(
-        "A previous Anki export may already have reached this card. Retry Send ready to Anki to reconcile it before changing the deck.",
+        reconcileError instanceof Error
+          ? reconcileError.message
+          : "Retry Send ready to Anki before changing this deck.",
       );
       return;
     }
