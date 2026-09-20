@@ -148,7 +148,7 @@ const ankiServer = createServer(async (request, response) => {
           deckName: "Hebrew RU",
           modelName: "Hebrew Existing",
           ord: 0,
-          question: "<div class=front>שלום</div>",
+          question: "<script>window.__unsafePreview = true</script><img src=https://tracking.invalid/pixel.png><a href=https://tracking.invalid/click>שלום</a>",
           answer: "<div class=back>hello</div>",
           css: ".front { font-size: 24px; } .back { font-size: 18px; }",
           fields: {},
@@ -936,10 +936,26 @@ try {
     .locator('iframe[title="Hebrew Existing representative front"]')
     .first();
   await firstRepresentativeFront.waitFor();
+  const representativeFrame = firstRepresentativeFront.contentFrame();
   assert.match(
-    await firstRepresentativeFront.contentFrame().locator("body").innerText(),
+    await representativeFrame.locator("body").innerText(),
     /שלום/,
     "Representative front should use rendered cardsInfo content.",
+  );
+  assert.equal(
+    await representativeFrame.locator("script").count(),
+    0,
+    "Representative preview must strip script elements.",
+  );
+  assert.equal(
+    await representativeFrame.locator("img[src]").count(),
+    0,
+    "Representative preview must remove external image URLs.",
+  );
+  assert.equal(
+    await representativeFrame.locator("a[href]").count(),
+    0,
+    "Representative preview must remove external navigation URLs.",
   );
 
   const analysisRequests = ankiRequests.slice(requestsBeforeDeckAnalysis);
