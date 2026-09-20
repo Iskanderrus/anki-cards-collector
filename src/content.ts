@@ -172,27 +172,51 @@ function startVisibleSession(language: string): VisibleSessionStatus {
   return sessionStatus();
 }
 
-function stopVisibleSession(): { status: VisibleSessionStatus; evidence: BatchCaptureEvidence[]; sessionId?: string } {
+function prepareStopVisibleSession(): { status: VisibleSessionStatus; evidence: BatchCaptureEvidence[]; sessionId?: string } {
   const session = visibleSession;
   if (!session) return { status: sessionStatus(), evidence: [] };
-  if (session.terminating) {
-    throw new Error("Duolingo backfill is already ending and staging its evidence.");
+
+  if (!session.terminating) {
+    session.terminating = true;
+    session.observer.disconnect();
+    if (session.scanTimer !== null) {
+      window.clearTimeout(session.scanTimer);
+      session.scanTimer = null;
+    }
+
+    if (supportsDuolingoVisibleBackfill(document, window.location, session.allowFixture)) {
+      void accumulateVisibleEvidence(session);
+    }
   }
 
-  session.observer.disconnect();
-  if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
-  void accumulateVisibleEvidence(session);
-
   const evidence = [...session.evidence.values()];
-  const sessionId = session.id;
-  visibleSession = null;
-  notifySessionStatus();
-
   return {
     status: { active: false, candidateCount: evidence.length },
     evidence,
-    sessionId,
+    sessionId: session.id,
   };
+}
+
+function confirmStopVisibleSession(sessionId: string): VisibleSessionStatus {
+  const session = visibleSession;
+  if (!session || session.id !== sessionId) return sessionStatus();
+
+  session.observer.disconnect();
+  if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
+  visibleSession = null;
+  notifySessionStatus();
+  return { active: false, candidateCount: session.evidence.size };
+}
+
+function cancelVisibleSession(sessionId: string): VisibleSessionStatus {
+  const session = visibleSession;
+  if (!session || session.id !== sessionId) return sessionStatus();
+
+  session.observer.disconnect();
+  if (session.scanTimer !== null) window.clearTimeout(session.scanTimer);
+  visibleSession = null;
+  notifySessionStatus();
+  return { active: false, candidateCount: 0 };
 }
 
 if (!window.__ankiCardsCollectorLoaded) {
@@ -253,8 +277,24 @@ if (!window.__ankiCardsCollectorLoaded) {
         return false;
       }
 
-      if (message?.type === "DUOLINGO_STOP_VISIBLE_SESSION") {
-        sendResponse({ ok: true, ...stopVisibleSession() });
+      if (message?.type === "DUOLINGO_PREPARE_STOP_VISIBLE_SESSION") {
+        sendResponse({ ok: true, ...prepareStopVisibleSession() });
+        return false;
+      }
+
+      if (message?.type === "DUOLINGO_CONFIRM_STOP_VISIBLE_SESSION") {
+        sendResponse({
+          ok: true,
+          status: confirmStopVisibleSession(String(message.sessionId ?? "")),
+        });
+        return false;
+      }
+
+      if (message?.type === "DUOLINGO_CANCEL_VISIBLE_SESSION") {
+        sendResponse({
+          ok: true,
+          status: cancelVisibleSession(String(message.sessionId ?? "")),
+        });
         return false;
       }
     } catch (error) {
