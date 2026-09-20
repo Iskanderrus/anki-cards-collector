@@ -53,6 +53,7 @@ export async function moveExportedNote(
   const movedBinding: ExportBinding = {
     lexicalUnitId,
     profileId: targetProfile.id,
+    state: "exported",
     ankiNoteId: noteId,
     deckName: targetProfile.deckName,
     modelName: targetProfile.modelName,
