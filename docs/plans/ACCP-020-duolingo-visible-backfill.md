@@ -12,9 +12,9 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - session mode starts only after the user clicks **Start backfill session**;
 - the session uses a temporary `MutationObserver` in that tab to accumulate newly rendered visible evidence while the user navigates manually;
 - observation is supported only while recognizable lesson/review/challenge study DOM is present, not merely while the tab remains on a Duolingo hostname;
-- same-document SPA navigation that removes the supported study context terminates the observer;
-- stopping the session disconnects the observer and sends the accumulated evidence to ACCP-019 staging;
-- page teardown destroys the content-script session automatically;
+- same-document SPA navigation that removes the supported study context terminates the observer and hands the accumulated session evidence to ACCP-019 staging before the live session is discarded;
+- explicit **Stop & stage session** uses the same staging semantics;
+- page teardown makes the same preservation handoff on a best-effort basis before the content context disappears;
 - no persistent manifest content script or required Duolingo host permission is added;
 - Duolingo is declared only in `optional_host_permissions`;
 - the first explicit scan/session activation asks Chrome for Duolingo page access;
@@ -55,6 +55,8 @@ The session also stops when:
 - the tab navigates away from supported Duolingo context;
 - extension context is torn down;
 - the session expires according to a conservative implementation timeout if one is needed.
+
+Automatic termination is not cancellation: evidence already accumulated in the session must be preserved and staged through ACCP-019 exactly as with an explicit stop.
 
 ## Extraction rules
 
@@ -135,7 +137,7 @@ Use deterministic HTML/DOM fixtures for:
 - undeclared source-language text beside declared target-language material;
 - over-limit target-language wrappers;
 - session start/stop;
-- same-document SPA navigation away from supported study context;
+- same-document SPA navigation away from supported study context, including proof that a candidate unique to that session survives in the staged batch;
 - changing the configured language while a session is active;
 - no-candidate page.
 
