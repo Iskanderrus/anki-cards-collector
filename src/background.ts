@@ -27,6 +27,7 @@ type VisibleContentResponse =
 
 const batchPipeline = new BatchCapturePipeline(repository);
 const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
+const VISIBLE_SESSION_OWNER_KEY = "collectorVisibleSessionOwnerV1";
 
 interface StoredStagedBatch {
   version: 1;
@@ -34,7 +35,13 @@ interface StoredStagedBatch {
   evidence: BatchCaptureEvidence[];
 }
 
-let visibleSessionTabId: number | null = null;
+interface StoredVisibleSessionOwner {
+  version: 1;
+  tabId: number;
+  sessionId: string;
+}
+
+let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
@@ -126,6 +133,106 @@ async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> 
 
 async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
   return withStagedBatchLock(() => restoreStagedBatchUnlocked());
+}
+
+function isStoredVisibleSessionOwner(value: unknown): value is StoredVisibleSessionOwner {
+  if (!value || typeof value !== "object") return false;
+  const owner = value as Partial<StoredVisibleSessionOwner>;
+  return owner.version === 1
+    && Number.isInteger(owner.tabId)
+    && (owner.tabId ?? -1) >= 0
+    && typeof owner.sessionId === "string"
+    && owner.sessionId.trim().length > 0;
+}
+
+async function loadVisibleSessionOwner(): Promise<StoredVisibleSessionOwner | null> {
+  if (visibleSessionOwner) return visibleSessionOwner;
+
+  const stored = await chrome.storage.session.get(VISIBLE_SESSION_OWNER_KEY);
+  const value = stored[VISIBLE_SESSION_OWNER_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredVisibleSessionOwner(value)) {
+    await chrome.storage.session.remove(VISIBLE_SESSION_OWNER_KEY);
+    return null;
+  }
+
+  visibleSessionOwner = { ...value };
+  return visibleSessionOwner;
+}
+
+async function persistVisibleSessionOwner(tabId: number, sessionId: string): Promise<StoredVisibleSessionOwner> {
+  const owner: StoredVisibleSessionOwner = {
+    version: 1,
+    tabId,
+    sessionId,
+  };
+  await chrome.storage.session.set({ [VISIBLE_SESSION_OWNER_KEY]: owner });
+  visibleSessionOwner = owner;
+  return owner;
+}
+
+async function clearVisibleSessionOwner(
+  expected?: Pick<StoredVisibleSessionOwner, "tabId" | "sessionId">,
+): Promise<void> {
+  const current = await loadVisibleSessionOwner();
+  if (expected && current
+    && (current.tabId !== expected.tabId || current.sessionId !== expected.sessionId)) {
+    return;
+  }
+
+  visibleSessionOwner = null;
+  await chrome.storage.session.remove(VISIBLE_SESSION_OWNER_KEY);
+}
+
+interface ValidatedVisibleSessionOwner {
+  owner: StoredVisibleSessionOwner;
+  response: Extract<VisibleContentResponse, { ok: true }>;
+}
+
+async function validateVisibleSessionOwner(): Promise<ValidatedVisibleSessionOwner | null> {
+  const owner = await loadVisibleSessionOwner();
+  if (!owner) return null;
+
+  try {
+    const response = await chrome.tabs.sendMessage(owner.tabId, {
+      type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+    }) as VisibleContentResponse;
+
+    if (response?.ok
+      && response.status?.active
+      && response.status.sessionId === owner.sessionId) {
+      return { owner, response };
+    }
+  } catch {
+    // The owner tab/content context disappeared. The stored owner is stale.
+  }
+
+  await clearVisibleSessionOwner(owner);
+  return null;
+}
+
+async function discoverVisibleSessionOnActiveTab(): Promise<ValidatedVisibleSessionOwner | null> {
+  const tabId = await activeTabId();
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
+    }) as VisibleContentResponse;
+
+    if (!response?.ok || !response.status?.active || !response.status.sessionId) {
+      return null;
+    }
+
+    const owner = await persistVisibleSessionOwner(tabId, response.status.sessionId);
+    return { owner, response };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveVisibleSessionOwner(): Promise<ValidatedVisibleSessionOwner | null> {
+  return await validateVisibleSessionOwner() ?? await discoverVisibleSessionOnActiveTab();
 }
 
 function errorMessage(error: unknown): string {
@@ -283,21 +390,13 @@ async function startVisibleDuolingoSession(): Promise<{
   staged: ReturnType<typeof stagedSummary>;
   liveEvidence: BatchCaptureEvidence[];
 }> {
-  if (visibleSessionTabId !== null) {
-    try {
-      const existing = await chrome.tabs.sendMessage(visibleSessionTabId, {
-        type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
-      }) as VisibleContentResponse;
-      if (existing?.ok && existing.status?.active) {
-        return {
-          status: existing.status,
-          staged: stagedSummary(await currentStagedBatch()),
-          liveEvidence: existing.evidence ?? [],
-        };
-      }
-    } catch {
-      visibleSessionTabId = null;
-    }
+  const existing = await resolveVisibleSessionOwner();
+  if (existing) {
+    return {
+      status: existing.response.status!,
+      staged: stagedSummary(await currentStagedBatch()),
+      liveEvidence: existing.response.evidence ?? [],
+    };
   }
 
   const tabId = await activeTabId();
@@ -309,11 +408,20 @@ async function startVisibleDuolingoSession(): Promise<{
     language: settings.defaultLanguage,
   }) as VisibleContentResponse;
 
-  if (!response?.ok || !response.status) {
+  if (!response?.ok || !response.status?.active || !response.status.sessionId) {
     throw new Error(response?.ok ? "Could not start Duolingo backfill." : response?.error);
   }
 
-  visibleSessionTabId = tabId;
+  try {
+    await persistVisibleSessionOwner(tabId, response.status.sessionId);
+  } catch (error) {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "DUOLINGO_CANCEL_VISIBLE_SESSION",
+      sessionId: response.status.sessionId,
+    }).catch(() => undefined);
+    throw error;
+  }
+
   return {
     status: response.status,
     staged: stagedSummary(await currentStagedBatch()),
@@ -327,57 +435,22 @@ async function visibleDuolingoSessionStatus(): Promise<{
   staged: ReturnType<typeof stagedSummary>;
   liveEvidence: BatchCaptureEvidence[];
 }> {
-  if (visibleSessionTabId !== null) {
-    try {
-      const response = await chrome.tabs.sendMessage(visibleSessionTabId, {
-        type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
-      }) as VisibleContentResponse;
-
-      if (response?.ok && response.status?.active) {
-        return {
-          supported: true,
-          status: response.status,
-          staged: stagedSummary(await currentStagedBatch()),
-          liveEvidence: response.evidence ?? [],
-        };
-      }
-    } catch {
-      // The originating tab navigated, closed, or destroyed the injected content context.
-    }
-    visibleSessionTabId = null;
-  }
-
-  const tabId = await activeTabId();
-
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: "DUOLINGO_GET_VISIBLE_SESSION_STATUS",
-    }) as VisibleContentResponse;
-
-    if (!response?.ok || !response.status) {
-      return {
-        supported: false,
-        status: { active: false, candidateCount: 0 },
-        staged: stagedSummary(await currentStagedBatch()),
-        liveEvidence: [],
-      };
-    }
-
-    if (response.status.active) visibleSessionTabId = tabId;
+  const resolved = await resolveVisibleSessionOwner();
+  if (resolved) {
     return {
-      supported: response.supported === true,
-      status: response.status,
+      supported: resolved.response.supported === true,
+      status: resolved.response.status!,
       staged: stagedSummary(await currentStagedBatch()),
-      liveEvidence: response.status.active ? response.evidence ?? [] : [],
-    };
-  } catch {
-    return {
-      supported: false,
-      status: { active: false, candidateCount: 0 },
-      staged: stagedSummary(await currentStagedBatch()),
-      liveEvidence: [],
+      liveEvidence: resolved.response.evidence ?? [],
     };
   }
+
+  return {
+    supported: false,
+    status: { active: false, candidateCount: 0 },
+    staged: stagedSummary(await currentStagedBatch()),
+    liveEvidence: [],
+  };
 }
 
 async function stopVisibleDuolingoSession(): Promise<{
@@ -385,26 +458,45 @@ async function stopVisibleDuolingoSession(): Promise<{
   status: VisibleSessionStatus;
   staged: ReturnType<typeof stagedSummary>;
 }> {
-  const tabId = visibleSessionTabId ?? await activeTabId();
-  const settings = await loadSettings();
+  const resolved = await resolveVisibleSessionOwner();
+  if (!resolved) throw new Error("No active Duolingo backfill session.");
 
-  const response = await chrome.tabs.sendMessage(tabId, {
-    type: "DUOLINGO_STOP_VISIBLE_SESSION",
+  const { owner } = resolved;
+  const settings = await loadSettings();
+  const response = await chrome.tabs.sendMessage(owner.tabId, {
+    type: "DUOLINGO_PREPARE_STOP_VISIBLE_SESSION",
   }) as VisibleContentResponse;
 
-  if (!response?.ok) throw new Error(response?.error ?? "Could not stop Duolingo backfill.");
-  visibleSessionTabId = null;
+  if (!response?.ok) throw new Error(response?.error ?? "Could not prepare Duolingo backfill for staging.");
+  if (response.sessionId !== owner.sessionId) {
+    throw new Error("Duolingo backfill session ownership changed before staging.");
+  }
 
   const evidence = response.evidence ?? [];
   const staged = await stageVisibleEvidence(
     evidence,
     settings.sourceUrlMode,
-    response.sessionId ? `duolingo-session-${response.sessionId}` : `duolingo-session-${crypto.randomUUID()}`,
+    `duolingo-session-${owner.sessionId}`,
   );
+
+  const confirmation = await chrome.tabs.sendMessage(owner.tabId, {
+    type: "DUOLINGO_CONFIRM_STOP_VISIBLE_SESSION",
+    sessionId: owner.sessionId,
+  }) as VisibleContentResponse;
+
+  if (!confirmation?.ok || confirmation.status?.active) {
+    throw new Error(
+      confirmation?.ok
+        ? "Duolingo backfill staging succeeded, but the live session could not be finalized."
+        : confirmation?.error ?? "Could not finalize Duolingo backfill.",
+    );
+  }
+
+  await clearVisibleSessionOwner(owner);
 
   return {
     foundCount: evidence.length,
-    status: response.status ?? { active: false, candidateCount: evidence.length },
+    status: confirmation.status ?? { active: false, candidateCount: evidence.length },
     staged,
   };
 }
@@ -431,8 +523,8 @@ async function stageAutoTerminatedDuolingoSession(
     `duolingo-session-${sessionId}`,
   );
 
-  if (tabId !== undefined && visibleSessionTabId === tabId) {
-    visibleSessionTabId = null;
+  if (tabId !== undefined) {
+    await clearVisibleSessionOwner({ tabId, sessionId });
   }
 
   chrome.runtime.sendMessage({
