@@ -450,6 +450,15 @@ export class CaptureRepository {
             this.database.exportBindings.get(collision.id),
           ]);
 
+          if (
+            currentBinding?.state === "reserved"
+            || collisionBinding?.state === "reserved"
+          ) {
+            throw new Error(
+              "Cannot consolidate these forms while an Anki export is awaiting reconciliation.",
+            );
+          }
+
           if (!compatibleBindings(currentBinding, collisionBinding)) {
             throw new Error(
               "Cannot consolidate these forms because they use different export destinations or Anki notes.",
@@ -664,6 +673,13 @@ export class CaptureRepository {
       this.database.occurrences,
       this.database.exportBindings,
       async () => {
+        const binding = await this.database.exportBindings.get(id);
+        if (binding?.state === "reserved") {
+          throw new Error(
+            "Cannot delete this item while an Anki export is awaiting reconciliation.",
+          );
+        }
+
         await this.database.occurrences.where("lexicalUnitId").equals(id).delete();
         await this.database.exportBindings.delete(id);
         await this.database.lexicalUnits.delete(id);
