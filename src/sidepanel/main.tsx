@@ -22,6 +22,7 @@ import {
 import { exportBatch, type ExportItemOutcome, type ExportProgress } from "../anki/batch";
 import { AnkiClient } from "../anki/client";
 import { resolveExportRoute } from "../anki/routing";
+import { moveExportedNote } from "../anki/move";
 import {
   AnkiCatalogService,
   type AnkiCatalogRefreshResult,
@@ -659,36 +660,26 @@ function App(): React.ReactElement {
       setError("The current or target export profile no longer exists.");
       return;
     }
-    if (target.mode !== "collector-managed") {
-      setError("Moving to a mapped user note type requires ACCP-014.");
-      return;
-    }
-    const currentModelName = binding.modelName ?? currentProfile.modelName;
-    if (currentModelName !== target.modelName) {
-      setError("Changing an exported note's note type requires ACCP-014 mapping. Only same-note-type deck moves are allowed here.");
-      return;
-    }
-
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const client = new AnkiClient();
-      await client.ensureDeckAndModel(target);
-      await client.moveNoteToDeck(binding.ankiNoteId, target.deckName);
-      await repository.setExportBinding({
-        lexicalUnitId: item.lexicalUnit.id,
-        profileId: target.id,
-        ankiNoteId: binding.ankiNoteId,
-        deckName: target.deckName,
-        modelName: target.modelName,
-      });
+      const movedBinding = await moveExportedNote(
+        {
+          lexicalUnitId: item.lexicalUnit.id,
+          binding,
+          currentProfile,
+          targetProfile: target,
+        },
+        new AnkiClient(),
+        (nextBinding) => repository.setExportBinding(nextBinding),
+      );
       setPendingMoveProfiles((current) => {
         const next = { ...current };
         delete next[item.lexicalUnit.id];
         return next;
       });
-      setNotice(`Moved Anki note ${binding.ankiNoteId} to ${target.deckName} and updated its pinned profile.`);
+      setNotice(`Moved Anki note ${movedBinding.ankiNoteId} to ${movedBinding.deckName} and updated its pinned profile.`);
       await load();
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "Could not move the Anki note.");
