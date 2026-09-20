@@ -96,4 +96,20 @@ describe("resolveExportRoute", () => {
 
     expect(() => resolveExportRoute(item(), settings, binding)).toThrow("pinned to a missing profile");
   });
+
+  it("pins a reserved destination snapshot even before the Anki note id is saved", () => {
+    const binding: ExportBinding = {
+      lexicalUnitId: "unit-1",
+      profileId: "he-profile",
+      deckName: "Hebrew Reserved",
+      modelName: "Collector Basic",
+      updatedAt: "2026-09-20T00:00:00Z",
+    };
+
+    const route = resolveExportRoute(item(), settings, binding);
+    expect(route.source).toBe("binding");
+    expect(route.profile.deckName).toBe("Hebrew Reserved");
+    expect(route.profile.modelName).toBe("Collector Basic");
+  });
+
 });
