@@ -26,7 +26,107 @@ type VisibleContentResponse =
   | { ok: false; error: string };
 
 const batchPipeline = new BatchCapturePipeline(repository);
+const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
+
+interface StoredStagedBatch {
+  version: 1;
+  batchId: string;
+  evidence: BatchCaptureEvidence[];
+}
+
 let visibleSessionTabId: number | null = null;
+let stagedBatchQueue: Promise<void> = Promise.resolve();
+
+function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
+  return {
+    ...evidence,
+    source: { ...evidence.source },
+    adapterMetadata: evidence.adapterMetadata ? { ...evidence.adapterMetadata } : undefined,
+  };
+}
+
+function evidenceFromResult(result: BatchCaptureResult): BatchCaptureEvidence[] {
+  return result.candidates.flatMap((candidate) =>
+    Array.from(
+      { length: Math.max(1, candidate.duplicateCount) },
+      () => cloneEvidence(asEvidence(candidate)),
+    )
+  );
+}
+
+function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<StoredStagedBatch>;
+  if (candidate.version !== 1 || typeof candidate.batchId !== "string" || !candidate.batchId.trim()) {
+    return false;
+  }
+  if (!Array.isArray(candidate.evidence)) return false;
+
+  return candidate.evidence.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const evidence = item as Partial<BatchCaptureEvidence>;
+    return typeof evidence.surfaceText === "string"
+      && typeof evidence.context === "string"
+      && typeof evidence.language === "string"
+      && typeof evidence.capturedAt === "string"
+      && Boolean(evidence.source)
+      && typeof evidence.source?.kind === "string"
+      && typeof evidence.source?.adapter === "string"
+      && typeof evidence.source?.url === "string"
+      && typeof evidence.source?.title === "string";
+  });
+}
+
+async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
+  const stored = await chrome.storage.session.get(STAGED_BATCH_SESSION_KEY);
+  const value = stored[STAGED_BATCH_SESSION_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredStagedBatch(value)) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    return null;
+  }
+
+  return {
+    version: 1,
+    batchId: value.batchId,
+    evidence: value.evidence.map(cloneEvidence),
+  };
+}
+
+async function persistStagedBatch(result: BatchCaptureResult | null): Promise<void> {
+  if (!result || result.candidates.length === 0) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    return;
+  }
+
+  const payload: StoredStagedBatch = {
+    version: 1,
+    batchId: result.batchId,
+    evidence: evidenceFromResult(result),
+  };
+  await chrome.storage.session.set({ [STAGED_BATCH_SESSION_KEY]: payload });
+}
+
+function withStagedBatchLock<T>(operation: () => Promise<T>): Promise<T> {
+  const run = stagedBatchQueue.then(operation, operation);
+  stagedBatchQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> {
+  const active = batchPipeline.getActiveBatch();
+  if (active) return active;
+
+  const stored = await loadStoredStagedBatch();
+  if (!stored) return null;
+
+  return batchPipeline.stageBatch(stored.batchId, stored.evidence);
+}
+
+async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
+  return withStagedBatchLock(() => restoreStagedBatchUnlocked());
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Capture failed.";
@@ -118,28 +218,39 @@ async function stageVisibleEvidence(
   sourceUrlMode: SourceUrlMode,
   requestedBatchId: string,
 ) {
-  const existing = batchPipeline.getActiveBatch();
-  const prepared = evidence.map((candidate) => ({
-    ...candidate,
-    // Preserve the immutable language attached when the evidence was observed.
-    // Settings may change while a session is active.
-    language: candidate.language.trim().toLowerCase() || "und",
-    source: {
-      ...candidate.source,
-      url: sanitizeSourceUrl(candidate.source.url, sourceUrlMode),
-    },
-  }));
+  return withStagedBatchLock(async () => {
+    const existing = await restoreStagedBatchUnlocked();
+    const previousEvidence = existing ? evidenceFromResult(existing) : [];
+    const prepared = evidence.map((candidate) => ({
+      ...cloneEvidence(candidate),
+      // Preserve the immutable language attached when the evidence was observed.
+      // Settings may change while a session is active.
+      language: candidate.language.trim().toLowerCase() || "und",
+      source: {
+        ...candidate.source,
+        url: sanitizeSourceUrl(candidate.source.url, sourceUrlMode),
+      },
+    }));
 
-  const merged = [
-    ...(existing?.candidates.map(asEvidence) ?? []),
-    ...prepared,
-  ];
-  const result = await batchPipeline.stageBatch(
-    existing?.batchId ?? requestedBatchId,
-    merged,
-  );
+    const merged = [...previousEvidence, ...prepared];
+    const result = await batchPipeline.stageBatch(
+      existing?.batchId ?? requestedBatchId,
+      merged,
+    );
 
-  return stagedSummary(result);
+    try {
+      await persistStagedBatch(result);
+    } catch (error) {
+      if (existing) {
+        await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+      } else {
+        batchPipeline.discard();
+      }
+      throw error;
+    }
+
+    return stagedSummary(result);
+  });
 }
 
 async function scanVisibleDuolingo(): Promise<{
