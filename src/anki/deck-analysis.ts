@@ -2,6 +2,8 @@ import type { AnkiObjectId } from "./catalog";
 
 export const DEFAULT_DECK_ANALYSIS_SAMPLE_SIZE = 24;
 export const DEFAULT_MAX_REPRESENTATIVES_PER_MODEL = 4;
+export const MAX_REPRESENTATIVE_HTML_CHARS = 100_000;
+export const MAX_REPRESENTATIVE_CSS_CHARS = 100_000;
 
 export interface DeckAnalysisClient {
   findCards(query: string): Promise<unknown>;
@@ -57,13 +59,7 @@ function compareIds(left: AnkiObjectId, right: AnkiObjectId): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-export function selectDeterministicCardSample(
-  value: unknown,
-  limit = DEFAULT_DECK_ANALYSIS_SAMPLE_SIZE,
-): AnkiObjectId[] {
-  if (!Number.isSafeInteger(limit) || limit < 1) {
-    throw new Error("Deck analysis sample size must be a positive integer.");
-  }
+function normalizeSortedCardIds(value: unknown): AnkiObjectId[] {
   if (!Array.isArray(value)) {
     throw new Error("findCards response must be an array.");
   }
@@ -74,8 +70,17 @@ export function selectDeterministicCardSample(
     unique.set(idKey(id), id);
   });
 
-  const ids = [...unique.values()].sort(compareIds);
-  if (ids.length <= limit) return ids;
+  return [...unique.values()].sort(compareIds);
+}
+
+function sampleSortedCardIds(
+  ids: readonly AnkiObjectId[],
+  limit: number,
+): AnkiObjectId[] {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error("Deck analysis sample size must be a positive integer.");
+  }
+  if (ids.length <= limit) return [...ids];
   if (limit === 1) return [ids[0]!];
 
   const sample: AnkiObjectId[] = [];
@@ -84,6 +89,13 @@ export function selectDeterministicCardSample(
     sample.push(ids[index]!);
   }
   return sample;
+}
+
+export function selectDeterministicCardSample(
+  value: unknown,
+  limit = DEFAULT_DECK_ANALYSIS_SAMPLE_SIZE,
+): AnkiObjectId[] {
+  return sampleSortedCardIds(normalizeSortedCardIds(value), limit);
 }
 
 export function deckScopedSearch(deckName: string): string {
@@ -112,14 +124,23 @@ function normalizeCard(
   const answer = value.answer;
   const css = value.css;
 
+  const inDeckScope =
+    typeof deckName === "string"
+    && (
+      deckName === expectedDeckName
+      || deckName.startsWith(`${expectedDeckName}::`)
+    );
+
   if (
-    typeof deckName !== "string"
-    || deckName !== expectedDeckName
+    !inDeckScope
     || typeof modelName !== "string"
     || !modelName.trim()
     || typeof question !== "string"
     || typeof answer !== "string"
     || typeof css !== "string"
+    || question.length > MAX_REPRESENTATIVE_HTML_CHARS
+    || answer.length > MAX_REPRESENTATIVE_HTML_CHARS
+    || css.length > MAX_REPRESENTATIVE_CSS_CHARS
   ) return null;
 
   const ord = value.ord;
@@ -164,8 +185,8 @@ export class DeckAnalysisService {
       throw new Error("findCards response must be an array.");
     }
 
-    const allIds = selectDeterministicCardSample(rawIds, Math.max(rawIds.length, 1));
-    const sampledIds = selectDeterministicCardSample(rawIds, this.sampleSize);
+    const allIds = normalizeSortedCardIds(rawIds);
+    const sampledIds = sampleSortedCardIds(allIds, this.sampleSize);
 
     if (sampledIds.length === 0) {
       return {
