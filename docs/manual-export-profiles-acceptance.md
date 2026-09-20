@@ -8,7 +8,7 @@ The purpose is to prove routing and identity with real decks. Do **not** use a u
 
 1. Sync/backup Anki normally before the run.
 2. Keep any personal backup JSON or screenshots containing study content out of the public issue.
-3. Use two existing destination decks. Hebrew and Serbian are a useful real-world pair, but any two existing decks are valid.
+3. Use three existing destination decks for three language routes. Hebrew, Serbian, and Spanish are the canonical ACCP-013 acceptance set when those real decks are available.
 4. Use the Collector-managed note type (`Collector Basic`) for this acceptance.
 
 ## 1. Build and reload
@@ -38,18 +38,19 @@ A missing saved deck must never be created by export. To verify the explicit pat
 
 ## 3. Configure two language routes
 
-Create two routes, for example:
+Create three routes, for example:
 
 ```text
 he -> Hebrew profile
 sr -> Serbian profile
+es -> Spanish profile
 ```
 
-Confirm both appear in the routing list.
+Confirm all three appear in the routing list.
 
 ## 4. Mixed Ready batch
 
-Prepare at least one Ready Collector item for each routed language.
+Prepare at least one Ready Collector item for each of the three routed languages.
 
 Before export, confirm each item's **Destination** line shows the expected profile/deck.
 
@@ -57,9 +58,10 @@ Click **Send ready to Anki** once.
 
 Verify in Anki:
 
-- both items were exported;
-- the first language is in the first configured deck;
-- the second language is in the second configured deck;
+- all three items were exported in the same operation;
+- Hebrew is in the Hebrew-configured deck;
+- Serbian is in the Serbian-configured deck;
+- Spanish is in the Spanish-configured deck;
 - both use the Collector-managed note type;
 - no user-owned model fields/templates/CSS were modified.
 
@@ -108,7 +110,7 @@ Record:
 
 - browser/version;
 - Anki Desktop + AnkiConnect version if convenient;
-- two deck names;
+- the three deck names;
 - whether the mixed batch routed correctly;
 - note IDs before/after the pin test;
 - explicit move result;
