@@ -145,6 +145,26 @@ async function cardForTerm(panel, term) {
   return panel.locator(".card").filter({ has: panel.locator(".term", { hasText: term }) });
 }
 
+async function stopExtensionServiceWorker(context, page, extensionId) {
+  const cdp = await context.newCDPSession(page);
+  try {
+    const { targetInfos } = await cdp.send("Target.getTargets");
+    const workerTarget = targetInfos.find(
+      (target) =>
+        target.type === "service_worker"
+        && target.url.startsWith(`chrome-extension://${extensionId}/`),
+    );
+    assert.ok(workerTarget, "Extension service-worker target must exist before termination.");
+
+    const result = await cdp.send("Target.closeTarget", {
+      targetId: workerTarget.targetId,
+    });
+    assert.equal(result.success, true, "Extension service worker should terminate via CDP.");
+  } finally {
+    await cdp.detach();
+  }
+}
+
 try {
   context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
@@ -314,6 +334,33 @@ try {
     await termCount(panel),
     2,
     "One-shot visible backfill must stage evidence without mutating the normal corpus.",
+  );
+
+  // MV3 service workers can terminate at any idle point. The staged batch must be
+  // reconstructed from chrome.storage.session when the worker is woken again.
+  await stopExtensionServiceWorker(context, panel, extensionId);
+  await panel.waitForTimeout(100);
+
+  const restoredAfterWorkerRestart = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(restoredAfterWorkerRestart?.ok, true);
+  assert.equal(
+    restoredAfterWorkerRestart?.batch?.candidates?.length,
+    3,
+    "Staged evidence must survive extension service-worker termination/restart.",
+  );
+  assert.equal(
+    restoredAfterWorkerRestart.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "שלום עולם" && candidate.language === "he",
+    ),
+    true,
+    "The staged Hebrew candidate must be reconstructed after worker restart.",
+  );
+  assert.equal(
+    await termCount(panel),
+    2,
+    "Restoring transient staging must not insert staged evidence into the corpus.",
   );
 
   await clickPanelButton(panel, "Start backfill session");
