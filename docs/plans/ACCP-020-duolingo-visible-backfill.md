@@ -19,7 +19,10 @@ Implemented as a specialized visible-DOM extractor plus an explicitly activated 
 - Duolingo is declared only in `optional_host_permissions`;
 - the first explicit scan/session activation asks Chrome for Duolingo page access;
 - granting page access does not start background collection: extraction still runs only for a one-shot scan or an explicitly active session;
-- staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki.
+- staged evidence is not a LexicalUnit, is not Ready, and is not exported to Anki;
+- the staged batch is mirrored in versioned `chrome.storage.session` so MV3 service-worker suspension cannot erase it;
+- worker revival reconstructs the in-memory pipeline by rerunning `stageBatch()` against the current corpus, so dispositions are recalculated rather than persisted as stale classifications;
+- session storage remains transient and is not part of IndexedDB backups or Anki export.
 
 The side panel exposes the minimal ACCP-020 controls plus two read-only evidence views for acceptance/debugging:
 
@@ -139,6 +142,7 @@ Use deterministic HTML/DOM fixtures for:
 - session start/stop;
 - same-document SPA navigation away from supported study context, including proof that a candidate unique to that session survives in the staged batch;
 - changing the configured language while a session is active;
+- actual extension service-worker termination/restart after staging, verifying staged evidence survives while corpus data remains unchanged;
 - no-candidate page.
 
 Browser E2E should verify the observer only runs after explicit activation.
