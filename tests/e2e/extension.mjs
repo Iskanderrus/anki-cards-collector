@@ -299,6 +299,7 @@ const server = createServer((request, response) => {
           <p id="first">Aunque llueva, voy a caminar porque quiero practicar español.</p>
           <p id="second">Context menu phrase appears in a separate sentence for capture.</p>
           <p id="repeat">Aunque llueva.</p>
+          <p id="long">Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear.</p>
         </main>
       </body>
     </html>`);
@@ -346,12 +347,49 @@ async function clickPanelButton(panel, name) {
   }, name);
 }
 
+async function ensureQueue(panel) {
+  if (await panel.locator(".queue").count() === 0) {
+    await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  }
+  await panel.locator(".queue").waitFor();
+}
+
+async function openSettings(panel) {
+  await panel.getByRole("button", { name: "Settings", exact: true }).click();
+  await panel.locator(".settings").waitFor();
+}
+
+async function setCaptureLanguage(panel, language) {
+  await openSettings(panel);
+  const input = panel.getByPlaceholder("es, sr, he…");
+  await input.fill(language);
+  await panel.waitForFunction(async (expectedLanguage) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings?.defaultLanguage === expectedLanguage;
+  }, language);
+  await ensureQueue(panel);
+}
+
 async function termCount(panel) {
-  return panel.locator(".term").count();
+  await ensureQueue(panel);
+  return panel.locator(".queue-row .term").count();
+}
+
+async function queueRowForTerm(panel, term) {
+  await ensureQueue(panel);
+  return panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: term }),
+  });
 }
 
 async function cardForTerm(panel, term) {
-  return panel.locator(".card").filter({ has: panel.locator(".term", { hasText: term }) });
+  const row = await queueRowForTerm(panel, term);
+  await row.click();
+  const card = panel.locator(".detail-card").filter({
+    has: panel.locator(".term", { hasText: term }),
+  });
+  await card.waitFor();
+  return card;
 }
 
 async function stopExtensionServiceWorker(context, page, extensionId) {
@@ -401,12 +439,18 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
 
-  await panel.locator(".term", { hasText: "Aunque llueva" }).waitFor();
+  await panel.locator(".queue-row .term", { hasText: "Aunque llueva" }).waitFor();
   assert.equal(await termCount(panel), 1, "Explicit capture should add one lexical unit.");
+  const firstQueueRowAfterCapture = await queueRowForTerm(panel, "Aunque llueva");
   assert.match(
-    await panel.locator(".context").first().innerText(),
+    await firstQueueRowAfterCapture.locator(".queue-context").innerText(),
     /Aunque llueva, voy a caminar/,
-    "Captured item should keep visible page context.",
+    "Compact queue should retain a short preview of the selected visible context.",
+  );
+  assert.equal(
+    await panel.locator(".learning-proposal").count(),
+    0,
+    "Queue view must not render full proposal detail for every item.",
   );
 
   // The side panel must refresh via DATA_CHANGED; no page reload happens above.
@@ -442,24 +486,26 @@ try {
     tabId,
   );
   assert.equal(contextMenuResult?.ok, true, contextMenuResult?.error);
-  await panel.locator(".term", { hasText: "Context menu phrase" }).waitFor();
+  await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
 
   // Keyboard review: the first captured item remains active even though the newer item sorts above it.
   await panel.bringToFront();
-  const firstCard = await cardForTerm(panel, "Aunque llueva");
-  await firstCard.focus();
-  assert.equal(await firstCard.getAttribute("data-active"), "true");
+  const firstRow = await queueRowForTerm(panel, "Aunque llueva");
+  await firstRow.focus();
+  assert.equal(await firstRow.getAttribute("data-active"), "true");
 
   await panel.keyboard.press("k");
-  const secondCard = await cardForTerm(panel, "Context menu phrase");
-  await secondCard.waitFor();
-  assert.equal(await secondCard.getAttribute("data-active"), "true", "K should move to the previous visible card.");
+  const secondRow = await queueRowForTerm(panel, "Context menu phrase");
+  assert.equal(await secondRow.getAttribute("data-active"), "true", "K should move to the previous visible row.");
 
   await panel.keyboard.press("r");
-  await secondCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await secondRow.locator(".pill", { hasText: "ready" }).waitFor();
 
   await panel.keyboard.press("e");
+  const secondCard = panel.locator(".detail-card").filter({
+    has: panel.locator(".term", { hasText: "Context menu phrase" }),
+  });
   await secondCard.locator(".editor").waitFor();
   const noteField = secondCard.locator("textarea").last();
   await noteField.focus();
@@ -472,11 +518,14 @@ try {
   await secondCard.getByRole("button", { name: "Cancel" }).click();
 
   await secondCard.focus();
+  await panel.keyboard.press("b");
+  await firstRow.waitFor();
+  await secondRow.focus();
   await panel.keyboard.press("ArrowDown");
   assert.equal(
-    await firstCard.getAttribute("data-active"),
+    await firstRow.getAttribute("data-active"),
     "true",
-    "ArrowDown should move to the next visible card.",
+    "ArrowDown should move to the next visible row.",
   );
 
   // Repeated evidence must enrich the existing lexical unit, not create another study target.
@@ -484,8 +533,9 @@ try {
   await selectText(contentPage, "#repeat", "Aunque llueva");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
-  await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
   assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
+  const firstCard = await cardForTerm(panel, "Aunque llueva");
+  await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
   assert.match(
     await firstCard.locator(".context").innerText(),
     /Aunque llueva, voy a caminar porque quiero practicar español\./,
@@ -496,17 +546,14 @@ try {
     /Using occurrence 1 of 2/,
     "Review should explain which occurrence drives the proposal.",
   );
+  assert.match(
+    await firstCard.locator(".other-occurrences").innerText(),
+    /Other occurrences \(1\)/,
+    "Focused detail should expose non-selected occurrences through progressive disclosure.",
+  );
 
   // Duolingo visible backfill is explicitly activated and remains staged.
-  await panel.locator(".settings").evaluate((details) => {
-    if (details instanceof HTMLDetailsElement) details.open = true;
-  });
-  const languageInput = panel.getByPlaceholder("es, sr, he…");
-  await languageInput.fill("he");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "he";
-  });
+  await setCaptureLanguage(panel, "he");
 
   const duolingoPage = await context.newPage();
   await duolingoPage.goto(`${fixtureUrl}duolingo`);
@@ -630,11 +677,7 @@ try {
 
   // Session evidence owns the language captured at session start. Changing the
   // current setting must not relabel already observed Hebrew evidence.
-  await languageInput.fill("sr");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "sr";
-  });
+  await setCaptureLanguage(panel, "sr");
 
   // Switch away from the originating tab before stopping. The service worker must
   // still address the Duolingo tab that owns the explicit session.
@@ -718,11 +761,7 @@ try {
     "Changing Settings mid-session must not relabel observed Hebrew evidence as Serbian.",
   );
 
-  await languageInput.fill("he");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "he";
-  });
+  await setCaptureLanguage(panel, "he");
 
   // A same-document Duolingo SPA transition away from lesson/review content must
   // stop the active observer even though the hostname and document stay the same.
@@ -846,9 +885,7 @@ try {
   // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
   // Internal export profiles remain an implementation detail.
   await panel.bringToFront();
-  await panel.locator(".settings").evaluate((details) => {
-    if (details instanceof HTMLDetailsElement) details.open = true;
-  });
+  await openSettings(panel);
   await clickPanelButton(panel, "Refresh from Anki");
   await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
 
@@ -981,25 +1018,28 @@ try {
   await analysisPanel.getByRole("button", { name: "Close" }).click();
   await analysisPanel.waitFor({ state: "detached" });
 
-  const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
+  let firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
   await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
   await firstRoutingCard.getByRole("button", { name: "Save" }).click();
-  await firstRoutingCard.getByRole("button", { name: "Ready" }).click();
+  await firstRoutingCard.locator(".editor").waitFor({ state: "detached" });
+  const firstReady = firstRoutingCard.getByRole("button", { name: "Ready" });
+  if (await firstReady.count()) await firstReady.click();
   await firstRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
-
-  const secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
-  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
-  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
-  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
-  await secondRoutingCard.getByRole("button", { name: "Ready" }).click();
-  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
-
   assert.match(
     await firstRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Hebrew RU/,
     "The Hebrew card should show only its resolved Anki deck.",
   );
+
+  let secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
+  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
+  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
+  await secondRoutingCard.locator(".editor").waitFor({ state: "detached" });
+  const secondReady = secondRoutingCard.getByRole("button", { name: "Ready" });
+  if (await secondReady.count()) await secondReady.click();
+  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Serbian RU/,
@@ -1021,10 +1061,12 @@ try {
   assert.equal(deckByCanonical["Aunque llueva"], "Hebrew RU");
   assert.equal(deckByCanonical["Context menu phrase"], "Serbian RU");
 
+  firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   assert.match(
     await firstRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Hebrew RU.*note\s+\d+/s,
   );
+  secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Serbian RU.*note\s+\d+/s,
@@ -1069,7 +1111,30 @@ try {
   );
   assert.equal(await termCount(panel), 2, "Restricted-page failure must not add data.");
 
-  console.log("Browser extension capture, keyboard, accessibility, and permission checks passed.");
+  // ACCP-011: long study targets stay compact and scannable instead of expanding
+  // the queue into repeated full-card blocks.
+  const longTarget = "Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear";
+  await selectText(contentPage, "#long", longTarget);
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  const longRow = await queueRowForTerm(panel, longTarget);
+  await longRow.waitFor();
+  const longTermStyle = await longRow.locator(".term").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      lineClamp: style.getPropertyValue("-webkit-line-clamp"),
+      overflow: style.overflow,
+    };
+  });
+  assert.equal(longTermStyle.lineClamp, "2", "Long queue terms should clamp to two lines.");
+  assert.equal(longTermStyle.overflow, "hidden", "Long queue terms should not expand the entire review feed.");
+  assert.equal(
+    await panel.locator(".detail-card").count(),
+    0,
+    "Capturing a long item should keep the user in the compact queue.",
+  );
+
+  console.log("Browser extension capture, compact queue/detail, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
   await Promise.all([

@@ -42,6 +42,7 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
+import { ReviewQueue } from "./queue";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -58,6 +59,8 @@ type DeckAnalysisUiState =
   | { kind: "loading"; deckName: string }
   | { kind: "live"; analysis: DeckAnalysis }
   | { kind: "error"; deckName: string; error: string };
+
+type SidepanelView = "queue" | "detail" | "settings";
 
 function safePreviewCss(css: string): string {
   return css.replace(/<\/style/gi, "<\\/style");
@@ -232,11 +235,14 @@ function App(): React.ReactElement {
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const loadRequestId = useRef(0);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
   const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
   const [deckAnalysisState, setDeckAnalysisState] = useState<DeckAnalysisUiState>({ kind: "idle" });
+  const [view, setView] = useState<SidepanelView>("queue");
   const [backfill, setBackfill] = useState<BackfillUiState>({
     supported: false,
     status: { active: false, candidateCount: 0 },
@@ -260,7 +266,12 @@ function App(): React.ReactElement {
     [],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredActiveId?: string) => {
+    if (preferredActiveId !== undefined) {
+      activeIdRef.current = preferredActiveId;
+    }
+    const requestId = ++loadRequestId.current;
+
     const [loadedItems, loadedBindings, loadedSettings] = await Promise.all([
       repository.list(),
       repository.listExportBindings(),
@@ -289,15 +300,19 @@ function App(): React.ReactElement {
       return completed;
     }));
 
+    if (requestId !== loadRequestId.current) return;
+
     setItems(loadedItems);
     setExportBindings(Object.fromEntries(
       completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
     ));
-    setActiveId((current) => (
-      current && loadedItems.some((item) => item.lexicalUnit.id === current)
-        ? current
-        : loadedItems[0]?.lexicalUnit.id ?? null
-    ));
+    const requestedActiveId = activeIdRef.current;
+    const nextActiveId = requestedActiveId
+      && loadedItems.some((item) => item.lexicalUnit.id === requestedActiveId)
+      ? requestedActiveId
+      : loadedItems[0]?.lexicalUnit.id ?? null;
+    activeIdRef.current = nextActiveId;
+    setActiveId(nextActiveId);
     setSettings(loadedSettings);
     const fallback = loadedSettings.exportProfiles.find(
       (profile) => profile.id === loadedSettings.fallbackProfileId,
@@ -356,6 +371,43 @@ function App(): React.ReactElement {
     inbox: items.filter((item) => item.lexicalUnit.status === "inbox").length,
     ready: items.filter((item) => item.lexicalUnit.status === "ready").length,
   }), [items]);
+
+  const activeItem = useMemo(
+    () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
+    [activeId, items],
+  );
+
+  function selectActiveId(id: string | null): void {
+    activeIdRef.current = id;
+    setActiveId(id);
+  }
+
+  function openDetail(id: string): void {
+    selectActiveId(id);
+    setView("detail");
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+    });
+  }
+
+  function showQueue(): void {
+    cancelEdit();
+    setView("queue");
+    requestAnimationFrame(() => {
+      const currentActiveId = activeIdRef.current;
+      if (!currentActiveId) return;
+      const selector = `[data-queue-id="${CSS.escape(currentActiveId)}"]`;
+      const row = document.querySelector<HTMLElement>(selector);
+      row?.focus({ preventScroll: true });
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function showSettings(): void {
+    cancelEdit();
+    closeDeckAnalysis();
+    setView("settings");
+  }
 
   async function capture(): Promise<void> {
     setBusy(true);
@@ -545,7 +597,7 @@ function App(): React.ReactElement {
 
     setError("");
     await repository.setStatus(id, status);
-    await load();
+    await load(id);
   }
 
   function beginEdit(item: CollectedItem): void {
@@ -589,8 +641,9 @@ function App(): React.ReactElement {
       } else {
         setNotice("Changes saved. The next Anki export will update the same Collector note.");
       }
+      selectActiveId(updated.lexicalUnit.id);
       cancelEdit();
-      await load();
+      await load(updated.lexicalUnit.id);
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Could not save changes.");
     } finally {
@@ -1093,45 +1146,61 @@ function App(): React.ReactElement {
       return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
     }
 
-    function focusCard(id: string): void {
-      setActiveId(id);
+    function focusItem(id: string): void {
+      selectActiveId(id);
       requestAnimationFrame(() => {
-        const selector = `[data-card-id="${CSS.escape(id)}"]`;
-        const card = document.querySelector<HTMLElement>(selector);
-        card?.focus({ preventScroll: true });
-        card?.scrollIntoView({ block: "nearest" });
+        const selector = view === "queue"
+          ? `[data-queue-id="${CSS.escape(id)}"]`
+          : `[data-card-id="${CSS.escape(id)}"]`;
+        const element = document.querySelector<HTMLElement>(selector);
+        element?.focus({ preventScroll: true });
+        element?.scrollIntoView({ block: "nearest" });
       });
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      if (busy || editingId !== null || isTypingTarget(event.target) || items.length === 0) return;
+      if (busy || editingId !== null || isTypingTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      if (view === "detail" && (event.key === "Escape" || key === "b")) {
+        event.preventDefault();
+        showQueue();
+        return;
+      }
+      if (view === "settings" || items.length === 0) return;
 
       const currentIndex = Math.max(
         0,
         items.findIndex((item) => item.lexicalUnit.id === activeId),
       );
-      const key = event.key.toLowerCase();
 
       if (key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
         const next = Math.min(items.length - 1, currentIndex + 1);
-        focusCard(items[next]!.lexicalUnit.id);
+        focusItem(items[next]!.lexicalUnit.id);
         return;
       }
 
       if (key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         const previous = Math.max(0, currentIndex - 1);
-        focusCard(items[previous]!.lexicalUnit.id);
+        focusItem(items[previous]!.lexicalUnit.id);
         return;
       }
 
-      const activeItem = items[currentIndex];
-      if (!activeItem) return;
+      const currentItem = items[currentIndex];
+      if (!currentItem) return;
+
+      if (view === "queue" && (event.key === "Enter" || key === "o")) {
+        event.preventDefault();
+        openDetail(currentItem.lexicalUnit.id);
+        return;
+      }
 
       if (key === "e") {
         event.preventDefault();
-        beginEdit(activeItem);
+        setView("detail");
+        beginEdit(currentItem);
         return;
       }
 
@@ -1143,13 +1212,13 @@ function App(): React.ReactElement {
       const nextStatus = statusByKey[key];
       if (nextStatus) {
         event.preventDefault();
-        void changeStatus(activeItem.lexicalUnit.id, nextStatus);
+        void changeStatus(currentItem.lexicalUnit.id, nextStatus);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, busy, editingId, items]);
+  }, [activeId, busy, editingId, items, view]);
 
   return (
     <main className="app">
@@ -1167,6 +1236,25 @@ function App(): React.ReactElement {
         </button>
       </div>
 
+      <nav className="view-tabs" aria-label="Collector views">
+        <button
+          type="button"
+          aria-current={view === "queue" ? "page" : undefined}
+          onClick={showQueue}
+        >
+          Queue
+        </button>
+        <button
+          type="button"
+          aria-current={view === "settings" ? "page" : undefined}
+          onClick={showSettings}
+        >
+          Settings
+        </button>
+      </nav>
+
+      {view === "queue" && (
+        <>
       <section className="backfill-panel" aria-label="Duolingo visible backfill">
         <div className="toolbar backfill-toolbar">
           <button
@@ -1267,6 +1355,8 @@ function App(): React.ReactElement {
         <span>{counts.ready} ready</span>
         <span>{items.length} unique total</span>
       </div>
+        </>
+      )}
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
@@ -1284,17 +1374,48 @@ function App(): React.ReactElement {
         </div>
       )}
 
-      <div className="shortcuts" aria-label="Keyboard shortcuts">
-        <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
-        <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
-        <span><kbd>E</kbd> edit</span>
-        <span><kbd>R</kbd> ready</span>
-        <span><kbd>I</kbd> inbox</span>
-        <span><kbd>A</kbd> archive</span>
-      </div>
+      {view !== "settings" && (
+        <div className="shortcuts" aria-label="Keyboard shortcuts">
+          <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
+          <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
+          {view === "queue" && <span><kbd>Enter</kbd> open</span>}
+          {view === "detail" && <span><kbd>B</kbd>/<kbd>Esc</kbd> back</span>}
+          <span><kbd>E</kbd> edit</span>
+          <span><kbd>R</kbd> ready</span>
+          <span><kbd>I</kbd> inbox</span>
+          <span><kbd>A</kbd> archive</span>
+        </div>
+      )}
 
-      <details className="settings">
-        <summary>Settings & Anki</summary>
+      {view === "queue" && (
+        <ReviewQueue
+          entries={items.map((item) => {
+            const proposal = proposeLearningCard(item);
+            const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
+            const binding = exportBindings[item.lexicalUnit.id];
+            const route = resolvedRoute(item);
+            return {
+              id: item.lexicalUnit.id,
+              canonicalText: item.lexicalUnit.canonicalText,
+              language: item.lexicalUnit.language,
+              status: item.lexicalUnit.status,
+              occurrenceCount: item.occurrences.length,
+              context: selectedOccurrence?.context ?? "",
+              deckName: route?.profile.deckName ?? binding?.deckName ?? "",
+            };
+          })}
+          activeId={activeId}
+          onActivate={selectActiveId}
+          onOpen={openDetail}
+        />
+      )}
+
+      {view === "settings" && (
+      <section className="settings settings-view" aria-labelledby="settings-title">
+        <div className="settings-view-head">
+          <h2 id="settings-title">Settings & Anki</h2>
+          <button className="ghost" type="button" onClick={showQueue}>Back to queue</button>
+        </div>
         <div className="settings-grid">
           <label>
             Capture language
@@ -1688,22 +1809,33 @@ function App(): React.ReactElement {
             </div>
           </details>
         </div>
-      </details>
+      </section>
+      )}
 
-      <section className="list" aria-label="Collected language">
-        {items.length === 0 && (
+      {view === "detail" && (
+        <>
+          <div className="detail-heading">
+            <button className="ghost" type="button" onClick={showQueue}>← Back to queue</button>
+            <span className="setting-help">
+              {activeItem
+                ? `${Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1)} of ${items.length}`
+                : "No item selected"}
+            </span>
+          </div>
+      <section className="list detail-list" aria-label="Focused review detail">
+        {!activeItem && (
           <div className="empty">
-            Select something useful on a page, then click <strong>Collect selection</strong>.
+            Choose an item from the queue to review it.
           </div>
         )}
 
-        {items.map((item) => {
+        {items.filter((item) => item.lexicalUnit.id === activeId).map((item) => {
           const unit = item.lexicalUnit;
           const editing = editingId === unit.id && editDraft !== null;
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = proposeLearningCard(item);
-          const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
+          const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
           const boundProfile = binding
@@ -1717,13 +1849,13 @@ function App(): React.ReactElement {
 
           return (
             <article
-              className="card"
+              className="card detail-card"
               key={unit.id}
               data-card-id={unit.id}
               data-active={active ? "true" : "false"}
               tabIndex={active ? 0 : -1}
               aria-label={`Review ${unit.canonicalText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
-              onFocus={() => setActiveId(unit.id)}
+              onFocus={() => selectActiveId(unit.id)}
             >
               <div className="card-head">
                 <div>
@@ -1875,6 +2007,27 @@ function App(): React.ReactElement {
                     </div>
                   )}
 
+                  {item.occurrences.length > 1 && (
+                    <details className="other-occurrences">
+                      <summary>
+                        Other occurrences ({item.occurrences.filter((occurrence) => occurrence.id !== selectedOccurrence?.id).length})
+                      </summary>
+                      <div className="occurrence-list">
+                        {item.occurrences
+                          .filter((occurrence) => occurrence.id !== selectedOccurrence?.id)
+                          .map((occurrence) => (
+                            <div className="occurrence-row" key={occurrence.id}>
+                              <strong dir="auto">{occurrence.surfaceText}</strong>
+                              {occurrence.context && occurrence.context !== occurrence.surfaceText && (
+                                <span dir="auto">{occurrence.context}</span>
+                              )}
+                              <span className="setting-help">{sourceLabel(occurrence)}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </details>
+                  )}
+
                   <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
                     <div className="proposal-head">
                       <strong>Suggested card</strong>
@@ -1891,10 +2044,13 @@ function App(): React.ReactElement {
                       <span>Answer</span>
                       <div>{proposal.answer || "—"}</div>
                     </div>
-                    <p className="proposal-why"><strong>Why:</strong> {proposal.reason}</p>
-                    {proposal.warning && (
-                      <div className="proposal-warning" role="status">{proposal.warning}</div>
-                    )}
+                    <details className="proposal-explanation">
+                      <summary>Why this card?</summary>
+                      <p className="proposal-why">{proposal.reason}</p>
+                      {proposal.warning && (
+                        <div className="proposal-warning" role="status">{proposal.warning}</div>
+                      )}
+                    </details>
                   </div>
 
                   {exportOutcome?.kind === "failed" && (
@@ -1931,25 +2087,35 @@ function App(): React.ReactElement {
                     {unit.status !== "archived" && (
                       <button aria-keyshortcuts="A" className="ghost" disabled={busy} onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
                     )}
-                    <button
-                      className="ghost danger"
-                      disabled={busy || reconciliationPending}
-                      title={
-                        reconciliationPending
-                          ? "Retry Send ready to Anki before deleting this item."
-                          : undefined
-                      }
-                      onClick={() => void repository.remove(unit.id).then(load)}
-                    >
-                      Delete
-                    </button>
                   </div>
+                  <details className="more-actions">
+                    <summary>More actions</summary>
+                    <div className="more-actions-body">
+                      <button
+                        className="ghost danger"
+                        disabled={busy || reconciliationPending}
+                        title={
+                          reconciliationPending
+                            ? "Retry Send ready to Anki before deleting this item."
+                            : undefined
+                        }
+                        onClick={() => void repository.remove(unit.id).then(async () => {
+                          await load();
+                          setView("queue");
+                        })}
+                      >
+                        Delete this item
+                      </button>
+                    </div>
+                  </details>
                 </>
               )}
             </article>
           );
         })}
       </section>
+        </>
+      )}
     </main>
   );
 }

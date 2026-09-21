@@ -73,3 +73,19 @@ Preserve keyboard-first use:
 ## Acceptance
 
 Matches ADR 0007 and issue ACCP-011.
+
+## Implementation status
+
+Implemented on `accp-011-sidebar-redesign`:
+
+- explicit Queue / focused Detail / Settings view state without a router dependency;
+- compact queue rows with canonical text, language, review status, occurrence count, short context, and resolved Anki destination;
+- one-item detail rendering instead of repeated full proposal cards;
+- selected-occurrence explanation plus progressive disclosure of other occurrences;
+- destructive delete action separated under `More actions`;
+- queue/detail keyboard flow: J/K or arrows, Enter/O to open, B/Escape to return, E to edit, R/I/A status shortcuts;
+- keyboard shortcuts remain disabled while typing in inputs, textareas, selects, or editable content;
+- two-line clamping for long targets/context and narrow-panel responsive rules;
+- browser E2E coverage for queue/detail navigation, long-target scanability, destination routing, and existing accessibility checks.
+
+The existing ACCP-013 destination model and ACCP-002 occurrence selection remain the source of truth; this ticket changes presentation/navigation rather than persistence semantics.
