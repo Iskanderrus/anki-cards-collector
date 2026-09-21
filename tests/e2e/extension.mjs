@@ -1586,6 +1586,12 @@ try {
   assert.match(await serbianMappedCard.locator(".meta").first().innerText(), /^sr\s+·/);
   const serbianReady = serbianMappedCard.getByRole("button", { name: "Ready" });
   if (await serbianReady.count()) await serbianReady.click();
+  await serbianMappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.match(
+    await serbianMappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Serbian RU/,
+    "The Serbian guided card should resolve to the saved Serbian route before export.",
+  );
   ankiRequests.length = 0;
   await clickPanelButton(panel, "Send ready to Anki");
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
