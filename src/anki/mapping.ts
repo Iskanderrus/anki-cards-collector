@@ -105,7 +105,9 @@ export function validateMappedProfile(
 }
 
 export function collectorIdentityTag(lexicalUnitId: string): string {
-  return `collector::id::${lexicalUnitId}`;
+  const encoded = encodeURIComponent(lexicalUnitId);
+  if (!encoded) throw new Error("Collector lexical-unit identity cannot be empty.");
+  return `collector::id::${encoded}`;
 }
 
 export function mappedSemanticValues(
