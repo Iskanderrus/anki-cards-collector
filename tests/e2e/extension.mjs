@@ -1201,7 +1201,9 @@ try {
   );
 
   // ACCP-003: a canonical edit that would merge independently exported units is
-  // blocked before any corpus mutation.
+  // blocked before any corpus mutation. Re-open the Serbian card because the
+  // mapped-export acceptance above intentionally focused a different detail.
+  secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
   const conflictEditor = secondRoutingCard.locator(".editor");
   await conflictEditor.getByLabel("Canonical form").fill("Aunque llueva");
