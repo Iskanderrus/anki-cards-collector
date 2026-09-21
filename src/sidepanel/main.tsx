@@ -1383,7 +1383,7 @@ function App(): React.ReactElement {
               status: item.lexicalUnit.status,
               occurrenceCount: item.occurrences.length,
               context: selectedOccurrence?.context ?? "",
-              deckName: binding?.deckName ?? route?.profile.deckName ?? "",
+              deckName: route?.profile.deckName ?? binding?.deckName ?? "",
             };
           })}
           activeId={activeId}
