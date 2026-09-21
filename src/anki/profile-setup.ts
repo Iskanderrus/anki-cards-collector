@@ -42,6 +42,10 @@ export function languageLabel(code: string): string {
   return COMMON_PROFILE_LANGUAGES.find((entry) => entry.code === code)?.label ?? code;
 }
 
+export function isGuidedLanguageCode(value: string): boolean {
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(value.trim());
+}
+
 export function profileLanguageFromSavedState(
   profile: ExportProfile,
   routes: readonly LanguageRoute[],
