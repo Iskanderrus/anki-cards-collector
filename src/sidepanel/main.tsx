@@ -46,6 +46,7 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
+import { mappedProfileIsConfigured } from "../anki/mapping";
 import { ReviewQueue } from "./queue";
 
 type CatalogUiState =
@@ -820,11 +821,11 @@ function App(): React.ReactElement {
 
     const legacyCustom = ready.filter((item) => {
       const binding = exportBindings[item.lexicalUnit.id];
-      if (!binding?.ankiNoteId) return false;
-      const profile = settings.exportProfiles.find(
-        (candidate) => candidate.id === binding.profileId,
-      );
-      return profile?.mode === "mapped-user-model";
+      const profile = binding
+        ? settings.exportProfiles.find((candidate) => candidate.id === binding.profileId)
+        : undefined;
+      return profile?.mode === "mapped-user-model"
+        && !mappedProfileIsConfigured(profile);
     });
     const exportable = ready.filter((item) => !legacyCustom.includes(item));
 
@@ -1996,7 +1997,9 @@ function App(): React.ReactElement {
             ? settings.exportProfiles.find((profile) => profile.id === binding.profileId)
             : null;
           const legacyCustomNote =
-            binding?.ankiNoteId !== undefined && boundProfile?.mode === "mapped-user-model";
+            binding?.ankiNoteId !== undefined
+            && boundProfile?.mode === "mapped-user-model"
+            && !mappedProfileIsConfigured(boundProfile);
           const reconciliationPending = binding?.state === "reserved";
           const currentDeckName = route?.profile.deckName ?? binding?.deckName ?? "";
           const pendingMoveDeckName = pendingMoveDecks[unit.id] ?? currentDeckName;
