@@ -23,13 +23,15 @@ Collector may inspect live Anki metadata and representative existing cards throu
 
 Selecting a user-owned model never authorizes Collector to add fields or rewrite templates/CSS.
 
-Field mappings are validated before export.
+Field mappings are validated before export. A mapped profile is not considered confirmed/routable until Collector has captured both the live Anki deck ID and note-type/model ID, not merely their names. Existing export bindings snapshot those confirmed IDs so a later same-name profile replacement cannot reinterpret an already pinned destination.
+
+Before a durable export reservation is written, Collector must verify that the mapped Prompt participates in a question side and must preflight the concrete mapped note with AnkiConnect's non-mutating addability check.
 
 Stable Collector identity must remain available without requiring mutation of the user model.
 
 For Collector-managed models, the existing `CollectorID` field remains valid.
 
-For user-owned models, the preferred fallback identity is a reserved Collector tag containing the stable lexical-unit ID. The local Anki note ID remains the primary update locator; the identity tag provides stale-note recovery.
+For user-owned models, the preferred fallback identity is a reserved Collector tag derived from the stable lexical-unit ID. The arbitrary lexical-unit ID is encoded to a search-safe representation, and stale recovery uses exact anchored tag matching rather than ordinary wildcard/hierarchical tag search. The local Anki note ID remains the primary update locator; the exact identity tag provides stale-note recovery.
 
 ## Consequences
 
@@ -43,6 +45,6 @@ Collector Basic remains the safe default for users who do not want custom mappin
 
 Custom-profile setup needs compatibility validation and a preview of where semantic values will be written.
 
-Idempotent export logic must support both CollectorID-field lookup and reserved-tag lookup.
+Idempotent export logic must support both CollectorID-field lookup and exact reserved-tag lookup. Missing confirmed deck/model IDs are treated as incomplete legacy configuration and must be reconfirmed before a mapped write.
 
 Collector must not assume that all user-owned models have one card template or the same field semantics.
