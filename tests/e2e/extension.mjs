@@ -1177,7 +1177,7 @@ try {
     "The dominant sampled model is evidence only and remains an explicit choice.",
   );
 
-  await intendedModel.selectOption({ label: /Hebrew Existing/ });
+  await intendedModel.selectOption("Hebrew Existing");
   const guidedRepresentativeFront = guidedForm.locator('iframe[title="Hebrew Existing guided representative front"]');
   await guidedRepresentativeFront.waitFor();
   const guidedRepresentativeFrame = guidedRepresentativeFront.contentFrame();
@@ -1351,11 +1351,11 @@ try {
   await usedHebrewProfile.getByRole("button", { name: "Edit" }).click();
   const usedEdit = guidedProfiles.locator(".guided-profile-form");
   await usedEdit.getByLabel("Intended note type").waitFor();
-  await usedEdit.getByLabel("Intended note type").selectOption({ label: /Hebrew Verbs/ });
+  await usedEdit.getByLabel("Intended note type").selectOption("Hebrew Verbs");
   await usedEdit.getByText(/Deck\/note-type identity changes are blocked/).waitFor();
   assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), true);
 
-  await usedEdit.getByLabel("Intended note type").selectOption({ label: /Hebrew Existing/ });
+  await usedEdit.getByLabel("Intended note type").selectOption("Hebrew Existing");
   await usedEdit.getByLabel("Map Collector Prompt").waitFor();
   await usedEdit.getByLabel("Map Collector Prompt").selectOption("Russian");
   await usedEdit.getByLabel("Map Collector Answer").selectOption("Hebrew");
