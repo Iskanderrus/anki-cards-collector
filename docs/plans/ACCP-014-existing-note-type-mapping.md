@@ -114,12 +114,14 @@ Implemented on `accp-014-existing-note-type-mapping`:
 - configured mapped profiles are valid routing destinations while incomplete legacy mapped profiles remain preserved but are not selected for new unbound exports;
 - user-owned model setup is read-only: Collector checks live deck/model IDs plus fields but does not call model creation, field-add, template update, or styling update actions;
 - saved deck/model IDs are revalidated before mapped writes when available, preventing a same-name replacement object from silently receiving Collector data;
+- normal multi-template user models remain supported, while cloze templates are detected read-only and rejected before any note mutation because Collector does not yet generate cloze semantics;
 - mapped note creation writes only configured fields plus Collector-owned tags;
 - mapped note updates write only configured fields and add the reserved `collector::id::<lexicalUnitId>` identity tag;
 - the identity tag is established before mapped field updates so an interrupted update can be retried safely;
 - stale local note IDs recover by the reserved identity tag, with duplicate-tag ambiguity and wrong-model recovery treated as blocking errors;
 - mapped note creation allows equal first-field values because idempotency is based on the reserved Collector identity rather than user-model first-field uniqueness;
 - the normal Ready-card flow exports fully configured mapped profiles instead of treating every user-owned note as an immutable legacy card;
+- exported mapped notes remain pinned to their confirmed user-model destination in the current UI rather than offering the Collector-Basic deck-move control;
 - settings/backup round-trips preserve field mappings;
 - unit and browser coverage exercise mapped routing, live-field validation, read-only model handling, mapped-only payloads, stale identity recovery, tag-first retry safety, and the normal Ready-card send path.
 
