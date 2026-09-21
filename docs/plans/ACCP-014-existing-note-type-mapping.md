@@ -103,3 +103,34 @@ Export through a real non-Collector note type and confirm:
 - rendered card uses the existing Anki layout;
 - note type/templates/CSS are unchanged;
 - only mapped fields and Collector-owned tags change.
+
+
+## Implementation status
+
+Implemented on `accp-014-existing-note-type-mapping`:
+
+- `ExportProfile` can persist an explicit semantic-field mapping for a user-owned Anki note type;
+- mapping normalization/validation requires Prompt + Answer, rejects duplicate target fields, and revalidates configured targets against live `modelFieldNames`;
+- configured mapped profiles are valid routing destinations while incomplete legacy mapped profiles remain preserved but are not selected for new unbound exports;
+- user-owned model setup is read-only: Collector checks deck/model/fields but does not call model creation, field-add, template update, or styling update actions;
+- mapped note creation writes only configured fields plus Collector-owned tags;
+- mapped note updates write only configured fields and add the reserved `collector::id::<lexicalUnitId>` identity tag;
+- the identity tag is established before mapped field updates so an interrupted update can be retried safely;
+- stale local note IDs recover by the reserved identity tag, with duplicate-tag ambiguity and wrong-model recovery treated as blocking errors;
+- mapped note creation allows equal first-field values because idempotency is based on the reserved Collector identity rather than user-model first-field uniqueness;
+- the normal Ready-card flow exports fully configured mapped profiles instead of treating every user-owned note as an immutable legacy card;
+- settings/backup round-trips preserve field mappings;
+- unit and browser coverage exercise mapped routing, live-field validation, read-only model handling, mapped-only payloads, stale identity recovery, tag-first retry safety, and the normal Ready-card send path.
+
+ACCP-018 still owns the guided UI for selecting a live note type and building this mapping. ACCP-014 intentionally provides the safe storage/runtime/export boundary first.
+
+### Remaining acceptance gate
+
+Before closing ACCP-014, run the manual real-Anki acceptance from this plan against an existing non-Collector note type and record:
+
+- exact deck + note type used;
+- mapped fields;
+- successful create/update/retry behavior;
+- note type field list/templates/CSS before and after;
+- confirmation that unmapped fields remain unchanged;
+- confirmation that the reserved Collector identity tag is present.
