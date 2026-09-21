@@ -523,6 +523,16 @@ describe("AnkiClient", () => {
         deckNamesAndIds: { "Hebrew RU": 2 },
         modelNamesAndIds: { "Hebrew Existing": 11 },
         modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example", "Private Notes"],
+        modelTemplates: {
+          Recognition: {
+            Front: "{{Hebrew}}",
+            Back: "{{FrontSide}}<hr>{{Russian}}",
+          },
+          Reverse: {
+            Front: "{{Russian}}",
+            Back: "{{FrontSide}}<hr>{{Hebrew}}",
+          },
+        },
       };
       return new Response(JSON.stringify({
         result: resultByAction[request.action] ?? null,
@@ -533,7 +543,12 @@ describe("AnkiClient", () => {
     await new AnkiClient("http://127.0.0.1:8765", fetcher)
       .ensureDeckAndModel(mappedProfile());
 
-    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds", "modelFieldNames"]);
+    expect(actions).toEqual([
+      "deckNamesAndIds",
+      "modelNamesAndIds",
+      "modelFieldNames",
+      "modelTemplates",
+    ]);
     expect(actions).not.toContain("createModel");
     expect(actions).not.toContain("modelFieldAdd");
     expect(actions).not.toContain("updateModelTemplates");
@@ -859,6 +874,46 @@ describe("AnkiClient", () => {
 
     expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds"]);
     expect(actions).not.toContain("modelFieldNames");
+  });
+
+
+  it("rejects cloze user-owned models before any note mutation", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      const resultByAction: Record<string, unknown> = {
+        deckNamesAndIds: { "Hebrew RU": 2 },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
+        modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example"],
+        modelTemplates: {
+          Cloze: {
+            Front: "{{cloze:Hebrew}}",
+            Back: "{{cloze:Hebrew}}<hr>{{Russian}}",
+          },
+        },
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .ensureDeckAndModel(mappedProfile()),
+    ).rejects.toThrow("Mapped cloze export is not supported");
+
+    expect(actions).toEqual([
+      "deckNamesAndIds",
+      "modelNamesAndIds",
+      "modelFieldNames",
+      "modelTemplates",
+    ]);
+    expect(actions).not.toContain("addNote");
+    expect(actions).not.toContain("updateNoteFields");
+    expect(actions).not.toContain("modelFieldAdd");
+    expect(actions).not.toContain("updateModelTemplates");
   });
 
 });
