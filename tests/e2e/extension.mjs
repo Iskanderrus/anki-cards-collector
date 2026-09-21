@@ -1607,13 +1607,27 @@ try {
 
   markE2eStage("accp018-serbian-capture-and-duolingo");
   // Duolingo visible scanning must use the same active Serbian profile language.
+  // Replace the earlier Hebrew matching-pairs evidence with explicit Serbian DOM:
+  // already-staged Hebrew evidence must keep its original language, while newly
+  // observed Serbian evidence is captured through the active sr profile.
   await pairsPage.bringToFront();
+  await pairsPage.evaluate(() => {
+    const challenge = document.querySelector("[data-test='challenge-match']");
+    if (!challenge) throw new Error("Matching-pairs fixture is missing.");
+    challenge.innerHTML = `
+      <p data-test="challenge-sentence" lang="sr">Dobar dan</p>
+      <div data-test="word-bank">
+        <button data-test="challenge-tap-token" lang="sr">prozor</button>
+      </div>
+    `;
+  });
   const profileDrivenScan = await sendPanelMessage(
     panel,
     { type: "DUOLINGO_SCAN_ACTIVE" },
     "ACCP-018 profile-driven Duolingo scan",
   );
   assert.equal(profileDrivenScan?.ok, true, profileDrivenScan?.error);
+  assert.equal(profileDrivenScan?.foundCount, 2);
   const profileDrivenBatch = await sendPanelMessage(
     panel,
     { type: "GET_STAGED_BATCH" },
@@ -1621,10 +1635,24 @@ try {
   );
   assert.equal(
     profileDrivenBatch.batch.candidates.some(
-      (candidate) => candidate.surfaceText === "מרק" && candidate.language === "sr",
+      (candidate) => candidate.surfaceText === "Dobar dan" && candidate.language === "sr",
     ),
     true,
-    "Duolingo visible scan must derive language from the active Serbian profile, not the legacy he fallback.",
+    "New Serbian Duolingo sentence evidence must derive language from the active Serbian profile.",
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "prozor" && candidate.language === "sr",
+    ),
+    true,
+    "New Serbian Duolingo token evidence must derive language from the active Serbian profile.",
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "מרק" && candidate.language === "he",
+    ),
+    true,
+    "Previously staged Hebrew evidence must not be reinterpreted when the active capture profile changes.",
   );
   await contentPage.bringToFront();
 
