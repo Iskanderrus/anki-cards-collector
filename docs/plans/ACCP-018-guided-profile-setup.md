@@ -101,7 +101,7 @@ Save:
 - field mapping;
 - identity strategy.
 
-Optionally assign the profile to a language route such as `he -> Hebrew`.
+Configure or update the corresponding language route through the existing ACCP-013 routing model, for example `he -> Hebrew`. The guided UI does not duplicate routing rules.
 
 ## Revalidation
 
