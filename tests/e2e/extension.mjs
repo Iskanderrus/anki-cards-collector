@@ -1262,7 +1262,6 @@ try {
 
   // Same-name deck replacement must fail closed and never rewrite the pinned ID.
   ankiDecks.set("Hebrew RU", 22);
-  await clickPanelButton(panel, "Refresh from Anki");
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText(/Same-name deck replacement rejected/).waitFor();
   let revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
@@ -1271,11 +1270,11 @@ try {
     "2",
   );
   ankiDecks.set("Hebrew RU", 2);
-  await clickPanelButton(panel, "Refresh from Anki");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
 
   // Same-name note-type replacement must also be rejected without identity rewriting.
   ankiModels.set("Hebrew Existing", 99);
-  await clickPanelButton(panel, "Refresh from Anki");
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText(/Same-name note-type replacement rejected/).waitFor();
   revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
@@ -1284,7 +1283,8 @@ try {
     "11",
   );
   ankiModels.set("Hebrew Existing", 11);
-  await clickPanelButton(panel, "Refresh from Anki");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
 
   // Changed mapped fields fail closed until the original model shape is restored.
   ankiModelFields.set("Hebrew Existing", ["Hebrew", "Example"]);
