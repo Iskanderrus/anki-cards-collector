@@ -355,6 +355,7 @@ const server = createServer((request, response) => {
           <p id="canonical-base">Quiero tener tiempo para estudiar.</p>
           <p id="canonical-observed">Tengo tiempo para estudiar hoy.</p>
           <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
+          <p id="mapped-context">Mapped context-menu phrase demonstrates profile-driven capture language.</p>
           <p id="mapped-sr">Serbian mapped export phrase demonstrates a second existing Anki note type.</p>
         </main>
       </body>
@@ -1314,8 +1315,26 @@ try {
   await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
 
   // Deliberately set the legacy global fallback to Serbian. Active-profile language
-  // must still make the next normal capture Hebrew without maintaining that global.
+  // must still make normal capture Hebrew without maintaining that global.
   await setCaptureLanguage(panel, "sr");
+
+  await selectText(contentPage, "#mapped-context", "Mapped context-menu phrase");
+  await contentPage.bringToFront();
+  const guidedContextResult = await panel.evaluate(
+    async (activeTabId) => chrome.runtime.sendMessage({
+      type: "E2E_CONTEXT_MENU_CLICK",
+      tabId: activeTabId,
+    }),
+    tabId,
+  );
+  assert.equal(guidedContextResult?.ok, true, guidedContextResult?.error);
+  const guidedContextCard = await cardForTerm(panel, "Mapped context-menu phrase");
+  assert.match(
+    await guidedContextCard.locator(".meta").first().innerText(),
+    /^he\s+·/,
+    "Context-menu capture must derive language from the active Hebrew profile, not the legacy sr fallback.",
+  );
+
   await selectText(contentPage, "#mapped", "Mapped export phrase");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
@@ -1453,6 +1472,24 @@ try {
     ankiRequests.some((request) => ["createModel", "modelFieldAdd", "updateModelTemplates", "updateModelStyling"].includes(request.action)),
     false,
   );
+
+  // Duolingo visible scanning must use the same active Serbian profile language.
+  await pairsPage.bringToFront();
+  const profileDrivenScan = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_SCAN_ACTIVE" }),
+  );
+  assert.equal(profileDrivenScan?.ok, true, profileDrivenScan?.error);
+  const profileDrivenBatch = await panel.evaluate(
+    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "מרק" && candidate.language === "sr",
+    ),
+    true,
+    "Duolingo visible scan must derive language from the active Serbian profile, not the legacy he fallback.",
+  );
+  await contentPage.bringToFront();
 
   // ACCP-003: a canonical edit that would merge independently exported units is
   // blocked before any corpus mutation. Re-open the Serbian card because the
