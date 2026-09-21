@@ -24,6 +24,42 @@ export interface CaptureBatchEntry {
   targetLexicalUnitId?: string;
 }
 
+export interface ObservedFormGroup {
+  normalizedSurfaceText: string;
+  surfaceForms: string[];
+  count: number;
+  occurrences: Occurrence[];
+}
+
+export type CanonicalizationPreviewKind =
+  | "unchanged"
+  | "rename"
+  | "consolidate"
+  | "conflict";
+
+export interface CanonicalizationTargetSummary {
+  id: string;
+  canonicalText: string;
+  language: string;
+  status: ReviewStatus;
+  occurrenceCount: number;
+}
+
+export interface CanonicalizationPreview {
+  kind: CanonicalizationPreviewKind;
+  currentId: string;
+  currentCanonicalText: string;
+  requestedCanonicalText: string;
+  requestedLanguage: string;
+  currentOccurrenceCount: number;
+  willReturnToInbox: boolean;
+  target?: CanonicalizationTargetSummary;
+  survivingLexicalUnitId?: string;
+  resultingOccurrenceCount?: number;
+  preservedAnkiNoteId?: number;
+  conflictReason?: string;
+}
+
 export interface RestorePreview {
   lexicalUnitsAdded: number;
   lexicalUnitsUpdated: number;
@@ -218,20 +254,53 @@ function buildRestorePlan(
   };
 }
 
-function compatibleBindings(
-  left: ExportBinding | undefined,
-  right: ExportBinding | undefined,
-): boolean {
-  if (!left || !right) return true;
-  if (left.profileId !== right.profileId) return false;
+function consolidationConflictReason(
+  leftUnit: LexicalUnit,
+  rightUnit: LexicalUnit,
+  leftBinding: ExportBinding | undefined,
+  rightBinding: ExportBinding | undefined,
+): string | undefined {
+  if (leftBinding?.state === "reserved" || rightBinding?.state === "reserved") {
+    return "Cannot consolidate these forms while an Anki export is awaiting reconciliation.";
+  }
+
   if (
-    left.ankiNoteId !== undefined
-    && right.ankiNoteId !== undefined
-    && left.ankiNoteId !== right.ankiNoteId
-  ) return false;
-  if (left.deckName && right.deckName && left.deckName !== right.deckName) return false;
-  if (left.modelName && right.modelName && left.modelName !== right.modelName) return false;
-  return true;
+    leftBinding?.ankiNoteId !== undefined
+    && rightBinding?.ankiNoteId !== undefined
+    && leftBinding.ankiNoteId !== rightBinding.ankiNoteId
+  ) {
+    return "Cannot consolidate these forms because both are linked to different Anki notes.";
+  }
+
+  if (leftBinding && rightBinding) {
+    if (leftBinding.profileId !== rightBinding.profileId) {
+      return "Cannot consolidate these forms because they use different export destinations.";
+    }
+    if (
+      leftBinding.deckName
+      && rightBinding.deckName
+      && leftBinding.deckName !== rightBinding.deckName
+    ) {
+      return "Cannot consolidate these forms because they use different export destinations.";
+    }
+    if (
+      leftBinding.modelName
+      && rightBinding.modelName
+      && leftBinding.modelName !== rightBinding.modelName
+    ) {
+      return "Cannot consolidate these forms because they use different export destinations.";
+    }
+  }
+
+  if (
+    leftUnit.ankiNoteId !== undefined
+    && rightUnit.ankiNoteId !== undefined
+    && leftUnit.ankiNoteId !== rightUnit.ankiNoteId
+  ) {
+    return "Cannot consolidate these forms because both are linked to different Anki notes.";
+  }
+
+  return undefined;
 }
 
 function bindingPriority(binding: ExportBinding | undefined): number {
@@ -337,6 +406,155 @@ export class CaptureRepository {
     });
 
     return lexicalUnit;
+  }
+
+  async listObservedForms(id: string): Promise<ObservedFormGroup[]> {
+    const lexicalUnit = await this.database.lexicalUnits.get(id);
+    if (!lexicalUnit) throw new Error("Collected item no longer exists.");
+
+    const occurrences = await this.database.occurrences
+      .where("lexicalUnitId")
+      .equals(id)
+      .sortBy("capturedAt");
+
+    const groups = new Map<string, ObservedFormGroup>();
+    for (const occurrence of occurrences) {
+      const current = groups.get(occurrence.normalizedSurfaceText);
+      if (current) {
+        current.count += 1;
+        current.occurrences.push(occurrence);
+        if (!current.surfaceForms.includes(occurrence.surfaceText)) {
+          current.surfaceForms.push(occurrence.surfaceText);
+        }
+      } else {
+        groups.set(occurrence.normalizedSurfaceText, {
+          normalizedSurfaceText: occurrence.normalizedSurfaceText,
+          surfaceForms: [occurrence.surfaceText],
+          count: 1,
+          occurrences: [occurrence],
+        });
+      }
+    }
+
+    return [...groups.values()].sort(
+      (left, right) =>
+        right.count - left.count
+        || left.normalizedSurfaceText.localeCompare(right.normalizedSurfaceText),
+    );
+  }
+
+  async previewCanonicalization(
+    id: string,
+    requestedCanonicalText: string,
+    requestedLanguage: string,
+  ): Promise<CanonicalizationPreview> {
+    const canonicalText = normalizeText(requestedCanonicalText);
+    if (!canonicalText) throw new Error("Canonical form cannot be empty.");
+
+    const language = requestedLanguage.trim().toLowerCase() || "und";
+    const contentKey = makeContentKey(canonicalText, language);
+    const current = await this.database.lexicalUnits.get(id);
+    if (!current) throw new Error("Collected item no longer exists.");
+
+    const currentOccurrenceCount = await this.database.occurrences
+      .where("lexicalUnitId")
+      .equals(current.id)
+      .count();
+
+    if (current.contentKey === contentKey) {
+      return {
+        kind: "unchanged",
+        currentId: current.id,
+        currentCanonicalText: current.canonicalText,
+        requestedCanonicalText: canonicalText,
+        requestedLanguage: language,
+        currentOccurrenceCount,
+        willReturnToInbox: false,
+        survivingLexicalUnitId: current.id,
+        resultingOccurrenceCount: currentOccurrenceCount,
+      };
+    }
+
+    const collision = await this.database.lexicalUnits
+      .where("contentKey")
+      .equals(contentKey)
+      .first();
+
+    if (!collision || collision.id === current.id) {
+      return {
+        kind: "rename",
+        currentId: current.id,
+        currentCanonicalText: current.canonicalText,
+        requestedCanonicalText: canonicalText,
+        requestedLanguage: language,
+        currentOccurrenceCount,
+        willReturnToInbox: current.status === "ready",
+        survivingLexicalUnitId: current.id,
+        resultingOccurrenceCount: currentOccurrenceCount,
+      };
+    }
+
+    const [currentBinding, collisionBinding, collisionOccurrenceCount] = await Promise.all([
+      this.database.exportBindings.get(current.id),
+      this.database.exportBindings.get(collision.id),
+      this.database.occurrences.where("lexicalUnitId").equals(collision.id).count(),
+    ]);
+    const target: CanonicalizationTargetSummary = {
+      id: collision.id,
+      canonicalText: collision.canonicalText,
+      language: collision.language,
+      status: collision.status,
+      occurrenceCount: collisionOccurrenceCount,
+    };
+    const conflictReason = consolidationConflictReason(
+      current,
+      collision,
+      currentBinding,
+      collisionBinding,
+    );
+
+    if (conflictReason) {
+      return {
+        kind: "conflict",
+        currentId: current.id,
+        currentCanonicalText: current.canonicalText,
+        requestedCanonicalText: canonicalText,
+        requestedLanguage: language,
+        currentOccurrenceCount,
+        willReturnToInbox: false,
+        target,
+        resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
+        conflictReason,
+      };
+    }
+
+    const currentHasIdentity =
+      currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
+    const collisionHasIdentity =
+      collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
+    const keepCurrent = currentHasIdentity && !collisionHasIdentity;
+    const survivingLexicalUnitId = keepCurrent ? current.id : collision.id;
+    const binding = preferredBinding(
+      keepCurrent ? currentBinding : collisionBinding,
+      keepCurrent ? collisionBinding : currentBinding,
+      survivingLexicalUnitId,
+    );
+    const preservedAnkiNoteId = binding?.ankiNoteId
+      ?? (keepCurrent ? current.ankiNoteId : collision.ankiNoteId);
+
+    return {
+      kind: "consolidate",
+      currentId: current.id,
+      currentCanonicalText: current.canonicalText,
+      requestedCanonicalText: canonicalText,
+      requestedLanguage: language,
+      currentOccurrenceCount,
+      willReturnToInbox: true,
+      target,
+      survivingLexicalUnitId,
+      resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
+      preservedAnkiNoteId,
+    };
   }
 
   private async collectedItem(id: string): Promise<CollectedItem> {
@@ -450,34 +668,18 @@ export class CaptureRepository {
             this.database.exportBindings.get(collision.id),
           ]);
 
-          if (
-            currentBinding?.state === "reserved"
-            || collisionBinding?.state === "reserved"
-          ) {
-            throw new Error(
-              "Cannot consolidate these forms while an Anki export is awaiting reconciliation.",
-            );
-          }
-
-          if (!compatibleBindings(currentBinding, collisionBinding)) {
-            throw new Error(
-              "Cannot consolidate these forms because they use different export destinations or Anki notes.",
-            );
-          }
+          const conflictReason = consolidationConflictReason(
+            current,
+            collision,
+            currentBinding,
+            collisionBinding,
+          );
+          if (conflictReason) throw new Error(conflictReason);
 
           const currentHasIdentity =
             currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
           const collisionHasIdentity =
             collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
-          if (
-            current.ankiNoteId !== undefined &&
-            collision.ankiNoteId !== undefined &&
-            current.ankiNoteId !== collision.ankiNoteId
-          ) {
-            throw new Error(
-              "Cannot consolidate these forms because both are linked to different Anki notes.",
-            );
-          }
 
           const keepCurrent = currentHasIdentity && !collisionHasIdentity;
           const mergedNote = combineNotes(requestedNote, collision.note);
