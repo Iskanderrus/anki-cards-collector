@@ -475,7 +475,9 @@ describe("exportBatch profile routing", () => {
       id: "he-existing",
       name: "Hebrew existing",
       deckName: "Hebrew RU",
+      deckId: "2",
       modelName: "Hebrew Existing",
+      modelId: "11",
       mode: "mapped-user-model",
       fieldMapping: { Prompt: "Hebrew" },
     };
