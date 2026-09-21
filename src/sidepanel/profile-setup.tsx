@@ -154,6 +154,14 @@ export function GuidedProfileSetup({
       }
     : null;
 
+  const liveCompatibilityValidation =
+    nextProfile && liveModelDetail && catalogSnapshot && catalogKind === "live"
+      ? validateMappedProfileAgainstLive(nextProfile, catalogSnapshot, liveModelDetail)
+      : null;
+
+  const displayedMappingErrors =
+    liveCompatibilityValidation?.errors ?? mappingValidation.errors;
+
   const editSafety = originalProfile && nextProfile
     ? assessUsedMappedProfileEdit(originalProfile, nextProfile, bindings)
     : null;
@@ -752,9 +760,9 @@ export function GuidedProfileSetup({
                     </label>
                   ))}
                 </div>
-                {!mappingValidation.valid && (
+                {displayedMappingErrors.length > 0 && (
                   <ul className="conflict-list" aria-label="Field mapping errors">
-                    {mappingValidation.errors.map((message) => <li key={message}>{message}</li>)}
+                    {displayedMappingErrors.map((message) => <li key={message}>{message}</li>)}
                   </ul>
                 )}
               </div>
@@ -808,7 +816,7 @@ export function GuidedProfileSetup({
                 || !draft.deckId
                 || !draft.modelId
                 || !liveModelDetail
-                || !mappingValidation.valid
+                || !liveCompatibilityValidation?.valid
                 || Boolean(editSafety?.durableBindingCount && editSafety.identityChanged)
                 || Boolean(editSafety?.durableBindingCount && editSafety.fieldMappingChanged && !remapAcknowledged)
               }
