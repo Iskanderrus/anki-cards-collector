@@ -30,10 +30,11 @@ const ankiRequests = [];
 let nextAnkiNoteId = 9000;
 
 function collectorIdentityTagForE2e(id) {
-  const bytes = new TextEncoder().encode(id);
-  return "collector::id::" + [...bytes]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  let encoded = "";
+  for (let index = 0; index < id.length; index += 1) {
+    encoded += id.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return "collector::id::" + encoded;
 }
 const ankiDecks = new Map([
   ["Hebrew RU", 2],
