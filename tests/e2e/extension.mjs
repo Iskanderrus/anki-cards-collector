@@ -1182,10 +1182,12 @@ try {
   await selectText(contentPage, "#canonical-base", "tener");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
+  await (await queueRowForTerm(panel, "tener")).waitFor();
 
   await selectText(contentPage, "#canonical-observed", "Tengo");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
+  await (await queueRowForTerm(panel, "Tengo")).waitFor();
   assert.equal(
     await termCount(panel),
     countBeforeCanonicalPair + 2,
