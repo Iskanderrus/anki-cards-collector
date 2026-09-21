@@ -97,6 +97,16 @@ kbd {
   border-radius: 12px;
   padding: 10px 12px;
 }
+.settings-view-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.settings-view-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
 .settings summary { cursor: pointer; font-weight: 650; }
 .settings-grid { display: grid; gap: 10px; margin-top: 12px; }
 label {
@@ -498,6 +508,18 @@ summary:focus-visible {
   font-size: 12px;
   line-height: 1.35;
   border: 1px solid #b54708;
+}
+.proposal-explanation {
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  padding-top: 6px;
+}
+.proposal-explanation > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 64%, transparent);
+}
+.proposal-explanation .proposal-why {
+  margin-top: 7px;
 }
 
 
