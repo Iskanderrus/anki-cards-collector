@@ -786,7 +786,6 @@ describe("AnkiClient", () => {
     ).resolves.toBe(4242);
 
     expect(requests.map(({ action }) => action)).toEqual([
-      "notesInfo",
       "findNotes",
       "notesInfo",
       "addTags",
