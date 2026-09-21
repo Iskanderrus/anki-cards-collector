@@ -235,6 +235,8 @@ function App(): React.ReactElement {
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const loadRequestId = useRef(0);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
@@ -265,6 +267,11 @@ function App(): React.ReactElement {
   );
 
   const load = useCallback(async (preferredActiveId?: string) => {
+    if (preferredActiveId !== undefined) {
+      activeIdRef.current = preferredActiveId;
+    }
+    const requestId = ++loadRequestId.current;
+
     const [loadedItems, loadedBindings, loadedSettings] = await Promise.all([
       repository.list(),
       repository.listExportBindings(),
@@ -293,21 +300,19 @@ function App(): React.ReactElement {
       return completed;
     }));
 
+    if (requestId !== loadRequestId.current) return;
+
     setItems(loadedItems);
     setExportBindings(Object.fromEntries(
       completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
     ));
-    setActiveId((current) => {
-      if (
-        preferredActiveId
-        && loadedItems.some((item) => item.lexicalUnit.id === preferredActiveId)
-      ) {
-        return preferredActiveId;
-      }
-      return current && loadedItems.some((item) => item.lexicalUnit.id === current)
-        ? current
-        : loadedItems[0]?.lexicalUnit.id ?? null;
-    });
+    const requestedActiveId = activeIdRef.current;
+    const nextActiveId = requestedActiveId
+      && loadedItems.some((item) => item.lexicalUnit.id === requestedActiveId)
+      ? requestedActiveId
+      : loadedItems[0]?.lexicalUnit.id ?? null;
+    activeIdRef.current = nextActiveId;
+    setActiveId(nextActiveId);
     setSettings(loadedSettings);
     const fallback = loadedSettings.exportProfiles.find(
       (profile) => profile.id === loadedSettings.fallbackProfileId,
@@ -372,8 +377,13 @@ function App(): React.ReactElement {
     [activeId, items],
   );
 
-  function openDetail(id: string): void {
+  function selectActiveId(id: string | null): void {
+    activeIdRef.current = id;
     setActiveId(id);
+  }
+
+  function openDetail(id: string): void {
+    selectActiveId(id);
     setView("detail");
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
@@ -384,8 +394,9 @@ function App(): React.ReactElement {
     cancelEdit();
     setView("queue");
     requestAnimationFrame(() => {
-      if (!activeId) return;
-      const selector = `[data-queue-id="${CSS.escape(activeId)}"]`;
+      const currentActiveId = activeIdRef.current;
+      if (!currentActiveId) return;
+      const selector = `[data-queue-id="${CSS.escape(currentActiveId)}"]`;
       const row = document.querySelector<HTMLElement>(selector);
       row?.focus({ preventScroll: true });
       row?.scrollIntoView({ block: "nearest" });
@@ -586,7 +597,7 @@ function App(): React.ReactElement {
 
     setError("");
     await repository.setStatus(id, status);
-    await load();
+    await load(id);
   }
 
   function beginEdit(item: CollectedItem): void {
@@ -630,6 +641,7 @@ function App(): React.ReactElement {
       } else {
         setNotice("Changes saved. The next Anki export will update the same Collector note.");
       }
+      selectActiveId(updated.lexicalUnit.id);
       cancelEdit();
       await load(updated.lexicalUnit.id);
     } catch (editError) {
@@ -1135,7 +1147,7 @@ function App(): React.ReactElement {
     }
 
     function focusItem(id: string): void {
-      setActiveId(id);
+      selectActiveId(id);
       requestAnimationFrame(() => {
         const selector = view === "queue"
           ? `[data-queue-id="${CSS.escape(id)}"]`
@@ -1393,7 +1405,7 @@ function App(): React.ReactElement {
             };
           })}
           activeId={activeId}
-          onActivate={setActiveId}
+          onActivate={selectActiveId}
           onOpen={openDetail}
         />
       )}
@@ -1843,7 +1855,7 @@ function App(): React.ReactElement {
               data-active={active ? "true" : "false"}
               tabIndex={active ? 0 : -1}
               aria-label={`Review ${unit.canonicalText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
-              onFocus={() => setActiveId(unit.id)}
+              onFocus={() => selectActiveId(unit.id)}
             >
               <div className="card-head">
                 <div>
