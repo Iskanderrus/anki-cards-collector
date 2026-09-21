@@ -2007,6 +2007,27 @@ function App(): React.ReactElement {
                     </div>
                   )}
 
+                  {item.occurrences.length > 1 && (
+                    <details className="other-occurrences">
+                      <summary>
+                        Other occurrences ({item.occurrences.filter((occurrence) => occurrence.id !== selectedOccurrence?.id).length})
+                      </summary>
+                      <div className="occurrence-list">
+                        {item.occurrences
+                          .filter((occurrence) => occurrence.id !== selectedOccurrence?.id)
+                          .map((occurrence) => (
+                            <div className="occurrence-row" key={occurrence.id}>
+                              <strong dir="auto">{occurrence.surfaceText}</strong>
+                              {occurrence.context && occurrence.context !== occurrence.surfaceText && (
+                                <span dir="auto">{occurrence.context}</span>
+                              )}
+                              <span className="setting-help">{sourceLabel(occurrence)}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </details>
+                  )}
+
                   <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
                     <div className="proposal-head">
                       <strong>Suggested card</strong>
@@ -2063,19 +2084,27 @@ function App(): React.ReactElement {
                     {unit.status !== "archived" && (
                       <button aria-keyshortcuts="A" className="ghost" disabled={busy} onClick={() => void changeStatus(unit.id, "archived")}>Archive</button>
                     )}
-                    <button
-                      className="ghost danger"
-                      disabled={busy || reconciliationPending}
-                      title={
-                        reconciliationPending
-                          ? "Retry Send ready to Anki before deleting this item."
-                          : undefined
-                      }
-                      onClick={() => void repository.remove(unit.id).then(load)}
-                    >
-                      Delete
-                    </button>
                   </div>
+                  <details className="more-actions">
+                    <summary>More actions</summary>
+                    <div className="more-actions-body">
+                      <button
+                        className="ghost danger"
+                        disabled={busy || reconciliationPending}
+                        title={
+                          reconciliationPending
+                            ? "Retry Send ready to Anki before deleting this item."
+                            : undefined
+                        }
+                        onClick={() => void repository.remove(unit.id).then(async () => {
+                          await load();
+                          setView("queue");
+                        })}
+                      >
+                        Delete this item
+                      </button>
+                    </div>
+                  </details>
                 </>
               )}
             </article>
