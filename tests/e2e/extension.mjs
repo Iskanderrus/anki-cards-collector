@@ -404,6 +404,28 @@ async function clickPanelButton(panel, name) {
   }, name);
 }
 
+async function sendPanelMessage(panel, message, label, timeoutMs = 10000) {
+  return panel.evaluate(
+    async ({ payload, stage, timeout }) => {
+      let timer;
+      try {
+        return await Promise.race([
+          chrome.runtime.sendMessage(payload),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`Timed out waiting for extension response: ${stage}`)),
+              timeout,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    { payload: message, stage: label, timeout: timeoutMs },
+  );
+}
+
 async function ensureQueue(panel) {
   if (await panel.locator(".queue").count() === 0) {
     await panel.getByRole("button", { name: "Queue", exact: true }).click();
@@ -1345,12 +1367,10 @@ try {
 
   await selectText(contentPage, "#mapped-context", "Mapped context-menu phrase");
   await contentPage.bringToFront();
-  const guidedContextResult = await panel.evaluate(
-    async (activeTabId) => chrome.runtime.sendMessage({
-      type: "E2E_CONTEXT_MENU_CLICK",
-      tabId: activeTabId,
-    }),
-    tabId,
+  const guidedContextResult = await sendPanelMessage(
+    panel,
+    { type: "E2E_CONTEXT_MENU_CLICK", tabId },
+    "ACCP-018 guided context-menu capture",
   );
   assert.equal(guidedContextResult?.ok, true, guidedContextResult?.error);
   const guidedContextCard = await cardForTerm(panel, "Mapped context-menu phrase");
@@ -1515,12 +1535,16 @@ try {
 
   // Duolingo visible scanning must use the same active Serbian profile language.
   await pairsPage.bringToFront();
-  const profileDrivenScan = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_SCAN_ACTIVE" }),
+  const profileDrivenScan = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_SCAN_ACTIVE" },
+    "ACCP-018 profile-driven Duolingo scan",
   );
   assert.equal(profileDrivenScan?.ok, true, profileDrivenScan?.error);
-  const profileDrivenBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const profileDrivenBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-018 staged batch readback",
   );
   assert.equal(
     profileDrivenBatch.batch.candidates.some(
