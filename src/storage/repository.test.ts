@@ -588,4 +588,125 @@ describe("CaptureRepository", () => {
     });
   });
 
+
+  it("groups observed forms with counts without rewriting occurrence evidence", async () => {
+    const captured = await repository.capture(draft("Tengo", "Tengo tiempo."));
+    await repository.capture(draft("tengo", "Hoy tengo tiempo."));
+    await repository.update(captured.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+      occurrenceId: captured.occurrences[0]!.id,
+      surfaceText: "Tengo",
+      context: "Tengo tiempo.",
+    });
+
+    const groups = await repository.listObservedForms(captured.lexicalUnit.id);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      normalizedSurfaceText: "tengo",
+      count: 2,
+      surfaceForms: ["Tengo", "tengo"],
+    });
+    expect(groups[0]?.occurrences.map((occurrence) => occurrence.context)).toEqual([
+      "Tengo tiempo.",
+      "Hoy tengo tiempo.",
+    ]);
+  });
+
+  it("previews a canonical rename without mutating the corpus", async () => {
+    const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setStatus(captured.lexicalUnit.id, "ready");
+
+    const preview = await repository.previewCanonicalization(
+      captured.lexicalUnit.id,
+      "tener",
+      "es",
+    );
+
+    expect(preview).toMatchObject({
+      kind: "rename",
+      currentId: captured.lexicalUnit.id,
+      currentCanonicalText: "tengo",
+      requestedCanonicalText: "tener",
+      requestedLanguage: "es",
+      currentOccurrenceCount: 1,
+      willReturnToInbox: true,
+      survivingLexicalUnitId: captured.lexicalUnit.id,
+      resultingOccurrenceCount: 1,
+    });
+    expect((await repository.list())[0]?.lexicalUnit.canonicalText).toBe("tengo");
+    expect((await repository.list())[0]?.lexicalUnit.status).toBe("ready");
+  });
+
+  it("previews safe consolidation and identifies the surviving exported identity", async () => {
+    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: observed.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 6060,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    const preview = await repository.previewCanonicalization(
+      observed.lexicalUnit.id,
+      "tener",
+      "es",
+    );
+
+    expect(preview).toMatchObject({
+      kind: "consolidate",
+      currentId: observed.lexicalUnit.id,
+      requestedCanonicalText: "tener",
+      requestedLanguage: "es",
+      currentOccurrenceCount: 1,
+      willReturnToInbox: true,
+      survivingLexicalUnitId: observed.lexicalUnit.id,
+      resultingOccurrenceCount: 2,
+      preservedAnkiNoteId: 6060,
+      target: {
+        id: canonical.lexicalUnit.id,
+        canonicalText: "tener",
+        occurrenceCount: 1,
+      },
+    });
+    expect(await repository.list()).toHaveLength(2);
+  });
+
+  it("previews consolidation conflicts before any write occurs", async () => {
+    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: canonical.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 100,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+    await repository.setExportBinding({
+      lexicalUnitId: observed.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 200,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+
+    const preview = await repository.previewCanonicalization(
+      observed.lexicalUnit.id,
+      "tener",
+      "es",
+    );
+
+    expect(preview.kind).toBe("conflict");
+    expect(preview.conflictReason).toContain("different Anki notes");
+    expect(preview.target?.id).toBe(canonical.lexicalUnit.id);
+    expect(await repository.list()).toHaveLength(2);
+  });
+
 });
