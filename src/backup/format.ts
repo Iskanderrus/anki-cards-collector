@@ -244,9 +244,15 @@ function readExportBinding(value: unknown, path: string): ExportBinding {
     ...(readOptionalString(record, "deckName", path) === undefined
       ? {}
       : { deckName: readOptionalString(record, "deckName", path)! }),
+    ...(readOptionalString(record, "deckId", path) === undefined
+      ? {}
+      : { deckId: readOptionalString(record, "deckId", path)! }),
     ...(readOptionalString(record, "modelName", path) === undefined
       ? {}
       : { modelName: readOptionalString(record, "modelName", path)! }),
+    ...(readOptionalString(record, "modelId", path) === undefined
+      ? {}
+      : { modelId: readOptionalString(record, "modelId", path)! }),
     updatedAt: readDate(record, "updatedAt", path),
   };
 }
