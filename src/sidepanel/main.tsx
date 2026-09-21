@@ -1217,6 +1217,25 @@ function App(): React.ReactElement {
         </button>
       </div>
 
+      <nav className="view-tabs" aria-label="Collector views">
+        <button
+          type="button"
+          aria-current={view === "queue" ? "page" : undefined}
+          onClick={showQueue}
+        >
+          Queue
+        </button>
+        <button
+          type="button"
+          aria-current={view === "settings" ? "page" : undefined}
+          onClick={showSettings}
+        >
+          Settings
+        </button>
+      </nav>
+
+      {view === "queue" && (
+        <>
       <section className="backfill-panel" aria-label="Duolingo visible backfill">
         <div className="toolbar backfill-toolbar">
           <button
@@ -1317,6 +1336,8 @@ function App(): React.ReactElement {
         <span>{counts.ready} ready</span>
         <span>{items.length} unique total</span>
       </div>
+        </>
+      )}
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
@@ -1334,16 +1355,66 @@ function App(): React.ReactElement {
         </div>
       )}
 
-      <div className="shortcuts" aria-label="Keyboard shortcuts">
-        <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
-        <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
-        <span><kbd>E</kbd> edit</span>
-        <span><kbd>R</kbd> ready</span>
-        <span><kbd>I</kbd> inbox</span>
-        <span><kbd>A</kbd> archive</span>
-      </div>
+      {view !== "settings" && (
+        <div className="shortcuts" aria-label="Keyboard shortcuts">
+          <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
+          <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
+          {view === "queue" && <span><kbd>Enter</kbd> open</span>}
+          {view === "detail" && <span><kbd>B</kbd>/<kbd>Esc</kbd> back</span>}
+          <span><kbd>E</kbd> edit</span>
+          <span><kbd>R</kbd> ready</span>
+          <span><kbd>I</kbd> inbox</span>
+          <span><kbd>A</kbd> archive</span>
+        </div>
+      )}
 
-      <details className="settings">
+      {view === "queue" && (
+        <section className="queue" aria-label="Review queue">
+          {items.length === 0 && (
+            <div className="empty">
+              Select something useful on a page, then click <strong>Collect selection</strong>.
+            </div>
+          )}
+          {items.map((item) => {
+            const unit = item.lexicalUnit;
+            const proposal = proposeLearningCard(item);
+            const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
+            const binding = exportBindings[unit.id];
+            const route = resolvedRoute(item);
+            const deckName = binding?.deckName ?? route?.profile.deckName ?? "";
+            const active = unit.id === activeId;
+            return (
+              <button
+                type="button"
+                className="queue-row"
+                key={unit.id}
+                data-queue-id={unit.id}
+                data-active={active ? "true" : "false"}
+                aria-label={`Open ${unit.canonicalText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
+                onFocus={() => setActiveId(unit.id)}
+                onClick={() => openDetail(unit.id)}
+              >
+                <span className="queue-row-head">
+                  <span className="term" dir="auto">{unit.canonicalText}</span>
+                  <span className="pill">{unit.status}</span>
+                </span>
+                <span className="queue-meta">
+                  {unit.language} · {item.occurrences.length} occurrence{item.occurrences.length === 1 ? "" : "s"}
+                </span>
+                {selectedOccurrence?.context && (
+                  <span className="queue-context" dir="auto">{selectedOccurrence.context}</span>
+                )}
+                <span className="queue-destination">
+                  Anki: {deckName || "choose a deck in Settings"}
+                </span>
+              </button>
+            );
+          })}
+        </section>
+      )}
+
+      {view === "settings" && (
+      <details className="settings" open>
         <summary>Settings & Anki</summary>
         <div className="settings-grid">
           <label>
@@ -1739,15 +1810,26 @@ function App(): React.ReactElement {
           </details>
         </div>
       </details>
+      )}
 
-      <section className="list" aria-label="Collected language">
-        {items.length === 0 && (
+      {view === "detail" && (
+        <>
+          <div className="detail-heading">
+            <button className="ghost" type="button" onClick={showQueue}>← Back to queue</button>
+            <span className="setting-help">
+              {activeItem
+                ? `${Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1)} of ${items.length}`
+                : "No item selected"}
+            </span>
+          </div>
+      <section className="list detail-list" aria-label="Focused review detail">
+        {!activeItem && (
           <div className="empty">
-            Select something useful on a page, then click <strong>Collect selection</strong>.
+            Choose an item from the queue to review it.
           </div>
         )}
 
-        {items.map((item) => {
+        {items.filter((item) => item.lexicalUnit.id === activeId).map((item) => {
           const unit = item.lexicalUnit;
           const editing = editingId === unit.id && editDraft !== null;
           const active = activeId === unit.id;
@@ -1767,7 +1849,7 @@ function App(): React.ReactElement {
 
           return (
             <article
-              className="card"
+              className="card detail-card"
               key={unit.id}
               data-card-id={unit.id}
               data-active={active ? "true" : "false"}
@@ -2000,6 +2082,8 @@ function App(): React.ReactElement {
           );
         })}
       </section>
+        </>
+      )}
     </main>
   );
 }
