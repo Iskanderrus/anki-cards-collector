@@ -111,15 +111,17 @@ export function validateMappedProfile(
   return result.normalized;
 }
 
-function utf8Hex(value: string): string {
-  return [...new TextEncoder().encode(value)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+function exactStringHex(value: string): string {
+  let encoded = "";
+  for (let index = 0; index < value.length; index += 1) {
+    encoded += value.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return encoded;
 }
 
 export function collectorIdentityTag(lexicalUnitId: string): string {
   if (!lexicalUnitId) throw new Error("Collector lexical-unit identity cannot be empty.");
-  return `collector::id::${utf8Hex(lexicalUnitId)}`;
+  return `collector::id::${exactStringHex(lexicalUnitId)}`;
 }
 
 export function collectorIdentityQuery(lexicalUnitId: string): string {
