@@ -2000,6 +2000,10 @@ function App(): React.ReactElement {
             binding?.ankiNoteId !== undefined
             && boundProfile?.mode === "mapped-user-model"
             && !mappedProfileIsConfigured(boundProfile);
+          const configuredMappedNote =
+            binding?.ankiNoteId !== undefined
+            && boundProfile?.mode === "mapped-user-model"
+            && mappedProfileIsConfigured(boundProfile);
           const reconciliationPending = binding?.state === "reserved";
           const currentDeckName = route?.profile.deckName ?? binding?.deckName ?? "";
           const pendingMoveDeckName = pendingMoveDecks[unit.id] ?? currentDeckName;
@@ -2164,7 +2168,11 @@ function App(): React.ReactElement {
                       </div>
                     ) : legacyCustomNote ? (
                       <div className="legacy-note-warning" role="status">
-                        This existing Anki card uses a custom note type. Collector will leave it unchanged for now.
+                        This existing Anki card uses a custom note type without a confirmed field mapping. Collector will leave it unchanged.
+                      </div>
+                    ) : configuredMappedNote ? (
+                      <div className="setting-help mapped-note-destination" role="status">
+                        Existing note type: {boundProfile.modelName}. Collector keeps this mapped note on its pinned deck and updates only the confirmed fields.
                       </div>
                     ) : currentCatalogSnapshot() ? (
                       <details className="destination-change">
