@@ -129,6 +129,11 @@ export function collectorIdentityQuery(lexicalUnitId: string): string {
   return "tag:re:^" + collectorIdentityTag(lexicalUnitId) + "$";
 }
 
+export interface MappedTemplateHtml {
+  Front: string;
+  Back: string;
+}
+
 export function validateMappedQuestionFields(
   profile: ExportProfile,
   fieldsOnTemplates: Record<string, [string[], string[]]>,
@@ -157,6 +162,23 @@ export function validateMappedQuestionFields(
   if (!questionFields.has(promptField)) {
     throw new Error(
       `Mapped Prompt field "${promptField}" is not used on the question side of any card template.`,
+    );
+  }
+}
+
+export function validateMappedTemplateCompatibility(
+  profile: ExportProfile,
+  fieldsOnTemplates: Record<string, [string[], string[]]>,
+  templates: Record<string, MappedTemplateHtml>,
+): void {
+  validateMappedQuestionFields(profile, fieldsOnTemplates);
+
+  const usesCloze = Object.values(templates).some(
+    (template) => /\{\{\s*cloze\s*:/i.test(`${template.Front}\n${template.Back}`),
+  );
+  if (usesCloze) {
+    throw new Error(
+      `Anki note type "${profile.modelName}" uses cloze templates. Mapped cloze export is not supported yet; choose a non-cloze note type.`,
     );
   }
 }

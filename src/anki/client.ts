@@ -7,7 +7,7 @@ import {
   mappedAnkiFields,
   mappedSemanticValues,
   validateMappedProfile,
-  validateMappedQuestionFields,
+  validateMappedTemplateCompatibility,
 } from "./mapping";
 
 interface AnkiResponse<T> {
@@ -53,12 +53,6 @@ const LEGACY_BACK = "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</
 const POLICY_FRONT = "{{Prompt}}";
 const POLICY_BACK = "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>";
 const COLLECTOR_CSS = ".card { font-family: sans-serif; font-size: 22px; text-align: left; } .answer { margin-top: 16px; font-weight: 650; } .context { margin-top: 16px; font-size: 16px; opacity: .78; } .meta { margin-top: 16px; font-size: 12px; opacity: .58; }";
-
-function usesClozeTemplate(templates: AnkiTemplates): boolean {
-  return Object.values(templates).some(
-    (template) => /\{\{\s*cloze\s*:/i.test(`${template.Front}\n${template.Back}`),
-  );
-}
 
 export class AnkiClient {
   constructor(
@@ -166,16 +160,10 @@ export class AnkiClient {
         "modelFieldsOnTemplates",
         { modelName: profile.modelName },
       );
-      validateMappedQuestionFields(profile, fieldsOnTemplates);
-
       const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
         modelName: profile.modelName,
       });
-      if (usesClozeTemplate(templates)) {
-        throw new Error(
-          `Anki note type "${profile.modelName}" uses cloze templates. Mapped cloze export is not supported yet; choose a non-cloze note type.`,
-        );
-      }
+      validateMappedTemplateCompatibility(profile, fieldsOnTemplates, templates);
       return;
     }
 

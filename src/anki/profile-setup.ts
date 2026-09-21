@@ -10,6 +10,7 @@ import {
   COLLECTOR_SEMANTIC_FIELDS,
   normalizeFieldMapping,
   validateFieldMapping,
+  validateMappedTemplateCompatibility,
 } from "./mapping";
 
 export const COMMON_PROFILE_LANGUAGES = [
@@ -111,7 +112,29 @@ export function validateMappedProfileAgainstLive(
     errors.push("Live note-type inspection does not match the saved model ID.");
   }
 
-  errors.push(...validateFieldMapping(profile.fieldMapping, detail.fields).errors);
+  const fieldValidation = validateFieldMapping(profile.fieldMapping, detail.fields);
+  errors.push(...fieldValidation.errors);
+
+  if (fieldValidation.valid) {
+    const fieldsOnTemplates = Object.fromEntries(
+      detail.templates.map((template) => [
+        template.name,
+        [[...template.frontFields], [...template.backFields]] as [string[], string[]],
+      ]),
+    );
+    const templates = Object.fromEntries(
+      detail.templates.map((template) => [
+        template.name,
+        { Front: template.front, Back: template.back },
+      ]),
+    );
+    try {
+      validateMappedTemplateCompatibility(profile, fieldsOnTemplates, templates);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Mapped note-type compatibility validation failed.");
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }
 

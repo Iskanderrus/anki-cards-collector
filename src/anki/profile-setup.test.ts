@@ -33,7 +33,13 @@ const detail: AnkiModelDetail = {
   id: 11,
   name: "Hebrew Existing",
   fields: ["Hebrew", "Russian", "Example"],
-  templates: [],
+  templates: [{
+    name: "Recognition",
+    front: "{{Hebrew}}",
+    back: "{{FrontSide}}<hr>{{Russian}}",
+    frontFields: ["Hebrew"],
+    backFields: ["Hebrew", "Russian"],
+  }],
   css: "",
   refreshedAt: "2026-09-21T18:00:00Z",
 };
@@ -88,6 +94,28 @@ describe("guided profile setup domain", () => {
     });
     expect(validation.valid).toBe(false);
     expect(validation.errors.join(" ")).toContain('Mapped Anki field "Russian"');
+  });
+
+  it("reuses ACCP-014 question-side compatibility and cloze rejection before Save", () => {
+    const backOnly = validateMappedProfileAgainstLive(
+      { ...profile, fieldMapping: { Prompt: "Russian", Answer: "Hebrew" } },
+      snapshot,
+      detail,
+    );
+    expect(backOnly.valid).toBe(false);
+    expect(backOnly.errors.join(" ")).toContain(
+      'Mapped Prompt field "Russian" is not used on the question side',
+    );
+
+    const cloze = validateMappedProfileAgainstLive(profile, snapshot, {
+      ...detail,
+      templates: [{
+        ...detail.templates[0]!,
+        front: "{{cloze:Hebrew}}",
+      }],
+    });
+    expect(cloze.valid).toBe(false);
+    expect(cloze.errors.join(" ")).toContain("Mapped cloze export is not supported yet");
   });
 
   it("distinguishes blocked identity changes from consequence-bearing remaps on used profiles", () => {
