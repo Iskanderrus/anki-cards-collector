@@ -85,7 +85,9 @@ export interface ExportBinding {
   state: ExportBindingState;
   ankiNoteId?: number;
   deckName?: string;
+  deckId?: string;
   modelName?: string;
+  modelId?: string;
   updatedAt: string;
 }
 
