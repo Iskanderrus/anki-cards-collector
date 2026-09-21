@@ -299,6 +299,7 @@ const server = createServer((request, response) => {
           <p id="first">Aunque llueva, voy a caminar porque quiero practicar español.</p>
           <p id="second">Context menu phrase appears in a separate sentence for capture.</p>
           <p id="repeat">Aunque llueva.</p>
+          <p id="long">Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear.</p>
         </main>
       </body>
     </html>`);
@@ -346,12 +347,38 @@ async function clickPanelButton(panel, name) {
   }, name);
 }
 
+async function ensureQueue(panel) {
+  if (await panel.locator(".queue").count() === 0) {
+    await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  }
+  await panel.locator(".queue").waitFor();
+}
+
+async function openSettings(panel) {
+  await panel.getByRole("button", { name: "Settings", exact: true }).click();
+  await panel.locator(".settings").waitFor();
+}
+
 async function termCount(panel) {
-  return panel.locator(".term").count();
+  await ensureQueue(panel);
+  return panel.locator(".queue-row .term").count();
+}
+
+async function queueRowForTerm(panel, term) {
+  await ensureQueue(panel);
+  return panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: term }),
+  });
 }
 
 async function cardForTerm(panel, term) {
-  return panel.locator(".card").filter({ has: panel.locator(".term", { hasText: term }) });
+  const row = await queueRowForTerm(panel, term);
+  await row.click();
+  const card = panel.locator(".detail-card").filter({
+    has: panel.locator(".term", { hasText: term }),
+  });
+  await card.waitFor();
+  return card;
 }
 
 async function stopExtensionServiceWorker(context, page, extensionId) {
@@ -401,12 +428,18 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
 
-  await panel.locator(".term", { hasText: "Aunque llueva" }).waitFor();
+  await panel.locator(".queue-row .term", { hasText: "Aunque llueva" }).waitFor();
   assert.equal(await termCount(panel), 1, "Explicit capture should add one lexical unit.");
+  const firstQueueRowAfterCapture = await queueRowForTerm(panel, "Aunque llueva");
   assert.match(
-    await panel.locator(".context").first().innerText(),
+    await firstQueueRowAfterCapture.locator(".queue-context").innerText(),
     /Aunque llueva, voy a caminar/,
-    "Captured item should keep visible page context.",
+    "Compact queue should retain a short preview of the selected visible context.",
+  );
+  assert.equal(
+    await panel.locator(".learning-proposal").count(),
+    0,
+    "Queue view must not render full proposal detail for every item.",
   );
 
   // The side panel must refresh via DATA_CHANGED; no page reload happens above.
@@ -442,24 +475,26 @@ try {
     tabId,
   );
   assert.equal(contextMenuResult?.ok, true, contextMenuResult?.error);
-  await panel.locator(".term", { hasText: "Context menu phrase" }).waitFor();
+  await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
 
   // Keyboard review: the first captured item remains active even though the newer item sorts above it.
   await panel.bringToFront();
-  const firstCard = await cardForTerm(panel, "Aunque llueva");
-  await firstCard.focus();
-  assert.equal(await firstCard.getAttribute("data-active"), "true");
+  const firstRow = await queueRowForTerm(panel, "Aunque llueva");
+  await firstRow.focus();
+  assert.equal(await firstRow.getAttribute("data-active"), "true");
 
   await panel.keyboard.press("k");
-  const secondCard = await cardForTerm(panel, "Context menu phrase");
-  await secondCard.waitFor();
-  assert.equal(await secondCard.getAttribute("data-active"), "true", "K should move to the previous visible card.");
+  const secondRow = await queueRowForTerm(panel, "Context menu phrase");
+  assert.equal(await secondRow.getAttribute("data-active"), "true", "K should move to the previous visible row.");
 
   await panel.keyboard.press("r");
-  await secondCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await secondRow.locator(".pill", { hasText: "ready" }).waitFor();
 
   await panel.keyboard.press("e");
+  const secondCard = panel.locator(".detail-card").filter({
+    has: panel.locator(".term", { hasText: "Context menu phrase" }),
+  });
   await secondCard.locator(".editor").waitFor();
   const noteField = secondCard.locator("textarea").last();
   await noteField.focus();
@@ -472,11 +507,14 @@ try {
   await secondCard.getByRole("button", { name: "Cancel" }).click();
 
   await secondCard.focus();
+  await panel.keyboard.press("b");
+  await firstRow.waitFor();
+  await secondRow.focus();
   await panel.keyboard.press("ArrowDown");
   assert.equal(
-    await firstCard.getAttribute("data-active"),
+    await firstRow.getAttribute("data-active"),
     "true",
-    "ArrowDown should move to the next visible card.",
+    "ArrowDown should move to the next visible row.",
   );
 
   // Repeated evidence must enrich the existing lexical unit, not create another study target.
@@ -484,8 +522,9 @@ try {
   await selectText(contentPage, "#repeat", "Aunque llueva");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
-  await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
   assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
+  const firstCard = await cardForTerm(panel, "Aunque llueva");
+  await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
   assert.match(
     await firstCard.locator(".context").innerText(),
     /Aunque llueva, voy a caminar porque quiero practicar español\./,
@@ -496,17 +535,21 @@ try {
     /Using occurrence 1 of 2/,
     "Review should explain which occurrence drives the proposal.",
   );
+  assert.match(
+    await firstCard.locator(".other-occurrences").innerText(),
+    /Other occurrences \(1\)/,
+    "Focused detail should expose non-selected occurrences through progressive disclosure.",
+  );
 
   // Duolingo visible backfill is explicitly activated and remains staged.
-  await panel.locator(".settings").evaluate((details) => {
-    if (details instanceof HTMLDetailsElement) details.open = true;
-  });
+  await openSettings(panel);
   const languageInput = panel.getByPlaceholder("es, sr, he…");
   await languageInput.fill("he");
   await panel.waitForFunction(async () => {
     const stored = await chrome.storage.local.get("collectorSettings");
     return stored.collectorSettings?.defaultLanguage === "he";
   });
+  await ensureQueue(panel);
 
   const duolingoPage = await context.newPage();
   await duolingoPage.goto(`${fixtureUrl}duolingo`);
@@ -846,9 +889,7 @@ try {
   // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
   // Internal export profiles remain an implementation detail.
   await panel.bringToFront();
-  await panel.locator(".settings").evaluate((details) => {
-    if (details instanceof HTMLDetailsElement) details.open = true;
-  });
+  await openSettings(panel);
   await clickPanelButton(panel, "Refresh from Anki");
   await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
 
