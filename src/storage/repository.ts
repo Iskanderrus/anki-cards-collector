@@ -461,7 +461,11 @@ export class CaptureRepository {
       .equals(current.id)
       .count();
 
-    if (current.contentKey === contentKey) {
+    if (
+      current.contentKey === contentKey
+      && current.canonicalText === canonicalText
+      && current.language === language
+    ) {
       return {
         kind: "unchanged",
         currentId: current.id,
@@ -475,7 +479,9 @@ export class CaptureRepository {
       };
     }
 
-    const collision = await this.database.lexicalUnits
+    const collision = current.contentKey === contentKey
+      ? undefined
+      : await this.database.lexicalUnits
       .where("contentKey")
       .equals(contentKey)
       .first();
