@@ -1817,7 +1817,7 @@ function App(): React.ReactElement {
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = proposeLearningCard(item);
-          const selectedOccurrence = proposal.occurrenceSelection?.occurrence;
+          const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
           const boundProfile = binding
