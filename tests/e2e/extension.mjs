@@ -28,6 +28,13 @@ assert.ok(
 
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
+
+function collectorIdentityTagForE2e(id) {
+  const bytes = new TextEncoder().encode(id);
+  return "collector::id::" + [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 const ankiDecks = new Map([
   ["Hebrew RU", 2],
   ["Serbian RU", 3],
@@ -111,6 +118,9 @@ const ankiServer = createServer(async (request, response) => {
       break;
     case "findNotes":
       result = [];
+      break;
+    case "canAddNotes":
+      result = (params.notes ?? []).map(() => true);
       break;
     case "addNote":
       nextAnkiNoteId += 1;
@@ -1162,10 +1172,10 @@ try {
     "Mapped export must write only explicitly configured user-owned fields.",
   );
   assert.equal(mappedAdds[0].params.note.options.allowDuplicate, true);
+  const mappedCardId = await mappedCard.getAttribute("data-card-id");
+  assert.ok(mappedCardId, "Mapped card should expose its Collector id.");
   assert.ok(
-    mappedAdds[0].params.note.tags.includes("collector::id::" + (
-      await mappedCard.getAttribute("data-card-id")
-    )),
+    mappedAdds[0].params.note.tags.includes(collectorIdentityTagForE2e(mappedCardId)),
     "Mapped export must carry the stable reserved Collector identity tag.",
   );
   assert.equal(
