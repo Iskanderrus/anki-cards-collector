@@ -112,7 +112,8 @@ Implemented on `accp-014-existing-note-type-mapping`:
 - `ExportProfile` can persist an explicit semantic-field mapping for a user-owned Anki note type;
 - mapping normalization/validation requires Prompt + Answer, rejects duplicate target fields, and revalidates configured targets against live `modelFieldNames`;
 - configured mapped profiles are valid routing destinations while incomplete legacy mapped profiles remain preserved but are not selected for new unbound exports;
-- user-owned model setup is read-only: Collector checks deck/model/fields but does not call model creation, field-add, template update, or styling update actions;
+- user-owned model setup is read-only: Collector checks live deck/model IDs plus fields but does not call model creation, field-add, template update, or styling update actions;
+- saved deck/model IDs are revalidated before mapped writes when available, preventing a same-name replacement object from silently receiving Collector data;
 - mapped note creation writes only configured fields plus Collector-owned tags;
 - mapped note updates write only configured fields and add the reserved `collector::id::<lexicalUnitId>` identity tag;
 - the identity tag is established before mapped field updates so an interrupted update can be retried safely;
