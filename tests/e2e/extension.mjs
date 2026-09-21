@@ -1188,6 +1188,16 @@ try {
     0,
     "Configured mapped notes must not be treated as legacy custom cards.",
   );
+  assert.match(
+    await exportedMappedCard.locator(".mapped-note-destination").innerText(),
+    /Existing note type:\s*Hebrew Existing/,
+    "Mapped-note detail should identify the pinned existing user note type.",
+  );
+  assert.equal(
+    await exportedMappedCard.getByText("Move to another deck…", { exact: true }).count(),
+    0,
+    "Mapped notes must not offer the managed-model deck move control.",
+  );
 
   // ACCP-003: a canonical edit that would merge independently exported units is
   // blocked before any corpus mutation.
