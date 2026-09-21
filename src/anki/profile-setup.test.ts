@@ -4,6 +4,7 @@ import type { AnkiCatalogSnapshot, AnkiModelDetail } from "./catalog";
 import {
   assessUsedMappedProfileEdit,
   buildMappedPayloadPreview,
+  isGuidedLanguageCode,
   profileLanguageFromSavedState,
   validateMappedProfileAgainstLive,
 } from "./profile-setup";
@@ -38,6 +39,14 @@ const detail: AnkiModelDetail = {
 };
 
 describe("guided profile setup domain", () => {
+  it("accepts common BCP-47-like custom language tags without constraining legacy migration", () => {
+    expect(isGuidedLanguageCode("es")).toBe(true);
+    expect(isGuidedLanguageCode("es-UY")).toBe(true);
+    expect(isGuidedLanguageCode("zh-Hant")).toBe(true);
+    expect(isGuidedLanguageCode("Spanish")).toBe(false);
+    expect(isGuidedLanguageCode("")).toBe(false);
+  });
+
   it("keeps profile language first-class while allowing a legacy single-route fallback", () => {
     expect(profileLanguageFromSavedState(profile, [])).toBe("he");
     expect(profileLanguageFromSavedState(
