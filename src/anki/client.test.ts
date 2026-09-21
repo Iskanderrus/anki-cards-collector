@@ -610,7 +610,7 @@ describe("AnkiClient", () => {
     ]);
     expect(requests[1]?.params).toEqual({
       notes: [4242],
-      tags: "collector::id::756e69742d31",
+      tags: "collector::id::0075006e00690074002d0031",
     });
     expect(requests[2]?.params).toEqual({
       note: {
@@ -661,7 +661,7 @@ describe("AnkiClient", () => {
       "updateNoteFields",
     ]);
     expect(requests[1]?.params).toEqual({
-      query: "tag:re:^collector::id::756e69742d31$",
+      query: "tag:re:^collector::id::0075006e00690074002d0031$",
     });
   });
 
@@ -702,7 +702,7 @@ describe("AnkiClient", () => {
         tags: [
           "anki-cards-collector",
           "collector::context-production",
-          "collector::id::756e69742d31",
+          "collector::id::0075006e00690074002d0031",
         ],
       },
     });
@@ -812,7 +812,7 @@ describe("AnkiClient", () => {
       "updateNoteFields",
     ]);
     expect(requests[0]?.params).toEqual({
-      query: "tag:re:^collector::id::756e69742d31$",
+      query: "tag:re:^collector::id::0075006e00690074002d0031$",
     });
   });
 
@@ -983,7 +983,7 @@ describe("AnkiClient", () => {
         deckName: "Hebrew RU",
         modelName: "Hebrew Existing",
         options: { allowDuplicate: true },
-        tags: expect.arrayContaining(["collector::id::756e69742d31"]),
+        tags: expect.arrayContaining(["collector::id::0075006e00690074002d0031"]),
       })],
     });
   });
