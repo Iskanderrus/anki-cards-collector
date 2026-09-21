@@ -1393,8 +1393,11 @@ function App(): React.ReactElement {
       )}
 
       {view === "settings" && (
-      <details className="settings" open>
-        <summary>Settings & Anki</summary>
+      <section className="settings settings-view" aria-labelledby="settings-title">
+        <div className="settings-view-head">
+          <h2 id="settings-title">Settings & Anki</h2>
+          <button className="ghost" type="button" onClick={showQueue}>Back to queue</button>
+        </div>
         <div className="settings-grid">
           <label>
             Capture language
@@ -1788,7 +1791,7 @@ function App(): React.ReactElement {
             </div>
           </details>
         </div>
-      </details>
+      </section>
       )}
 
       {view === "detail" && (
@@ -2023,10 +2026,13 @@ function App(): React.ReactElement {
                       <span>Answer</span>
                       <div>{proposal.answer || "—"}</div>
                     </div>
-                    <p className="proposal-why"><strong>Why:</strong> {proposal.reason}</p>
-                    {proposal.warning && (
-                      <div className="proposal-warning" role="status">{proposal.warning}</div>
-                    )}
+                    <details className="proposal-explanation">
+                      <summary>Why this card?</summary>
+                      <p className="proposal-why">{proposal.reason}</p>
+                      {proposal.warning && (
+                        <div className="proposal-warning" role="status">{proposal.warning}</div>
+                      )}
+                    </details>
                   </div>
 
                   {exportOutcome?.kind === "failed" && (
