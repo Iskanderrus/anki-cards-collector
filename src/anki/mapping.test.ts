@@ -107,8 +107,12 @@ describe("mapped user-model field mapping", () => {
     });
   });
 
-  it("uses a stable reserved identity tag without requiring a model field", () => {
+  it("uses a stable query-safe reserved identity tag without requiring a model field", () => {
     expect(collectorIdentityTag("unit-1")).toBe("collector::id::unit-1");
+    expect(collectorIdentityTag("legacy id/with spaces")).toBe(
+      "collector::id::legacy%20id%2Fwith%20spaces",
+    );
+    expect(() => collectorIdentityTag("")).toThrow("cannot be empty");
   });
 
   it("returns normalized mapping when a mapped profile is valid", () => {
