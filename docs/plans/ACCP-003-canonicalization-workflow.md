@@ -48,3 +48,18 @@ If the edit collides with another compatible lexical unit, Collector previews co
 - automatic lemma selection;
 - merge/split for distinct senses;
 - silent canonical changes.
+
+## Implementation status
+
+Implemented on `accp-003-canonicalization-workflow`:
+
+- grouped observed-form query with counts and preserved occurrence/context evidence;
+- read-only canonicalization preview with explicit `unchanged`, `rename`, `consolidate`, and `conflict` outcomes;
+- preview reuses the same reserved/export-binding/Anki-identity safety rules as the repository write path;
+- focused detail shows the canonical form separately from grouped observed forms;
+- canonical edits are previewed before Save, including occurrence totals, surviving Collector identity, preserved Anki note identity, and Inbox re-approval;
+- unsafe consolidation disables Save and explains the identity/destination conflict before any write;
+- successful edits/consolidations preserve observed evidence and keep the focused detail on the surviving lexical unit;
+- browser acceptance covers rename preview, safe consolidation, grouped evidence preservation, and exported-identity conflict blocking.
+
+Automatic lemma selection, distinct-sense merge/split, and silent canonical changes remain out of scope.
