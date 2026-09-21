@@ -221,4 +221,57 @@ describe("backup format", () => {
     });
   });
 
+
+  it("round-trips mapped user-owned field configuration in backup settings", () => {
+    const mappedSettings: CollectorSettings = {
+      defaultLanguage: "he",
+      sourceUrlMode: "sanitized",
+      exportProfiles: [
+        {
+          id: "he-existing",
+          name: "Hebrew existing",
+          deckName: "Hebrew RU",
+          modelName: "Hebrew Existing",
+          mode: "mapped-user-model",
+          fieldMapping: {
+            Prompt: "Hebrew",
+            Answer: "Russian",
+            Canonical: "Lemma",
+          },
+        },
+        {
+          id: "fallback",
+          name: "Fallback",
+          deckName: "Collector Inbox",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+      languageRoutes: [{ language: "he", profileId: "he-existing" }],
+      fallbackProfileId: "fallback",
+    };
+
+    const raw = serializeBackup(
+      [sampleItem()],
+      mappedSettings,
+      [],
+      "2026-09-21T12:00:00Z",
+    );
+    const parsed = parseBackup(raw);
+
+    expect(parsed.settings?.exportProfiles.find(
+      (profile) => profile.id === "he-existing",
+    )).toMatchObject({
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+        Canonical: "Lemma",
+      },
+    });
+    expect(parsed.settings?.languageRoutes).toEqual([
+      { language: "he", profileId: "he-existing" },
+    ]);
+  });
+
 });
