@@ -19,7 +19,8 @@ The following work is already part of the current baseline:
 - **ACCP-020** — opt-in Duolingo visible lesson backfill with MV3-safe staged/session lifecycle;
 - **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle;
 - **ACCP-017** — bounded read-only deck/model analysis with representative existing-card previews and real-Anki acceptance;
-- **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell.
+- **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell;
+- **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation.
 
 ---
 
@@ -39,9 +40,9 @@ ACCP-017 is now baseline work alongside ACCP-013 and ACCP-016.
 
 The compact queue + focused detail/settings shell is now baseline UI.
 
-### ACCP-003 — canonicalization workflow
+### ACCP-003 — canonicalization workflow — completed
 
-Depends on completed ACCP-002 and should target the ACCP-011 detail view.
+Canonical/observed review, rename/consolidation preview, and identity-safe consolidation are now baseline behavior.
 
 ---
 
@@ -103,17 +104,16 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-003 — canonicalization workflow
-2. ACCP-014 — existing note type mapping
-3. ACCP-018 — guided export-profile setup
-4. ACCP-021 — batch backfill review/import
-5. ACCP-012 — onboarding/user journey
-6. ACCP-004 — explicit merge/split
-7. ACCP-005 — learning-card policy v2
-8. ACCP-006 — morphology assistance
-9. ACCP-007 — learning-value decision
+1. ACCP-014 — existing note type mapping
+2. ACCP-018 — guided export-profile setup
+3. ACCP-021 — batch backfill review/import
+4. ACCP-012 — onboarding/user journey
+5. ACCP-004 — explicit merge/split
+6. ACCP-005 — learning-card policy v2
+7. ACCP-006 — morphology assistance
+8. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-017, and ACCP-011 are now baseline work. ACCP-003 is the next linear merge gate.
+ACCP-019, ACCP-020, ACCP-013, ACCP-017, ACCP-011, and ACCP-003 are now baseline work. ACCP-014 is the next linear merge gate and requires real-Anki acceptance before closure.
 
 ---
 
