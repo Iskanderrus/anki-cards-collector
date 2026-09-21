@@ -264,7 +264,7 @@ function App(): React.ReactElement {
     [],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredActiveId?: string) => {
     const [loadedItems, loadedBindings, loadedSettings] = await Promise.all([
       repository.list(),
       repository.listExportBindings(),
@@ -297,11 +297,17 @@ function App(): React.ReactElement {
     setExportBindings(Object.fromEntries(
       completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
     ));
-    setActiveId((current) => (
-      current && loadedItems.some((item) => item.lexicalUnit.id === current)
+    setActiveId((current) => {
+      if (
+        preferredActiveId
+        && loadedItems.some((item) => item.lexicalUnit.id === preferredActiveId)
+      ) {
+        return preferredActiveId;
+      }
+      return current && loadedItems.some((item) => item.lexicalUnit.id === current)
         ? current
-        : loadedItems[0]?.lexicalUnit.id ?? null
-    ));
+        : loadedItems[0]?.lexicalUnit.id ?? null;
+    });
     setSettings(loadedSettings);
     const fallback = loadedSettings.exportProfiles.find(
       (profile) => profile.id === loadedSettings.fallbackProfileId,
@@ -625,7 +631,7 @@ function App(): React.ReactElement {
         setNotice("Changes saved. The next Anki export will update the same Collector note.");
       }
       cancelEdit();
-      await load();
+      await load(updated.lexicalUnit.id);
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Could not save changes.");
     } finally {
