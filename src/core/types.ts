@@ -3,6 +3,19 @@ export type SourceKind = "web" | "duolingo";
 export type SourceUrlMode = "sanitized" | "query" | "none";
 export type ExportProfileMode = "collector-managed" | "mapped-user-model";
 
+export type CollectorSemanticField =
+  | "Prompt"
+  | "Answer"
+  | "Canonical"
+  | "Observed"
+  | "Context"
+  | "Note"
+  | "Source"
+  | "CardKind"
+  | "Why";
+
+export type ExportFieldMapping = Partial<Record<CollectorSemanticField, string>>;
+
 export const LEGACY_DEFAULT_PROFILE_ID = "collector-default";
 
 export interface CaptureSource {
@@ -56,6 +69,7 @@ export interface ExportProfile {
   modelName: string;
   modelId?: string;
   mode: ExportProfileMode;
+  fieldMapping?: ExportFieldMapping;
 }
 
 export interface LanguageRoute {
@@ -71,7 +85,9 @@ export interface ExportBinding {
   state: ExportBindingState;
   ankiNoteId?: number;
   deckName?: string;
+  deckId?: string;
   modelName?: string;
+  modelId?: string;
   updatedAt: string;
 }
 

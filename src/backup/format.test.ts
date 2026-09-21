@@ -221,4 +221,80 @@ describe("backup format", () => {
     });
   });
 
+
+  it("round-trips mapped user-owned field configuration in backup settings", () => {
+    const mappedSettings: CollectorSettings = {
+      defaultLanguage: "he",
+      sourceUrlMode: "sanitized",
+      exportProfiles: [
+        {
+          id: "he-existing",
+          name: "Hebrew existing",
+          deckName: "Hebrew RU",
+          deckId: "2",
+          modelName: "Hebrew Existing",
+          modelId: "11",
+          mode: "mapped-user-model",
+          fieldMapping: {
+            Prompt: "Hebrew",
+            Answer: "Russian",
+            Canonical: "Lemma",
+          },
+        },
+        {
+          id: "fallback",
+          name: "Fallback",
+          deckName: "Collector Inbox",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+      languageRoutes: [{ language: "he", profileId: "he-existing" }],
+      fallbackProfileId: "fallback",
+    };
+
+    const raw = serializeBackup(
+      [sampleItem()],
+      mappedSettings,
+      [],
+      "2026-09-21T12:00:00Z",
+    );
+    const parsed = parseBackup(raw);
+
+    expect(parsed.settings?.exportProfiles.find(
+      (profile) => profile.id === "he-existing",
+    )).toMatchObject({
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+        Canonical: "Lemma",
+      },
+    });
+    expect(parsed.settings?.languageRoutes).toEqual([
+      { language: "he", profileId: "he-existing" },
+    ]);
+  });
+
+
+  it("round-trips pinned Anki object IDs on export bindings", () => {
+    const current = binding();
+    current.deckId = "2";
+    current.modelId = "11";
+
+    const backup = parseBackup(serializeBackup(
+      [sampleItem()],
+      settings(),
+      [current],
+      "2026-09-21T12:30:00Z",
+    ));
+
+    expect(backup.exportBindings[0]).toMatchObject({
+      deckName: "Spanish RU",
+      deckId: "2",
+      modelName: "Collector Basic",
+      modelId: "11",
+    });
+  });
+
 });

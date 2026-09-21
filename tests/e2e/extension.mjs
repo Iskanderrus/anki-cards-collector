@@ -28,6 +28,14 @@ assert.ok(
 
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
+
+function collectorIdentityTagForE2e(id) {
+  let encoded = "";
+  for (let index = 0; index < id.length; index += 1) {
+    encoded += id.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return "collector::id::" + encoded;
+}
 const ankiDecks = new Map([
   ["Hebrew RU", 2],
   ["Serbian RU", 3],
@@ -111,6 +119,9 @@ const ankiServer = createServer(async (request, response) => {
       break;
     case "findNotes":
       result = [];
+      break;
+    case "canAddNotes":
+      result = (params.notes ?? []).map(() => true);
       break;
     case "addNote":
       nextAnkiNoteId += 1;
@@ -302,6 +313,7 @@ const server = createServer((request, response) => {
           <p id="long">Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear.</p>
           <p id="canonical-base">Quiero tener tiempo para estudiar.</p>
           <p id="canonical-observed">Tengo tiempo para estudiar hoy.</p>
+          <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
         </main>
       </body>
     </html>`);
@@ -550,6 +562,7 @@ try {
   );
   const observedEvidence = firstCard.locator(".canonical-evidence");
   await observedEvidence.getByText("Canonical form").waitFor();
+  await observedEvidence.getByText("Observed forms (1)", { exact: true }).waitFor();
   assert.match(
     await observedEvidence.innerText(),
     /Observed forms \(1\)/,
@@ -1092,8 +1105,116 @@ try {
     /Anki:\s*Serbian RU.*note\s+\d+/s,
   );
 
+  // ACCP-014: inject the low-level mapped profile that ACCP-018 will later
+  // configure through guided UI. A normal Ready-card send must now use the
+  // existing user-owned model without schema/template mutation.
+  await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const current = stored.collectorSettings;
+    if (!current) throw new Error("Collector settings are missing.");
+
+    const mappedProfile = {
+      id: "he-existing-e2e",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+
+    await chrome.storage.local.set({
+      collectorSettings: {
+        ...current,
+        exportProfiles: [
+          ...current.exportProfiles.filter((profile) => profile.id !== mappedProfile.id),
+          mappedProfile,
+        ],
+        languageRoutes: [
+          ...current.languageRoutes.filter((route) => route.language !== "he"),
+          { language: "he", profileId: mappedProfile.id },
+        ],
+      },
+    });
+  });
+  await panel.reload();
+  await panel.locator(".queue").waitFor();
+  await setCaptureLanguage(panel, "he");
+
+  await selectText(contentPage, "#mapped", "Mapped export phrase");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  const mappedCard = await cardForTerm(panel, "Mapped export phrase");
+  const mappedReady = mappedCard.getByRole("button", { name: "Ready" });
+  if (await mappedReady.count()) await mappedReady.click();
+  await mappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.match(
+    await mappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU/,
+  );
+
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
+
+  const mappedAdds = ankiRequests.filter(
+    (request) =>
+      request.action === "addNote"
+      && request.params?.note?.modelName === "Hebrew Existing",
+  );
+  assert.equal(mappedAdds.length, 1, "Configured mapped profile should export through the existing note type.");
+  assert.deepEqual(
+    Object.keys(mappedAdds[0].params.note.fields).sort(),
+    ["Hebrew", "Russian"],
+    "Mapped export must write only explicitly configured user-owned fields.",
+  );
+  assert.equal(mappedAdds[0].params.note.options.allowDuplicate, true);
+  const mappedCardId = await mappedCard.getAttribute("data-card-id");
+  assert.ok(mappedCardId, "Mapped card should expose its Collector id.");
+  assert.ok(
+    mappedAdds[0].params.note.tags.includes(collectorIdentityTagForE2e(mappedCardId)),
+    "Mapped export must carry the stable reserved Collector identity tag.",
+  );
+  assert.equal(
+    ankiRequests.some((request) => [
+      "createModel",
+      "modelFieldAdd",
+      "updateModelTemplates",
+      "updateModelStyling",
+    ].includes(request.action)),
+    false,
+    "Mapped export must never mutate the user-owned note type.",
+  );
+
+  const exportedMappedCard = await cardForTerm(panel, "Mapped export phrase");
+  assert.match(
+    await exportedMappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU.*note\s+\d+/s,
+  );
+  assert.equal(
+    await exportedMappedCard.locator(".legacy-note-warning").count(),
+    0,
+    "Configured mapped notes must not be treated as legacy custom cards.",
+  );
+  assert.match(
+    await exportedMappedCard.locator(".mapped-note-destination").innerText(),
+    /Existing note type:\s*Hebrew Existing/,
+    "Mapped-note detail should identify the pinned existing user note type.",
+  );
+  assert.equal(
+    await exportedMappedCard.getByText("Move to another deck…", { exact: true }).count(),
+    0,
+    "Mapped notes must not offer the managed-model deck move control.",
+  );
+
   // ACCP-003: a canonical edit that would merge independently exported units is
-  // blocked before any corpus mutation.
+  // blocked before any corpus mutation. Re-open the Serbian card because the
+  // mapped-export acceptance above intentionally focused a different detail.
+  secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
   const conflictEditor = secondRoutingCard.locator(".editor");
   await conflictEditor.getByLabel("Canonical form").fill("Aunque llueva");
@@ -1134,6 +1255,7 @@ try {
   });
 
   // Restricted browser pages cannot be scripted. The user gets a visible error and no data write.
+  const countBeforeRestrictedCapture = await termCount(panel);
   const restrictedPage = await context.newPage();
   await restrictedPage.goto("chrome://version/");
   await restrictedPage.bringToFront();
@@ -1149,7 +1271,11 @@ try {
     /(cannot access|chrome:\/\/|restricted|permission|cannot be scripted|extensions gallery)/i,
     `Unexpected restricted-page error: ${restrictedError}`,
   );
-  assert.equal(await termCount(panel), 2, "Restricted-page failure must not add data.");
+  assert.equal(
+    await termCount(panel),
+    countBeforeRestrictedCapture,
+    "Restricted-page failure must not add data.",
+  );
 
   // ACCP-011: long study targets stay compact and scannable instead of expanding
   // the queue into repeated full-card blocks.

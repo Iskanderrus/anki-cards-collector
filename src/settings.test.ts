@@ -270,4 +270,159 @@ describe("settings migration", () => {
     })).toThrow("unsupported ownership mode");
   });
 
+
+  it("preserves a fully configured mapped profile as a valid language route", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "he",
+      sourceUrlMode: "sanitized",
+      exportProfiles: [
+        {
+          id: "he-existing",
+          name: "Hebrew existing",
+          deckName: "Hebrew RU",
+          deckId: "2",
+          modelName: "Hebrew Existing",
+          modelId: "11",
+          mode: "mapped-user-model",
+          fieldMapping: {
+            Prompt: "Hebrew",
+            Answer: "Russian",
+            Canonical: "Lemma",
+          },
+        },
+        {
+          id: "fallback",
+          name: "Fallback",
+          deckName: "Collector Inbox",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+      languageRoutes: [{ language: "he", profileId: "he-existing" }],
+      fallbackProfileId: "fallback",
+    });
+
+    expect(settings.languageRoutes).toEqual([
+      { language: "he", profileId: "he-existing" },
+    ]);
+    expect(settings.exportProfiles.find((profile) => profile.id === "he-existing")).toMatchObject({
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+        Canonical: "Lemma",
+      },
+    });
+  });
+
+  it("keeps an incomplete mapped profile for compatibility but repairs active routing to Collector Basic", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "he",
+      exportProfiles: [{
+        id: "legacy-mapped",
+        name: "Legacy mapped",
+        deckName: "Hebrew RU",
+        modelName: "Hebrew Existing",
+        mode: "mapped-user-model",
+        fieldMapping: { Prompt: "Hebrew" },
+      }],
+      languageRoutes: [{ language: "he", profileId: "legacy-mapped" }],
+      fallbackProfileId: "legacy-mapped",
+    });
+
+    const legacy = settings.exportProfiles.find((profile) => profile.id === "legacy-mapped");
+    const managed = settings.exportProfiles.find((profile) => profile.mode === "collector-managed");
+
+    expect(legacy).toMatchObject({
+      mode: "mapped-user-model",
+      fieldMapping: { Prompt: "Hebrew" },
+    });
+    expect(managed).toMatchObject({
+      deckName: "Hebrew RU",
+      modelName: "Collector Basic",
+    });
+    expect(settings.fallbackProfileId).toBe(managed?.id);
+    expect(settings.languageRoutes).toEqual([
+      { language: "he", profileId: managed?.id },
+    ]);
+  });
+
+  it("treats different mapped field configurations as restore conflicts", () => {
+    const current = migrateSettings({
+      exportProfiles: [{
+        id: "he-existing",
+        name: "Hebrew existing",
+        deckName: "Hebrew RU",
+        deckId: "2",
+        modelName: "Hebrew Existing",
+        modelId: "11",
+        mode: "mapped-user-model",
+        fieldMapping: { Prompt: "Hebrew", Answer: "Russian" },
+      }],
+      languageRoutes: [],
+      fallbackProfileId: "he-existing",
+    });
+    const incoming = migrateSettings({
+      exportProfiles: [{
+        id: "he-existing",
+        name: "Hebrew existing",
+        deckName: "Hebrew RU",
+        deckId: "2",
+        modelName: "Hebrew Existing",
+        modelId: "11",
+        mode: "mapped-user-model",
+        fieldMapping: { Prompt: "Russian", Answer: "Hebrew" },
+      }],
+      languageRoutes: [],
+      fallbackProfileId: "he-existing",
+    });
+
+    const result = mergeSettingsForRestore(current, incoming, true);
+
+    expect(result.conflicts.join("\n")).toContain("Export destination conflict");
+  });
+
+
+  it("preserves a mapped profile with complete fields but missing live IDs while repairing active routing", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "he",
+      exportProfiles: [{
+        id: "legacy-name-only",
+        name: "Legacy name-only mapped",
+        deckName: "Hebrew RU",
+        modelName: "Hebrew Existing",
+        mode: "mapped-user-model",
+        fieldMapping: {
+          Prompt: "Hebrew",
+          Answer: "Russian",
+        },
+      }],
+      languageRoutes: [{ language: "he", profileId: "legacy-name-only" }],
+      fallbackProfileId: "legacy-name-only",
+    });
+
+    const preserved = settings.exportProfiles.find(
+      (profile) => profile.id === "legacy-name-only",
+    );
+    const managed = settings.exportProfiles.find(
+      (profile) => profile.mode === "collector-managed",
+    );
+
+    expect(preserved).toMatchObject({
+      mode: "mapped-user-model",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    });
+    expect(preserved?.deckId).toBeUndefined();
+    expect(preserved?.modelId).toBeUndefined();
+    expect(settings.fallbackProfileId).toBe(managed?.id);
+    expect(settings.languageRoutes).toEqual([
+      { language: "he", profileId: managed?.id },
+    ]);
+  });
+
 });

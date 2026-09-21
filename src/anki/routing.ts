@@ -5,6 +5,7 @@ import type {
   ExportProfile,
 } from "../core/types";
 import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
+import { validateMappedProfile } from "./mapping";
 
 export interface ResolvedExportRoute {
   profile: ExportProfile;
@@ -36,10 +37,16 @@ export function resolveExportRoute(
       );
     }
 
-    const profile = {
+    const profile: ExportProfile = {
       ...configuredProfile,
       deckName: binding.deckName ?? configuredProfile.deckName,
       modelName: binding.modelName ?? configuredProfile.modelName,
+      ...(configuredProfile.mode === "mapped-user-model"
+        ? {
+            deckId: binding.deckId,
+            modelId: binding.modelId,
+          }
+        : {}),
     };
 
     return { profile, source: "binding", binding };
@@ -75,12 +82,19 @@ export function assertDestinationChangeReconciled(
 }
 
 export function validateProfileForCurrentExport(profile: ExportProfile): void {
-  if (
-    profile.mode !== "collector-managed"
-    || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
-  ) {
-    throw new Error(
-      `This Anki destination uses a note type that Collector cannot update safely.`,
-    );
+  if (profile.mode === "collector-managed") {
+    if (profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME) {
+      throw new Error(
+        `Collector-managed export is only supported for "${COLLECTOR_MANAGED_MODEL_NAME}".`,
+      );
+    }
+    return;
   }
+
+  if (profile.mode === "mapped-user-model") {
+    validateMappedProfile(profile);
+    return;
+  }
+
+  throw new Error("This Anki destination has an unsupported ownership mode.");
 }

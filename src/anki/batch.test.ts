@@ -63,6 +63,7 @@ function client(overrides: Partial<AnkiExportClient> = {}): AnkiExportClient {
   return {
     ping: vi.fn(async () => 6),
     ensureDeckAndModel: vi.fn(async () => undefined),
+    preflight: vi.fn(async () => undefined),
     upsert: vi.fn(async (current) => current.lexicalUnit.id.length + 100),
     ...overrides,
   };
@@ -407,6 +408,183 @@ describe("exportBatch profile routing", () => {
       }),
     ]);
     expect(second).toMatchObject({ exported: 1, failed: 0, warnings: 0 });
+  });
+
+
+  it("routes a Ready item through an explicitly configured mapped user-owned profile", async () => {
+    const mapped: ExportProfile = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [mapped, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: mapped.id }],
+    };
+    const current = item("he-mapped", "שלום", "he");
+    const exportClient = client({ upsert: vi.fn(async () => 7070) });
+    const persisted: ExportBinding[] = [];
+
+    const report = await exportBatch(
+      [current],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async (binding) => {
+        persisted.push(binding);
+      },
+    );
+
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(mapped);
+    expect(exportClient.upsert).toHaveBeenCalledWith(current, mapped, undefined);
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        lexicalUnitId: "he-mapped",
+        profileId: "he-existing",
+        state: "reserved",
+        deckName: "Hebrew RU",
+        deckId: "2",
+        modelName: "Hebrew Existing",
+        modelId: "11",
+      }),
+      expect.objectContaining({
+        lexicalUnitId: "he-mapped",
+        profileId: "he-existing",
+        state: "exported",
+        ankiNoteId: 7070,
+        deckName: "Hebrew RU",
+        deckId: "2",
+        modelName: "Hebrew Existing",
+        modelId: "11",
+      }),
+    ]);
+    expect(report).toMatchObject({ exported: 1, failed: 0, warnings: 0 });
+  });
+
+  it("blocks an incomplete mapped profile before any Anki mutation", async () => {
+    const incomplete: ExportProfile = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model",
+      fieldMapping: { Prompt: "Hebrew" },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [incomplete, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: incomplete.id }],
+    };
+    const exportClient = client();
+
+    const report = await exportBatch(
+      [item("he-mapped", "שלום", "he")],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async () => undefined,
+    );
+
+    expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
+    expect(exportClient.upsert).not.toHaveBeenCalled();
+    expect(report.results[0]).toMatchObject({
+      kind: "failed",
+    });
+    expect((report.results[0] as { error: string }).error).toContain("Map Collector Answer");
+  });
+
+
+  it("fails mapped card preflight before persisting a reservation", async () => {
+    const mapped: ExportProfile = {
+      id: "he-existing-preflight",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [mapped, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: mapped.id }],
+    };
+    const persisted: ExportBinding[] = [];
+    const exportClient = client({
+      preflight: vi.fn(async () => {
+        throw new Error("Mapped export cannot produce an Anki card");
+      }),
+    });
+
+    const report = await exportBatch(
+      [item("he-preflight", "שלום", "he")],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async (binding) => {
+        persisted.push(binding);
+      },
+    );
+
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(mapped);
+    expect(exportClient.preflight).toHaveBeenCalledOnce();
+    expect(exportClient.upsert).not.toHaveBeenCalled();
+    expect(persisted).toEqual([]);
+    expect(report.results[0]).toMatchObject({
+      kind: "failed",
+      error: "Mapped export cannot produce an Anki card",
+    });
+  });
+
+  it("does not route a mapped profile that has fields but no confirmed live IDs", async () => {
+    const unconfirmed: ExportProfile = {
+      id: "he-name-only",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [unconfirmed, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: unconfirmed.id }],
+    };
+    const exportClient = client();
+
+    const report = await exportBatch(
+      [item("he-unconfirmed", "שלום", "he")],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async () => undefined,
+    );
+
+    expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
+    expect(exportClient.preflight).not.toHaveBeenCalled();
+    expect(exportClient.upsert).not.toHaveBeenCalled();
+    expect(report.results[0]).toMatchObject({ kind: "failed" });
+    expect((report.results[0] as { error: string }).error).toContain(
+      "requires confirmed live Anki deck and note-type IDs",
+    );
   });
 
 });

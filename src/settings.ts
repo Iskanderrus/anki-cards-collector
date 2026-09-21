@@ -5,6 +5,10 @@ import {
   type LanguageRoute,
   type SourceUrlMode,
 } from "./core/types";
+import {
+  mappedProfileIsConfigured,
+  normalizeFieldMapping,
+} from "./anki/mapping";
 
 interface LegacyCollectorSettings {
   defaultLanguage?: string;
@@ -116,6 +120,9 @@ function normalizedProfiles(value: unknown): ExportProfile[] {
     }
 
     ids.add(id);
+    const fieldMapping = profile.mode === "mapped-user-model"
+      ? normalizeFieldMapping(profile.fieldMapping)
+      : undefined;
     profiles.push({
       id,
       name,
@@ -124,6 +131,7 @@ function normalizedProfiles(value: unknown): ExportProfile[] {
       modelName,
       ...(profile.modelId ? { modelId: String(profile.modelId) } : {}),
       mode: profile.mode,
+      ...(fieldMapping && Object.keys(fieldMapping).length > 0 ? { fieldMapping } : {}),
     });
   }
 
@@ -160,9 +168,17 @@ function repairManagedRouting(settings: CollectorSettings): CollectorSettings {
     repaired = ensured.settings;
     return ensured.profile;
   };
+  const safeForNewExport = (source: ExportProfile | undefined): source is ExportProfile =>
+    Boolean(
+      source
+      && (
+        source.mode === "collector-managed"
+        || mappedProfileIsConfigured(source)
+      ),
+    );
 
   const fallback = profile(repaired.fallbackProfileId);
-  if (!fallback || fallback.mode !== "collector-managed") {
+  if (!safeForNewExport(fallback)) {
     const source = fallback ?? repaired.exportProfiles[0] ?? DEFAULT_PROFILE;
     const managedFallback = ensureFor(source);
     repaired = {
@@ -173,10 +189,11 @@ function repairManagedRouting(settings: CollectorSettings): CollectorSettings {
 
   repaired.languageRoutes = repaired.languageRoutes.map((route) => {
     const source = profile(route.profileId);
-    if (!source || source.mode === "collector-managed") return route;
+    if (safeForNewExport(source)) return route;
+    const fallbackSource = source ?? profile(repaired.fallbackProfileId) ?? DEFAULT_PROFILE;
     return {
       language: route.language,
-      profileId: ensureFor(source).id,
+      profileId: ensureFor(fallbackSource).id,
     };
   });
 
@@ -251,7 +268,8 @@ function sameProfile(left: ExportProfile, right: ExportProfile): boolean {
     && left.deckId === right.deckId
     && left.modelName === right.modelName
     && left.modelId === right.modelId
-    && left.mode === right.mode;
+    && left.mode === right.mode
+    && JSON.stringify(left.fieldMapping ?? {}) === JSON.stringify(right.fieldMapping ?? {});
 }
 
 function sameSettings(left: CollectorSettings, right: CollectorSettings): boolean {

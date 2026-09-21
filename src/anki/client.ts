@@ -1,6 +1,14 @@
 import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
+import {
+  collectorIdentityQuery,
+  collectorIdentityTag,
+  mappedAnkiFields,
+  mappedSemanticValues,
+  validateMappedProfile,
+  validateMappedQuestionFields,
+} from "./mapping";
 
 interface AnkiResponse<T> {
   result: T;
@@ -45,6 +53,12 @@ const LEGACY_BACK = "{{FrontSide}}<hr id=answer><div class=context>{{Context}}</
 const POLICY_FRONT = "{{Prompt}}";
 const POLICY_BACK = "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>";
 const COLLECTOR_CSS = ".card { font-family: sans-serif; font-size: 22px; text-align: left; } .answer { margin-top: 16px; font-weight: 650; } .context { margin-top: 16px; font-size: 16px; opacity: .78; } .meta { margin-top: 16px; font-size: 12px; opacity: .58; }";
+
+function usesClozeTemplate(templates: AnkiTemplates): boolean {
+  return Object.values(templates).some(
+    (template) => /\{\{\s*cloze\s*:/i.test(`${template.Front}\n${template.Back}`),
+  );
+}
 
 export class AnkiClient {
   constructor(
@@ -104,12 +118,65 @@ export class AnkiClient {
 
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
     if (
-      profile.mode !== "collector-managed"
-      || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
+      profile.mode === "collector-managed"
+      && profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
     ) {
       throw new Error(
         `Collector refuses to modify Anki note type "${profile.modelName}" because it is not the recognized Collector-managed model.`,
       );
+    }
+
+    if (profile.mode === "mapped-user-model") {
+      validateMappedProfile(profile);
+
+      const [decks, models] = await Promise.all([
+        this.deckNamesAndIds(),
+        this.modelNamesAndIds(),
+      ]);
+      const deckId = decks[profile.deckName];
+      if (deckId === undefined) {
+        throw new Error(
+          `Anki deck "${profile.deckName}" is not available. Refresh the live catalog and choose an existing deck.`,
+        );
+      }
+      if (String(deckId) !== profile.deckId) {
+        throw new Error(
+          `Saved Anki deck identity for "${profile.deckName}" no longer matches the live deck. Refresh and re-confirm this export profile before writing.`,
+        );
+      }
+
+      const modelId = models[profile.modelName];
+      if (modelId === undefined) {
+        throw new Error(
+          `Anki note type "${profile.modelName}" is not available. Refresh the live catalog and choose an existing note type.`,
+        );
+      }
+      if (String(modelId) !== profile.modelId) {
+        throw new Error(
+          `Saved Anki note-type identity for "${profile.modelName}" no longer matches the live model. Refresh and re-confirm this export profile before writing.`,
+        );
+      }
+
+      const fields = await this.invoke<string[]>("modelFieldNames", {
+        modelName: profile.modelName,
+      });
+      validateMappedProfile(profile, fields);
+
+      const fieldsOnTemplates = await this.invoke<RawAnkiFieldsOnTemplates>(
+        "modelFieldsOnTemplates",
+        { modelName: profile.modelName },
+      );
+      validateMappedQuestionFields(profile, fieldsOnTemplates);
+
+      const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
+        modelName: profile.modelName,
+      });
+      if (usesClozeTemplate(templates)) {
+        throw new Error(
+          `Anki note type "${profile.modelName}" uses cloze templates. Mapped cloze export is not supported yet; choose a non-cloze note type.`,
+        );
+      }
+      return;
     }
 
     const decks = await this.invoke<string[]>("deckNames");
@@ -170,6 +237,39 @@ export class AnkiClient {
     }
   }
 
+  async preflight(item: CollectedItem, profile: ExportProfile): Promise<void> {
+    if (profile.mode !== "mapped-user-model") return;
+
+    validateMappedProfile(profile);
+    const proposal = proposeLearningCard(item);
+    if (!proposal.recommended) {
+      throw new Error(proposal.warning ?? "This item needs review before export.");
+    }
+
+    const fields = mappedAnkiFields(item, profile);
+    const identityTag = collectorIdentityTag(item.lexicalUnit.id);
+    const candidate = {
+      deckName: profile.deckName,
+      modelName: profile.modelName,
+      fields,
+      options: { allowDuplicate: true },
+      tags: [
+        "anki-cards-collector",
+        `collector::${proposal.cardKind}`,
+        identityTag,
+      ],
+    };
+
+    const canAdd = await this.invoke<boolean[]>("canAddNotes", {
+      notes: [candidate],
+    });
+    if (canAdd.length !== 1 || canAdd[0] !== true) {
+      throw new Error(
+        `Mapped export for "${item.lexicalUnit.canonicalText}" cannot produce an Anki card with the confirmed field mapping. Review the note-type template and mapping before exporting.`,
+      );
+    }
+  }
+
   async upsert(
     item: CollectedItem,
     profile: ExportProfile,
@@ -180,29 +280,48 @@ export class AnkiClient {
       throw new Error(proposal.warning ?? "This item needs review before export.");
     }
 
-    const occurrence = proposal.occurrenceSelection?.occurrence;
-    const fields = {
-      CollectorID: item.lexicalUnit.id,
-      Prompt: proposal.prompt,
-      Answer: proposal.answer,
-      CardKind: proposal.cardKind,
-      Why: proposal.reason,
-      Canonical: item.lexicalUnit.canonicalText,
-      Observed: occurrence?.surfaceText ?? item.lexicalUnit.canonicalText,
-      Expression: item.lexicalUnit.canonicalText,
-      Context: occurrence?.context ?? "",
-      Note: item.lexicalUnit.note,
-      Source: occurrence?.source.url ?? "",
-    };
+    const semanticValues = mappedSemanticValues(item);
+    const fields = profile.mode === "mapped-user-model"
+      ? mappedAnkiFields(item, profile)
+      : {
+          CollectorID: item.lexicalUnit.id,
+          Prompt: semanticValues.Prompt,
+          Answer: semanticValues.Answer,
+          CardKind: semanticValues.CardKind,
+          Why: semanticValues.Why,
+          Canonical: semanticValues.Canonical,
+          Observed: semanticValues.Observed,
+          Expression: item.lexicalUnit.canonicalText,
+          Context: semanticValues.Context,
+          Note: semanticValues.Note,
+          Source: semanticValues.Source,
+        };
+    const identityTag = collectorIdentityTag(item.lexicalUnit.id);
 
     let noteId = existingNoteId ?? item.lexicalUnit.ankiNoteId;
 
     if (noteId !== undefined) {
       const storedNoteId = noteId;
       try {
-        const notes = await this.invoke<Array<{ noteId?: number }>>("notesInfo", { notes: [storedNoteId] });
-        const storedNoteStillExists = notes.some((note) => note.noteId === storedNoteId);
-        if (!storedNoteStillExists) noteId = undefined;
+        const notes = await this.invoke<Array<{ noteId?: number; modelName?: string }>>(
+          "notesInfo",
+          { notes: [storedNoteId] },
+        );
+        const storedNote = notes.find((note) => note.noteId === storedNoteId);
+        if (!storedNote) {
+          noteId = undefined;
+        } else if (profile.mode === "mapped-user-model") {
+          if (!storedNote.modelName) {
+            throw new Error(
+              `Pinned Anki note ${storedNoteId} did not report its note type; Collector will not update a user-owned note without verifying model identity.`,
+            );
+          }
+          if (storedNote.modelName !== profile.modelName) {
+            throw new Error(
+              `Pinned Anki note ${storedNoteId} uses note type "${storedNote.modelName}", not "${profile.modelName}".`,
+            );
+          }
+        }
       } catch (error) {
         if (!isMissingNoteError(error, storedNoteId)) throw error;
         noteId = undefined;
@@ -211,12 +330,51 @@ export class AnkiClient {
 
     if (noteId === undefined) {
       const found = await this.invoke<number[]>("findNotes", {
-        query: `CollectorID:${item.lexicalUnit.id}`,
+        query: profile.mode === "mapped-user-model"
+          ? collectorIdentityQuery(item.lexicalUnit.id)
+          : `CollectorID:${item.lexicalUnit.id}`,
       });
+      if (found.length > 1) {
+        throw new Error(
+          `Multiple Anki notes match Collector identity ${item.lexicalUnit.id}; resolve the duplicate identity before exporting.`,
+        );
+      }
       noteId = found[0];
+
+      if (noteId !== undefined && profile.mode === "mapped-user-model") {
+        const recovered = await this.invoke<Array<{ noteId?: number; modelName?: string }>>(
+          "notesInfo",
+          { notes: [noteId] },
+        );
+        const recoveredNote = recovered.find((note) => note.noteId === noteId);
+        if (!recoveredNote) {
+          throw new Error(
+            `Anki identity lookup returned note ${noteId}, but the note could not be inspected.`,
+          );
+        }
+        if (!recoveredNote.modelName) {
+          throw new Error(
+            `Recovered Anki note ${noteId} did not report its note type; Collector will not update it without verifying model identity.`,
+          );
+        }
+        if (recoveredNote.modelName !== profile.modelName) {
+          throw new Error(
+            `Collector identity tag belongs to note type "${recoveredNote.modelName}", not "${profile.modelName}".`,
+          );
+        }
+      }
     }
 
     if (noteId !== undefined) {
+      if (profile.mode === "mapped-user-model") {
+        // Establish the stable recovery identity before field mutation. If the
+        // subsequent update fails, a reserved local binding can safely retry by
+        // this tag without creating a duplicate note.
+        await this.invoke("addTags", {
+          notes: [noteId],
+          tags: identityTag,
+        });
+      }
       await this.invoke("updateNoteFields", {
         note: { id: noteId, fields },
       });
@@ -228,8 +386,15 @@ export class AnkiClient {
         deckName: profile.deckName,
         modelName: profile.modelName,
         fields,
-        options: { allowDuplicate: false },
-        tags: ["anki-cards-collector", `collector::${proposal.cardKind}`],
+        // Collector identity for user-owned models lives in the reserved
+        // tag, not necessarily in the model's first field. Allow equal prompt
+        // values there so unrelated notes do not block a valid Collector note.
+        options: { allowDuplicate: profile.mode === "mapped-user-model" },
+        tags: [
+          "anki-cards-collector",
+          `collector::${proposal.cardKind}`,
+          ...(profile.mode === "mapped-user-model" ? [identityTag] : []),
+        ],
       },
     });
   }

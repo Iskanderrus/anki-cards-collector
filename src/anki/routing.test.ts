@@ -7,6 +7,7 @@ import type {
 import {
   assertDestinationChangeReconciled,
   resolveExportRoute,
+  validateProfileForCurrentExport,
 } from "./routing";
 
 function item(language = "he"): CollectedItem {
@@ -133,6 +134,96 @@ describe("resolveExportRoute", () => {
     expect(() => assertDestinationChangeReconciled(binding)).toThrow(
       "Retry export before changing its destination",
     );
+  });
+
+
+  it("accepts a mapped user-owned profile only when required field mapping is explicit", () => {
+    const mapped = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model" as const,
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+
+    expect(() => validateProfileForCurrentExport(mapped)).not.toThrow();
+    expect(() => validateProfileForCurrentExport({
+      ...mapped,
+      fieldMapping: { Prompt: "Hebrew" },
+    })).toThrow("Map Collector Answer");
+  });
+
+  it("requires confirmed live IDs for mapped profiles", () => {
+    const mapped = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "mapped-user-model" as const,
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+
+    expect(() => validateProfileForCurrentExport(mapped)).toThrow(
+      "requires confirmed live Anki deck and note-type IDs",
+    );
+  });
+
+  it("uses mapped binding IDs instead of inheriting a reconfigured profile identity", () => {
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [{
+        id: "he-existing",
+        name: "Hebrew existing",
+        deckName: "Hebrew RU",
+        deckId: "999",
+        modelName: "Hebrew Existing",
+        modelId: "999",
+        mode: "mapped-user-model",
+        fieldMapping: {
+          Prompt: "Hebrew",
+          Answer: "Russian",
+        },
+      }],
+      languageRoutes: [],
+      fallbackProfileId: "he-existing",
+    };
+    const binding: ExportBinding = {
+      lexicalUnitId: "unit-1",
+      profileId: "he-existing",
+      state: "exported",
+      ankiNoteId: 4242,
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      updatedAt: "2026-09-20T00:00:00Z",
+    };
+
+    const route = resolveExportRoute(item(), mappedSettings, binding);
+
+    expect(route.profile).toMatchObject({
+      deckId: "2",
+      modelId: "11",
+    });
+  });
+
+  it("still refuses arbitrary note types marked as Collector-managed", () => {
+    expect(() => validateProfileForCurrentExport({
+      id: "unsafe",
+      name: "Unsafe",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "collector-managed",
+    })).toThrow("Collector-managed export is only supported");
   });
 
 });
