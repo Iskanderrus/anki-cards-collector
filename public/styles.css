@@ -784,7 +784,7 @@ summary:focus-visible {
   overflow-wrap: anywhere;
 }
 .payload-preview-row .untouched {
-  color: color-mix(in srgb, CanvasText 54%, transparent);
+  color: color-mix(in srgb, CanvasText 66%, transparent);
 }
 .guided-used-warning {
   display: grid;
