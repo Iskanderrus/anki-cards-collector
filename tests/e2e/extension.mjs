@@ -1677,7 +1677,14 @@ try {
 
   console.log("Browser extension capture, compact queue/detail, canonicalization, keyboard, accessibility, and permission checks passed.");
 } finally {
-  await context?.close();
+  await context?.close().catch(() => undefined);
+
+  // Failed browser assertions must still terminate the fixture deterministically.
+  // Explicitly close active HTTP connections before awaiting server shutdown so
+  // GitHub Actions exposes the real test failure instead of hanging until its
+  // outer job timeout.
+  server.closeAllConnections?.();
+  ankiServer.closeAllConnections?.();
   await Promise.all([
     new Promise((resolveClose) => server.close(resolveClose)),
     new Promise((resolveClose) => ankiServer.close(resolveClose)),
