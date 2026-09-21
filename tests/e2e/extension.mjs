@@ -373,6 +373,17 @@ const fixtureUrl = `http://127.0.0.1:${address.port}/`;
 
 const userDataDir = await mkdtemp(join(tmpdir(), "collector-e2e-"));
 let context;
+let e2eStage = "launch";
+const e2eWatchdog = setTimeout(() => {
+  console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
+  process.exit(1);
+}, 180000);
+e2eWatchdog.unref();
+
+function markE2eStage(stage) {
+  e2eStage = stage;
+  console.log(`E2E_STAGE=${stage}`);
+}
 
 async function selectText(page, selector, phrase) {
   await page.evaluate(({ selector: targetSelector, phrase: targetPhrase }) => {
@@ -512,6 +523,7 @@ async function stopExtensionServiceWorker(context, page, extensionId) {
 }
 
 try {
+  markE2eStage("launch-extension");
   context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
     colorScheme: "light",
@@ -559,6 +571,7 @@ try {
     "Side panel should refresh after background capture.",
   );
 
+  markE2eStage("baseline-capture-and-keyboard");
   // Empty selection should fail usefully and must not write another item.
   await contentPage.evaluate(() => window.getSelection()?.removeAllRanges());
   await contentPage.bringToFront();
@@ -668,6 +681,7 @@ try {
   );
   await firstCard.getByRole("button", { name: "Cancel" }).click();
 
+  markE2eStage("duolingo-visible-backfill");
   // Duolingo visible backfill is explicitly activated and remains staged.
   await setCaptureLanguage(panel, "he");
 
@@ -971,6 +985,7 @@ try {
     "Automatic session termination should add only the new unique session evidence.",
   );
 
+  markE2eStage("duolingo-matching-pairs");
   // Matching-pairs challenges often put keyboard shortcut numbers in an outer
   // language-marked wrapper. Only the clean leaf target text should be staged.
   const pairsPage = await context.newPage();
@@ -1022,6 +1037,7 @@ try {
     "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
+  markE2eStage("accp013-routing");
   // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
   // Internal export profiles remain an implementation detail.
   await panel.bringToFront();
@@ -1212,6 +1228,7 @@ try {
     /Anki:\s*Serbian RU.*note\s+\d+/s,
   );
 
+  markE2eStage("accp018-hebrew-guided-setup");
   // ACCP-018: configure the mapped Hebrew profile through the guided UI.
   await panel.bringToFront();
   await openSettings(panel);
@@ -1308,6 +1325,7 @@ try {
     storedHebrewGuided.profile.id,
   );
 
+  markE2eStage("accp018-reopen-offline-revalidation");
   // Reopen/edit loads the saved identity and mapping through fresh live evidence.
   await hebrewGuidedProfile.getByRole("button", { name: "Edit" }).click();
   const reopenedGuided = guidedProfiles.locator(".guided-profile-form");
@@ -1399,6 +1417,7 @@ try {
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
 
+  markE2eStage("accp018-hebrew-capture-export");
   // Deliberately set the legacy global fallback to Serbian. Active-profile language
   // must still make normal capture Hebrew without maintaining that global.
   await setCaptureLanguage(panel, "sr");
@@ -1465,6 +1484,7 @@ try {
   assert.equal(mappedUpdates.length, 1);
   assert.deepEqual(Object.keys(mappedUpdates[0].params.note.fields).sort(), ["Hebrew", "Russian"]);
 
+  markE2eStage("accp018-used-profile-edit-safety");
   // An already-used profile cannot change deck/model identity in place, while a
   // field remap requires a consequence acknowledgement.
   await openSettings(panel);
@@ -1503,6 +1523,7 @@ try {
   assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), false);
   await usedEdit.getByRole("button", { name: "Cancel" }).click();
 
+  markE2eStage("accp018-serbian-keyboard-setup");
   // Create a Serbian mapped profile using keyboard interaction only.
   await guidedProfiles.getByRole("button", { name: "New profile" }).focus();
   await panel.keyboard.press("Enter");
@@ -1571,6 +1592,7 @@ try {
     false,
   );
 
+  markE2eStage("accp018-serbian-capture-and-duolingo");
   // Duolingo visible scanning must use the same active Serbian profile language.
   await pairsPage.bringToFront();
   const profileDrivenScan = await sendPanelMessage(
@@ -1593,6 +1615,7 @@ try {
   );
   await contentPage.bringToFront();
 
+  markE2eStage("post-accp018-regression-suite");
   // ACCP-003: a canonical edit that would merge independently exported units is
   // blocked before any corpus mutation. Re-open the Serbian card because the
   // mapped-export acceptance above intentionally focused a different detail.
@@ -1737,8 +1760,10 @@ try {
     "Successful canonical consolidation should reduce two compatible units to one.",
   );
 
+  markE2eStage("complete");
   console.log("Browser extension capture, compact queue/detail, canonicalization, keyboard, accessibility, and permission checks passed.");
 } finally {
+  clearTimeout(e2eWatchdog);
   await context?.close().catch(() => undefined);
 
   // Failed browser assertions must still terminate the fixture deterministically.
