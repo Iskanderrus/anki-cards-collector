@@ -916,6 +916,7 @@ describe("AnkiClient", () => {
       "deckNamesAndIds",
       "modelNamesAndIds",
       "modelFieldNames",
+      "modelFieldsOnTemplates",
       "modelTemplates",
     ]);
     expect(actions).not.toContain("addNote");
