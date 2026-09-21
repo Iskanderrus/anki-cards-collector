@@ -1244,6 +1244,7 @@ try {
   });
 
   // Restricted browser pages cannot be scripted. The user gets a visible error and no data write.
+  const countBeforeRestrictedCapture = await termCount(panel);
   const restrictedPage = await context.newPage();
   await restrictedPage.goto("chrome://version/");
   await restrictedPage.bringToFront();
@@ -1259,7 +1260,11 @@ try {
     /(cannot access|chrome:\/\/|restricted|permission|cannot be scripted|extensions gallery)/i,
     `Unexpected restricted-page error: ${restrictedError}`,
   );
-  assert.equal(await termCount(panel), 2, "Restricted-page failure must not add data.");
+  assert.equal(
+    await termCount(panel),
+    countBeforeRestrictedCapture,
+    "Restricted-page failure must not add data.",
+  );
 
   // ACCP-011: long study targets stay compact and scannable instead of expanding
   // the queue into repeated full-card blocks.
