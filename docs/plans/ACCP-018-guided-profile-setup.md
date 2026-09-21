@@ -24,7 +24,13 @@ If Anki is unavailable:
 - explain that live validation/preview requires Anki Desktop + AnkiConnect;
 - do not erase configuration.
 
-### 2. Choose destination deck
+### 2. Choose language
+
+Language is stored on the export profile itself. Common languages use a guided label/code choice; an explicit custom code remains available for other languages.
+
+Legacy `defaultLanguage` is preserved as a fallback. Existing profiles are not assigned a language merely because a global language happened to be configured.
+
+### 3. Choose destination deck
 
 Populate from the live catalog.
 
@@ -37,7 +43,7 @@ Deck
   Spanish RU — Uruguay
 ```
 
-### 3. Inspect note types used in the deck
+### 4. Inspect note types used in the deck
 
 Use ACCP-017 analysis.
 
@@ -52,19 +58,19 @@ Used in this deck (sample)
 
 Percentages/counts are advisory only.
 
-### 4. Choose intended note type explicitly
+### 5. Choose intended note type explicitly
 
 The user confirms the model.
 
 Do not auto-select merely because one model dominates the sample.
 
-### 5. Show representative existing card
+### 6. Show representative existing card
 
 Display a sampled card's rendered front/back so the user can recognize the intended layout.
 
 Provide another sample when available.
 
-### 6. Configure field mapping
+### 7. Configure field mapping
 
 For a user-owned model:
 
@@ -78,13 +84,13 @@ Source                   -> Source
 
 Validation comes from ACCP-014.
 
-### 7. Preview outgoing payload
+### 8. Preview outgoing payload
 
 Show representative Collector values placed into the target fields.
 
 This preview is a data-placement preview, not a duplicate Anki renderer.
 
-### 8. Save profile and routing
+### 9. Save profile and routing
 
 Save:
 
@@ -123,3 +129,26 @@ Browser E2E:
 ## Manual acceptance
 
 Configure at least two real profiles, for example Hebrew and Serbian, using existing decks and note types, then export one item through each profile without changing either user-owned note type.
+
+
+## Migration and compatibility
+
+ACCP-018 is deliberately conservative:
+
+- existing lexical units keep their current language;
+- existing language routes are preserved unless the user explicitly replaces a route while saving a guided profile;
+- legacy `defaultLanguage` remains stored as a capture fallback;
+- old profiles are not assigned a first-class language from `defaultLanguage`;
+- name-only or otherwise incomplete mapped profiles remain preserved and continue to fail closed under ACCP-014 until live identity is reconfirmed;
+- Anki being offline never deletes or rewrites saved profile configuration.
+
+## Implementation decisions
+
+- `ExportProfile.language` is first-class for newly guided profiles.
+- `CollectorSettings.captureProfileId` selects the active profile whose language is used for ordinary capture.
+- if an older profile has no first-class language, exactly one existing language route may supply its capture language; ambiguous legacy routes do not;
+- guided mapped profiles persist live deck/model IDs, `collector-tag` identity strategy, field mapping, and the last successful live-validation time;
+- representative study content stays ephemeral in the UI and is never written into settings, backups, or diagnostics;
+- revalidation never rewrites IDs or mappings from same-name live objects;
+- for profiles with durable exported/reserved bindings, deck/model identity edits are blocked in place; a new profile must be created instead;
+- a field remap on an already-used profile requires explicit consequence acknowledgement because future updates will use the new mapping while existing Anki note content is not silently rewritten.
