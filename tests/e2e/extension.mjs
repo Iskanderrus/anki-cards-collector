@@ -1199,7 +1199,6 @@ try {
   assert.match(await payloadPreview.innerText(), /Russian\s+Answer: Example answer/);
   assert.match(await payloadPreview.innerText(), /Example\s+Untouched \/ omitted/);
 
-  const mutationsDuringGuidedSetupStart = ankiRequests.length;
   await saveGuided.click();
   await guidedForm.waitFor({ state: "detached" });
 
@@ -1434,13 +1433,6 @@ try {
   assert.equal(
     ankiRequests.some((request) => ["createModel", "modelFieldAdd", "updateModelTemplates", "updateModelStyling"].includes(request.action)),
     false,
-  );
-
-  const guidedSetupRequests = ankiRequests.slice(mutationsDuringGuidedSetupStart);
-  assert.equal(
-    guidedSetupRequests.some((request) => ["modelFieldAdd", "updateModelTemplates", "updateModelStyling"].includes(request.action)),
-    false,
-    "ACCP-018 must never mutate user-owned note-type fields/templates/CSS.",
   );
 
   // ACCP-003: a canonical edit that would merge independently exported units is
