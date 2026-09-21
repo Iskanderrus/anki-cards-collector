@@ -1395,8 +1395,23 @@ try {
 
   await usedEdit.getByLabel("Intended note type").selectOption("Hebrew Existing");
   await usedEdit.getByLabel("Map Collector Prompt").waitFor();
+
+  // ACCP-014 compatibility stays authoritative inside guided setup: mapping
+  // Prompt to a field that is absent from every question side remains blocked.
   await usedEdit.getByLabel("Map Collector Prompt").selectOption("Russian");
   await usedEdit.getByLabel("Map Collector Answer").selectOption("Hebrew");
+  await usedEdit.getByText(/not used on the question side/).waitFor();
+  assert.equal(
+    await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(),
+    true,
+    "Acknowledgement must never override an incompatible mapping.",
+  );
+
+  // A compatible remap of an optional semantic field still carries consequences
+  // for future updates to already-bound notes, so it requires acknowledgement.
+  await usedEdit.getByLabel("Map Collector Prompt").selectOption("Hebrew");
+  await usedEdit.getByLabel("Map Collector Answer").selectOption("Russian");
+  await usedEdit.getByLabel("Map Collector Context").selectOption("Example");
   await usedEdit.getByText(/future updates write/).waitFor();
   const remapConfirm = usedEdit.getByLabel(/I understand this remap affects future updates/);
   assert.equal(await remapConfirm.isChecked(), false);
