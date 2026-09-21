@@ -1199,6 +1199,15 @@ try {
   assert.match(await payloadPreview.innerText(), /Russian\s+Answer: Example answer/);
   assert.match(await payloadPreview.innerText(), /Example\s+Untouched \/ omitted/);
 
+  const guidedAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    guidedAccessibility.violations.length,
+    0,
+    "Guided profile accessibility violations:\n" + JSON.stringify(guidedAccessibility.violations, null, 2),
+  );
+
   await saveGuided.click();
   await guidedForm.waitFor({ state: "detached" });
 
@@ -1222,6 +1231,16 @@ try {
   assert.equal(storedHebrewGuided.profile.deckId, "2");
   assert.equal(storedHebrewGuided.profile.modelId, "11");
   assert.equal(storedHebrewGuided.profile.identityStrategy, "collector-tag");
+  assert.equal(
+    JSON.stringify(storedHebrewGuided.current).includes("שלום"),
+    false,
+    "Representative study content must not be persisted into settings.",
+  );
+  assert.equal(
+    JSON.stringify(storedHebrewGuided.current).includes("house"),
+    false,
+    "Alternate representative study content must not be persisted into settings.",
+  );
   assert.equal(storedHebrewGuided.current.captureProfileId, storedHebrewGuided.profile.id);
   assert.equal(
     storedHebrewGuided.current.languageRoutes.find((route) => route.language === "he")?.profileId,
