@@ -119,7 +119,7 @@ Implemented on `accp-014-existing-note-type-mapping`:
 - `modelFieldsOnTemplates` must confirm that the mapped Prompt field participates in at least one question side;
 - the actual mapped note is checked with AnkiConnect `canAddNotes` before ACCP-013 persists a durable reservation, so ordinary mapping/card-generation errors cannot create a reconciliation lock;
 - mapped note creation writes only configured fields plus Collector-owned tags;
-- mapped note updates write only configured fields and add a reserved Collector identity tag whose lexical-unit ID is UTF-8 hex encoded;
+- mapped note updates write only configured fields and add a reserved Collector identity tag whose lexical-unit ID is encoded as exact hex over JavaScript string code units;
 - stale recovery uses an anchored exact tag-regex query, so restored IDs containing Anki wildcard/search characters and child tags cannot alias another identity;
 - the identity tag is established before mapped field updates so an interrupted update can be retried safely;
 - stale local note IDs recover by the exact reserved identity tag, with duplicate-tag ambiguity and wrong-model recovery treated as blocking errors;
@@ -148,7 +148,7 @@ Before closing ACCP-014, run the manual real-Anki acceptance from this plan agai
 The deep review of head `35991a0d803d6d3825a8e27501f0de4a4fc8bae3` identified three blocking gaps. The implementation now closes them as follows:
 
 - **Confirmed Anki object identity:** mapped profiles require both `deckId` and `modelId` to become routable; bindings snapshot those IDs and restore/reconciliation/consolidation logic treats them as part of destination identity.
-- **Exact stale-note identity:** Collector hex-encodes arbitrary lexical-unit IDs into tag-safe text and searches with an anchored exact tag regex rather than ordinary hierarchical/wildcard tag matching.
+- **Exact stale-note identity:** Collector encodes arbitrary lexical-unit IDs injectively into hex-only tag-safe text and searches with an anchored exact tag regex rather than ordinary hierarchical/wildcard tag matching.
 - **Pre-reservation card compatibility:** live template field usage is checked and the actual mapped note is passed through non-mutating `canAddNotes` before a reservation is persisted.
 
 The remaining gate is still real-Anki manual acceptance; remediation does not waive that requirement.
