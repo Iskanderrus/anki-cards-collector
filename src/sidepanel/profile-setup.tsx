@@ -21,6 +21,7 @@ import {
   validateFieldMapping,
 } from "../anki/mapping";
 import {
+  COLLECTOR_MANAGED_MODEL_NAME,
   assignLanguageRoute,
   profileLanguage,
 } from "../settings";
@@ -186,6 +187,40 @@ export function GuidedProfileSetup({
       modelId: profile.modelId ?? "",
       fieldMapping: { ...(profile.fieldMapping ?? {}) },
     });
+
+    if (catalogKind !== "live" || !catalogSnapshot) return;
+    const deck = catalogSnapshot.decks.find((candidate) => candidate.name === profile.deckName);
+    const model = catalogSnapshot.models.find((candidate) => candidate.name === profile.modelName);
+    if (!deck || String(deck.id) !== profile.deckId || !model || String(model.id) !== profile.modelId) {
+      setProfileStatus((current) => ({
+        ...current,
+        [profile.id]: "Saved live identity no longer matches Anki. Revalidate before editing this profile.",
+      }));
+      return;
+    }
+
+    const id = ++requestId.current;
+    setAnalysisState({ kind: "loading", deckName: profile.deckName });
+    setModelState({ kind: "loading", modelName: profile.modelName });
+    void Promise.all([
+      deckAnalysisService.analyze(profile.deckName),
+      catalogService.inspectModel(profile.modelName),
+    ]).then(
+      ([analysis, inspected]) => {
+        if (requestId.current !== id) return;
+        setAnalysisState({ kind: "live", analysis });
+        setModelState(inspected);
+      },
+      (error: unknown) => {
+        if (requestId.current !== id) return;
+        setAnalysisState({
+          kind: "error",
+          deckName: profile.deckName,
+          error: error instanceof Error ? error.message : "Could not reopen live profile evidence.",
+        });
+        setModelState({ kind: "idle" });
+      },
+    );
   }
 
   async function chooseDeck(deckName: string): Promise<void> {
@@ -460,7 +495,14 @@ export function GuidedProfileSetup({
                 </button>
                 {profile.mode === "mapped-user-model" && (
                   <>
-                    <button className="ghost" type="button" onClick={() => beginEdit(profile)}>Edit</button>
+                    <button
+                      className="ghost"
+                      type="button"
+                      disabled={catalogKind !== "live"}
+                      onClick={() => beginEdit(profile)}
+                    >
+                      Edit
+                    </button>
                     <button className="ghost" type="button" disabled={catalogKind !== "live"} onClick={() => void revalidate(profile)}>
                       Revalidate
                     </button>
@@ -563,11 +605,13 @@ export function GuidedProfileSetup({
                     onChange={(event) => void chooseModel(event.target.value)}
                   >
                     <option value="">Choose explicitly…</option>
-                    {analysisState.analysis.models.map((model) => (
-                      <option key={model.modelName} value={model.modelName}>
-                        {model.modelName} — {model.sampledCount}/{analysisState.analysis.inspectedCardCount} sampled
-                      </option>
-                    ))}
+                    {analysisState.analysis.models
+                      .filter((model) => model.modelName !== COLLECTOR_MANAGED_MODEL_NAME)
+                      .map((model) => (
+                        <option key={model.modelName} value={model.modelName}>
+                          {model.modelName} — {model.sampledCount}/{analysisState.analysis.inspectedCardCount} sampled
+                        </option>
+                      ))}
                   </select>
                 </label>
               </>
