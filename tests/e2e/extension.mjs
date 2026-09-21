@@ -1022,6 +1022,7 @@ try {
   await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
   await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
   await firstRoutingCard.getByRole("button", { name: "Save" }).click();
+  await firstRoutingCard.locator(".editor").waitFor({ state: "detached" });
   const firstReady = firstRoutingCard.getByRole("button", { name: "Ready" });
   if (await firstReady.count()) await firstReady.click();
   await firstRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
@@ -1035,6 +1036,7 @@ try {
   await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
   await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
   await secondRoutingCard.getByRole("button", { name: "Save" }).click();
+  await secondRoutingCard.locator(".editor").waitFor({ state: "detached" });
   const secondReady = secondRoutingCard.getByRole("button", { name: "Ready" });
   if (await secondReady.count()) await secondReady.click();
   await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
