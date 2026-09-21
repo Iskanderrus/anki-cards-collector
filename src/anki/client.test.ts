@@ -791,7 +791,7 @@ describe("AnkiClient", () => {
       "addTags",
       "updateNoteFields",
     ]);
-    expect(requests[1]?.params).toEqual({
+    expect(requests[0]?.params).toEqual({
       query: "tag:collector::id::unit-1",
     });
   });
