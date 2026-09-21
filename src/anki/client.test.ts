@@ -583,10 +583,14 @@ describe("AnkiClient", () => {
     expect(noteId).toBe(4242);
     expect(requests.map(({ action }) => action)).toEqual([
       "notesInfo",
-      "updateNoteFields",
       "addTags",
+      "updateNoteFields",
     ]);
     expect(requests[1]?.params).toEqual({
+      notes: [4242],
+      tags: "collector::id::unit-1",
+    });
+    expect(requests[2]?.params).toEqual({
       note: {
         id: 4242,
         fields: {
@@ -596,10 +600,6 @@ describe("AnkiClient", () => {
           Example: "Hoy tengo ganas de salir a caminar por el centro.",
         },
       },
-    });
-    expect(requests[2]?.params).toEqual({
-      notes: [4242],
-      tags: "collector::id::unit-1",
     });
     expect(JSON.stringify(requests)).not.toContain("Private Notes");
   });
@@ -635,8 +635,8 @@ describe("AnkiClient", () => {
       "notesInfo",
       "findNotes",
       "notesInfo",
-      "updateNoteFields",
       "addTags",
+      "updateNoteFields",
     ]);
     expect(requests[1]?.params).toEqual({
       query: "tag:collector::id::unit-1",
@@ -676,7 +676,7 @@ describe("AnkiClient", () => {
           Lemma: "tener ganas de",
           Example: "Hoy tengo ganas de salir a caminar por el centro.",
         },
-        options: { allowDuplicate: false },
+        options: { allowDuplicate: true },
         tags: [
           "anki-cards-collector",
           "collector::context-production",
@@ -720,6 +720,78 @@ describe("AnkiClient", () => {
       new AnkiClient("http://127.0.0.1:8765", fetcher)
         .upsert(value, mappedProfile()),
     ).rejects.toThrow("Collector identity tag belongs to note type");
+  });
+
+
+  it("can recover safely after identity tagging succeeds but mapped field update fails", async () => {
+    const value = item();
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    let phase: "first" | "retry" = "first";
+
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+
+      if (phase === "first") {
+        if (request.action === "notesInfo") {
+          return new Response(JSON.stringify({
+            result: [{ noteId: 4242, modelName: "Hebrew Existing" }],
+            error: null,
+          }), { status: 200 });
+        }
+        if (request.action === "updateNoteFields") {
+          return new Response(JSON.stringify({
+            result: null,
+            error: "temporary update failure",
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ result: null, error: null }), { status: 200 });
+      }
+
+      if (request.action === "findNotes") {
+        return new Response(JSON.stringify({ result: [4242], error: null }), { status: 200 });
+      }
+      if (request.action === "notesInfo") {
+        return new Response(JSON.stringify({
+          result: [{ noteId: 4242, modelName: "Hebrew Existing" }],
+          error: null,
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ result: null, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const client = new AnkiClient("http://127.0.0.1:8765", fetcher);
+
+    await expect(
+      client.upsert(value, mappedProfile(), 4242),
+    ).rejects.toThrow("temporary update failure");
+
+    expect(requests.map(({ action }) => action)).toEqual([
+      "notesInfo",
+      "addTags",
+      "updateNoteFields",
+    ]);
+
+    phase = "retry";
+    requests.length = 0;
+
+    await expect(
+      client.upsert(value, mappedProfile()),
+    ).resolves.toBe(4242);
+
+    expect(requests.map(({ action }) => action)).toEqual([
+      "notesInfo",
+      "findNotes",
+      "notesInfo",
+      "addTags",
+      "updateNoteFields",
+    ]);
+    expect(requests[1]?.params).toEqual({
+      query: "tag:collector::id::unit-1",
+    });
   });
 
 });
