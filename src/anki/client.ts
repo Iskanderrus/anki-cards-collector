@@ -232,14 +232,17 @@ export class AnkiClient {
         const storedNote = notes.find((note) => note.noteId === storedNoteId);
         if (!storedNote) {
           noteId = undefined;
-        } else if (
-          profile.mode === "mapped-user-model"
-          && storedNote.modelName
-          && storedNote.modelName !== profile.modelName
-        ) {
-          throw new Error(
-            `Pinned Anki note ${storedNoteId} uses note type "${storedNote.modelName}", not "${profile.modelName}".`,
-          );
+        } else if (profile.mode === "mapped-user-model") {
+          if (!storedNote.modelName) {
+            throw new Error(
+              `Pinned Anki note ${storedNoteId} did not report its note type; Collector will not update a user-owned note without verifying model identity.`,
+            );
+          }
+          if (storedNote.modelName !== profile.modelName) {
+            throw new Error(
+              `Pinned Anki note ${storedNoteId} uses note type "${storedNote.modelName}", not "${profile.modelName}".`,
+            );
+          }
         }
       } catch (error) {
         if (!isMissingNoteError(error, storedNoteId)) throw error;
@@ -271,7 +274,12 @@ export class AnkiClient {
             `Anki identity lookup returned note ${noteId}, but the note could not be inspected.`,
           );
         }
-        if (recoveredNote.modelName && recoveredNote.modelName !== profile.modelName) {
+        if (!recoveredNote.modelName) {
+          throw new Error(
+            `Recovered Anki note ${noteId} did not report its note type; Collector will not update it without verifying model identity.`,
+          );
+        }
+        if (recoveredNote.modelName !== profile.modelName) {
           throw new Error(
             `Collector identity tag belongs to note type "${recoveredNote.modelName}", not "${profile.modelName}".`,
           );
