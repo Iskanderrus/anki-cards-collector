@@ -146,6 +146,10 @@ The public repository is intentionally focused on the local capture â†’ review â
 
 See the [maintenance roadmap](docs/roadmap.md).
 
+## Product lifecycle
+
+The product/distribution evidence contract is mapped in [docs/product/lifecycle.md](docs/product/lifecycle.md). It applies the proposed Agent Workflows Product Commercialization Lifecycle v0.1 in open-source/free mode without introducing a revenue gate.
+
 ## Project status
 
 **Working public release.**
