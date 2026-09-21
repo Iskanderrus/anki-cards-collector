@@ -59,6 +59,8 @@ type DeckAnalysisUiState =
   | { kind: "live"; analysis: DeckAnalysis }
   | { kind: "error"; deckName: string; error: string };
 
+type SidepanelView = "queue" | "detail" | "settings";
+
 function safePreviewCss(css: string): string {
   return css.replace(/<\/style/gi, "<\\/style");
 }
@@ -237,6 +239,7 @@ function App(): React.ReactElement {
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
   const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
   const [deckAnalysisState, setDeckAnalysisState] = useState<DeckAnalysisUiState>({ kind: "idle" });
+  const [view, setView] = useState<SidepanelView>("queue");
   const [backfill, setBackfill] = useState<BackfillUiState>({
     supported: false,
     status: { active: false, candidateCount: 0 },
@@ -356,6 +359,37 @@ function App(): React.ReactElement {
     inbox: items.filter((item) => item.lexicalUnit.status === "inbox").length,
     ready: items.filter((item) => item.lexicalUnit.status === "ready").length,
   }), [items]);
+
+  const activeItem = useMemo(
+    () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
+    [activeId, items],
+  );
+
+  function openDetail(id: string): void {
+    setActiveId(id);
+    setView("detail");
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+    });
+  }
+
+  function showQueue(): void {
+    cancelEdit();
+    setView("queue");
+    requestAnimationFrame(() => {
+      if (!activeId) return;
+      const selector = `[data-queue-id="${CSS.escape(activeId)}"]`;
+      const row = document.querySelector<HTMLElement>(selector);
+      row?.focus({ preventScroll: true });
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function showSettings(): void {
+    cancelEdit();
+    closeDeckAnalysis();
+    setView("settings");
+  }
 
   async function capture(): Promise<void> {
     setBusy(true);
@@ -1093,45 +1127,61 @@ function App(): React.ReactElement {
       return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
     }
 
-    function focusCard(id: string): void {
+    function focusItem(id: string): void {
       setActiveId(id);
       requestAnimationFrame(() => {
-        const selector = `[data-card-id="${CSS.escape(id)}"]`;
-        const card = document.querySelector<HTMLElement>(selector);
-        card?.focus({ preventScroll: true });
-        card?.scrollIntoView({ block: "nearest" });
+        const selector = view === "queue"
+          ? `[data-queue-id="${CSS.escape(id)}"]`
+          : `[data-card-id="${CSS.escape(id)}"]`;
+        const element = document.querySelector<HTMLElement>(selector);
+        element?.focus({ preventScroll: true });
+        element?.scrollIntoView({ block: "nearest" });
       });
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      if (busy || editingId !== null || isTypingTarget(event.target) || items.length === 0) return;
+      if (busy || editingId !== null || isTypingTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      if (view === "detail" && (event.key === "Escape" || key === "b")) {
+        event.preventDefault();
+        showQueue();
+        return;
+      }
+      if (view === "settings" || items.length === 0) return;
 
       const currentIndex = Math.max(
         0,
         items.findIndex((item) => item.lexicalUnit.id === activeId),
       );
-      const key = event.key.toLowerCase();
 
       if (key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
         const next = Math.min(items.length - 1, currentIndex + 1);
-        focusCard(items[next]!.lexicalUnit.id);
+        focusItem(items[next]!.lexicalUnit.id);
         return;
       }
 
       if (key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         const previous = Math.max(0, currentIndex - 1);
-        focusCard(items[previous]!.lexicalUnit.id);
+        focusItem(items[previous]!.lexicalUnit.id);
         return;
       }
 
-      const activeItem = items[currentIndex];
-      if (!activeItem) return;
+      const currentItem = items[currentIndex];
+      if (!currentItem) return;
+
+      if (view === "queue" && (event.key === "Enter" || key === "o")) {
+        event.preventDefault();
+        openDetail(currentItem.lexicalUnit.id);
+        return;
+      }
 
       if (key === "e") {
         event.preventDefault();
-        beginEdit(activeItem);
+        setView("detail");
+        beginEdit(currentItem);
         return;
       }
 
@@ -1143,13 +1193,13 @@ function App(): React.ReactElement {
       const nextStatus = statusByKey[key];
       if (nextStatus) {
         event.preventDefault();
-        void changeStatus(activeItem.lexicalUnit.id, nextStatus);
+        void changeStatus(currentItem.lexicalUnit.id, nextStatus);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, busy, editingId, items]);
+  }, [activeId, busy, editingId, items, view]);
 
   return (
     <main className="app">
