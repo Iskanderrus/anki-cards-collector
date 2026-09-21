@@ -551,6 +551,7 @@ try {
   );
   const observedEvidence = firstCard.locator(".canonical-evidence");
   await observedEvidence.getByText("Canonical form").waitFor();
+  await observedEvidence.getByText("Observed forms (1)", { exact: true }).waitFor();
   assert.match(
     await observedEvidence.innerText(),
     /Observed forms \(1\)/,
