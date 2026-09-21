@@ -302,6 +302,7 @@ const server = createServer((request, response) => {
           <p id="long">Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear.</p>
           <p id="canonical-base">Quiero tener tiempo para estudiar.</p>
           <p id="canonical-observed">Tengo tiempo para estudiar hoy.</p>
+          <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
         </main>
       </body>
     </html>`);
@@ -1090,6 +1091,102 @@ try {
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Serbian RU.*note\s+\d+/s,
+  );
+
+  // ACCP-014: inject the low-level mapped profile that ACCP-018 will later
+  // configure through guided UI. A normal Ready-card send must now use the
+  // existing user-owned model without schema/template mutation.
+  await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const current = stored.collectorSettings;
+    if (!current) throw new Error("Collector settings are missing.");
+
+    const mappedProfile = {
+      id: "he-existing-e2e",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      deckId: "2",
+      modelName: "Hebrew Existing",
+      modelId: "11",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+
+    await chrome.storage.local.set({
+      collectorSettings: {
+        ...current,
+        exportProfiles: [
+          ...current.exportProfiles.filter((profile) => profile.id !== mappedProfile.id),
+          mappedProfile,
+        ],
+        languageRoutes: [
+          ...current.languageRoutes.filter((route) => route.language !== "he"),
+          { language: "he", profileId: mappedProfile.id },
+        ],
+      },
+    });
+  });
+  await panel.reload();
+  await panel.locator(".queue").waitFor();
+  await setCaptureLanguage(panel, "he");
+
+  await selectText(contentPage, "#mapped", "Mapped export phrase");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  const mappedCard = await cardForTerm(panel, "Mapped export phrase");
+  const mappedReady = mappedCard.getByRole("button", { name: "Ready" });
+  if (await mappedReady.count()) await mappedReady.click();
+  await mappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.match(
+    await mappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU/,
+  );
+
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
+
+  const mappedAdds = ankiRequests.filter(
+    (request) =>
+      request.action === "addNote"
+      && request.params?.note?.modelName === "Hebrew Existing",
+  );
+  assert.equal(mappedAdds.length, 1, "Configured mapped profile should export through the existing note type.");
+  assert.deepEqual(
+    Object.keys(mappedAdds[0].params.note.fields).sort(),
+    ["Hebrew", "Russian"],
+    "Mapped export must write only explicitly configured user-owned fields.",
+  );
+  assert.equal(mappedAdds[0].params.note.options.allowDuplicate, true);
+  assert.ok(
+    mappedAdds[0].params.note.tags.includes("collector::id::" + (
+      await mappedCard.getAttribute("data-card-id")
+    )),
+    "Mapped export must carry the stable reserved Collector identity tag.",
+  );
+  assert.equal(
+    ankiRequests.some((request) => [
+      "createModel",
+      "modelFieldAdd",
+      "updateModelTemplates",
+      "updateModelStyling",
+    ].includes(request.action)),
+    false,
+    "Mapped export must never mutate the user-owned note type.",
+  );
+
+  const exportedMappedCard = await cardForTerm(panel, "Mapped export phrase");
+  assert.match(
+    await exportedMappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU.*note\s+\d+/s,
+  );
+  assert.equal(
+    await exportedMappedCard.locator(".legacy-note-warning").count(),
+    0,
+    "Configured mapped notes must not be treated as legacy custom cards.",
   );
 
   // ACCP-003: a canonical edit that would merge independently exported units is
