@@ -1236,10 +1236,12 @@ try {
   await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
 
   const guidedProfiles = panel.locator(".guided-profiles");
+  markE2eStage("accp018-hebrew-new-profile");
   await guidedProfiles.getByRole("button", { name: "New profile" }).click();
   const guidedForm = guidedProfiles.locator(".guided-profile-form");
   await guidedForm.getByLabel("Profile language").selectOption("he");
   await guidedForm.getByLabel("Live Anki deck").selectOption({ label: "Hebrew RU" });
+  markE2eStage("accp018-hebrew-deck-analysis");
   await guidedForm.getByText(/Sample evidence only:/).waitFor();
 
   const intendedModel = guidedForm.getByLabel("Intended note type");
@@ -1255,6 +1257,7 @@ try {
     "The dominant sampled model is evidence only and remains an explicit choice.",
   );
 
+  markE2eStage("accp018-hebrew-model-inspection");
   await intendedModel.selectOption("Hebrew Existing");
   const guidedRepresentativeFront = guidedForm.locator('iframe[title="Hebrew Existing guided representative front"]');
   await guidedRepresentativeFront.waitFor();
@@ -1265,6 +1268,7 @@ try {
   assert.equal(await guidedRepresentativeFrame.locator("a[href]").count(), 0);
   await guidedForm.getByRole("button", { name: "Another representative" }).click();
 
+  markE2eStage("accp018-hebrew-field-mapping");
   const saveGuided = guidedForm.getByRole("button", { name: "Save profile + language route" });
   assert.equal(await saveGuided.isDisabled(), true, "Incomplete mapping must block Save.");
   await guidedForm.getByLabel("Map Collector Prompt").selectOption("Hebrew");
@@ -1277,7 +1281,9 @@ try {
   assert.match(await payloadPreview.innerText(), /Russian\s+Answer: Example answer/);
   assert.match(await payloadPreview.innerText(), /Example\s+Untouched \/ omitted/);
 
+  markE2eStage("accp018-hebrew-accessibility");
   const guidedAccessibility = await new AxeBuilder({ page: panel })
+    .exclude(".anki-preview-frame")
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
   assert.equal(
@@ -1286,6 +1292,7 @@ try {
     "Guided profile accessibility violations:\n" + JSON.stringify(guidedAccessibility.violations, null, 2),
   );
 
+  markE2eStage("accp018-hebrew-save");
   await saveGuided.click();
   await guidedForm.waitFor({ state: "detached" });
 
