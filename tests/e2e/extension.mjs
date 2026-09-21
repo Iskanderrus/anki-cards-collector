@@ -300,6 +300,8 @@ const server = createServer((request, response) => {
           <p id="second">Context menu phrase appears in a separate sentence for capture.</p>
           <p id="repeat">Aunque llueva.</p>
           <p id="long">Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear.</p>
+          <p id="canonical-base">Quiero tener tiempo para estudiar.</p>
+          <p id="canonical-observed">Tengo tiempo para estudiar hoy.</p>
         </main>
       </body>
     </html>`);
@@ -511,7 +513,7 @@ try {
   await noteField.focus();
   await panel.keyboard.press("a");
   assert.equal(
-    await secondCard.locator(".pill").innerText(),
+    await secondCard.locator(".card-head > .pill").innerText(),
     "ready",
     "Typing inside an editor must not trigger the Archive shortcut.",
   );
@@ -546,11 +548,29 @@ try {
     /Using occurrence 1 of 2/,
     "Review should explain which occurrence drives the proposal.",
   );
+  const observedEvidence = firstCard.locator(".canonical-evidence");
+  await observedEvidence.getByText("Canonical form").waitFor();
   assert.match(
-    await firstCard.locator(".other-occurrences").innerText(),
-    /Other occurrences \(1\)/,
-    "Focused detail should expose non-selected occurrences through progressive disclosure.",
+    await observedEvidence.innerText(),
+    /Observed forms \(1\)/,
+    "Focused detail should group repeated observed evidence instead of duplicating full cards.",
   );
+  assert.match(
+    await observedEvidence.innerText(),
+    /2×/,
+    "Observed-form groups should expose occurrence counts.",
+  );
+
+  await firstCard.getByRole("button", { name: "Edit" }).click();
+  await firstCard.locator(".editor").getByLabel("Canonical form").fill("aunque llueva siempre");
+  const renamePreview = firstCard.locator(".canonicalization-preview.rename");
+  await renamePreview.waitFor();
+  assert.match(
+    await renamePreview.innerText(),
+    /Rename .*Aunque llueva.*aunque llueva siempre/s,
+    "Canonical edits should preview a rename before saving.",
+  );
+  await firstCard.getByRole("button", { name: "Cancel" }).click();
 
   // Duolingo visible backfill is explicitly activated and remains staged.
   await setCaptureLanguage(panel, "he");
@@ -1072,6 +1092,26 @@ try {
     /Anki:\s*Serbian RU.*note\s+\d+/s,
   );
 
+  // ACCP-003: a canonical edit that would merge independently exported units is
+  // blocked before any corpus mutation.
+  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
+  const conflictEditor = secondRoutingCard.locator(".editor");
+  await conflictEditor.getByLabel("Canonical form").fill("Aunque llueva");
+  await conflictEditor.getByLabel("Language code").fill("he");
+  const conflictPreview = secondRoutingCard.locator(".canonicalization-preview.conflict");
+  await conflictPreview.waitFor();
+  assert.match(
+    await conflictPreview.innerText(),
+    /(different export destinations|different Anki notes)/i,
+    "Unsafe consolidation should explain the identity conflict before Save.",
+  );
+  assert.equal(
+    await secondRoutingCard.getByRole("button", { name: "Save" }).isDisabled(),
+    true,
+    "Conflict preview must block Save instead of relying on a failed write.",
+  );
+  await secondRoutingCard.getByRole("button", { name: "Cancel" }).click();
+
   const accessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -1134,7 +1174,62 @@ try {
     "Capturing a long item should keep the user in the compact queue.",
   );
 
-  console.log("Browser extension capture, compact queue/detail, keyboard, accessibility, and permission checks passed.");
+  // ACCP-003: safe canonical consolidation is previewed, then committed without
+  // losing either observed form/context.
+  await setCaptureLanguage(panel, "es");
+  const countBeforeCanonicalPair = await termCount(panel);
+
+  await selectText(contentPage, "#canonical-base", "tener");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  await (await queueRowForTerm(panel, "tener")).waitFor();
+
+  await selectText(contentPage, "#canonical-observed", "Tengo");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  await (await queueRowForTerm(panel, "Tengo")).waitFor();
+  assert.equal(
+    await termCount(panel),
+    countBeforeCanonicalPair + 2,
+    "Canonicalization fixture should begin as two distinct lexical units.",
+  );
+
+  const observedCanonicalCard = await cardForTerm(panel, "Tengo");
+  await observedCanonicalCard.getByRole("button", { name: "Edit" }).click();
+  await observedCanonicalCard.locator(".editor").getByLabel("Canonical form").fill("tener");
+  const consolidationPreview = observedCanonicalCard.locator(".canonicalization-preview.consolidate");
+  await consolidationPreview.waitFor();
+  assert.match(
+    await consolidationPreview.innerText(),
+    /1 \+ 1 occurrences become 2/,
+    "Consolidation preview should make the occurrence consequence explicit.",
+  );
+  assert.match(
+    await consolidationPreview.innerText(),
+    /returns to Inbox/i,
+    "Consolidation preview should make re-approval explicit.",
+  );
+  await observedCanonicalCard.getByRole("button", { name: "Save" }).click();
+  await observedCanonicalCard.locator(".editor").waitFor({ state: "detached" });
+
+  const consolidatedCard = panel.locator(".detail-card", {
+    has: panel.locator(".term", { hasText: "tener" }),
+  });
+  await consolidatedCard.waitFor();
+  const consolidatedEvidence = consolidatedCard.locator(".canonical-evidence");
+  await consolidatedEvidence.getByText("Observed forms (2)").waitFor();
+  assert.match(await consolidatedEvidence.innerText(), /tener/);
+  assert.match(await consolidatedEvidence.innerText(), /Tengo/);
+  assert.match(await consolidatedEvidence.innerText(), /Quiero tener tiempo para estudiar\./);
+  assert.match(await consolidatedEvidence.innerText(), /Tengo tiempo para estudiar hoy\./);
+  await ensureQueue(panel);
+  assert.equal(
+    await termCount(panel),
+    countBeforeCanonicalPair + 1,
+    "Successful canonical consolidation should reduce two compatible units to one.",
+  );
+
+  console.log("Browser extension capture, compact queue/detail, canonicalization, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
   await Promise.all([

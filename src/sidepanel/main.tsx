@@ -11,7 +11,11 @@ import type {
   ReviewStatus,
   SourceUrlMode,
 } from "../core/types";
-import type { RestorePreview } from "../storage/repository";
+import type {
+  CanonicalizationPreview,
+  ObservedFormGroup,
+  RestorePreview,
+} from "../storage/repository";
 import { repository } from "../storage/repository";
 import {
   DEFAULT_SETTINGS,
@@ -61,6 +65,67 @@ type DeckAnalysisUiState =
   | { kind: "error"; deckName: string; error: string };
 
 type SidepanelView = "queue" | "detail" | "settings";
+
+type CanonicalizationUiState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "live"; preview: CanonicalizationPreview }
+  | { kind: "error"; error: string };
+
+type ObservedFormsUiState =
+  | { kind: "idle" }
+  | { kind: "loading"; lexicalUnitId: string }
+  | { kind: "live"; lexicalUnitId: string; groups: ObservedFormGroup[] }
+  | { kind: "error"; lexicalUnitId: string; error: string };
+
+function sameCanonicalizationPreview(
+  left: CanonicalizationPreview,
+  right: CanonicalizationPreview,
+): boolean {
+  return (
+    left.kind === right.kind
+    && left.currentId === right.currentId
+    && left.requestedCanonicalText === right.requestedCanonicalText
+    && left.requestedLanguage === right.requestedLanguage
+    && left.target?.id === right.target?.id
+    && left.survivingLexicalUnitId === right.survivingLexicalUnitId
+    && left.resultingOccurrenceCount === right.resultingOccurrenceCount
+    && left.preservedAnkiNoteId === right.preservedAnkiNoteId
+    && left.conflictReason === right.conflictReason
+  );
+}
+
+function canonicalizationPreviewMessage(preview: CanonicalizationPreview): string {
+  if (preview.kind === "unchanged") {
+    return "Canonical identity is unchanged.";
+  }
+
+  if (preview.kind === "rename") {
+    return [
+      `Rename “${preview.currentCanonicalText}” to “${preview.requestedCanonicalText}”.`,
+      `${preview.currentOccurrenceCount} captured occurrence${preview.currentOccurrenceCount === 1 ? "" : "s"} stay attached.`,
+      preview.willReturnToInbox ? "The item will return to Inbox for re-approval." : "",
+    ].filter(Boolean).join(" ");
+  }
+
+  if (preview.kind === "conflict") {
+    return preview.conflictReason ?? "This canonical change cannot be applied safely.";
+  }
+
+  const targetCount = preview.target?.occurrenceCount ?? 0;
+  const keepsCurrent = preview.survivingLexicalUnitId === preview.currentId;
+  return [
+    `Consolidate with existing “${preview.target?.canonicalText ?? preview.requestedCanonicalText}”.`,
+    `${preview.currentOccurrenceCount} + ${targetCount} occurrences become ${preview.resultingOccurrenceCount ?? preview.currentOccurrenceCount + targetCount}.`,
+    keepsCurrent
+      ? "This item’s Collector identity will be kept."
+      : "The existing canonical unit’s Collector identity will be kept.",
+    preview.preservedAnkiNoteId !== undefined
+      ? `Anki note ${preview.preservedAnkiNoteId} will be preserved.`
+      : "",
+    "The result returns to Inbox for re-approval.",
+  ].filter(Boolean).join(" ");
+}
 
 function safePreviewCss(css: string): string {
   return css.replace(/<\/style/gi, "<\\/style");
@@ -232,6 +297,8 @@ function App(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
+  const [observedFormsState, setObservedFormsState] = useState<ObservedFormsUiState>({ kind: "idle" });
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -252,6 +319,8 @@ function App(): React.ReactElement {
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const deckAnalysisRequestId = useRef(0);
+  const canonicalizationRequestId = useRef(0);
+  const observedFormsRequestId = useRef(0);
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -376,6 +445,67 @@ function App(): React.ReactElement {
     () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
     [activeId, items],
   );
+
+  useEffect(() => {
+    if (view !== "detail" || !activeId) {
+      setObservedFormsState({ kind: "idle" });
+      return;
+    }
+
+    const requestId = ++observedFormsRequestId.current;
+    setObservedFormsState({ kind: "loading", lexicalUnitId: activeId });
+    void repository.listObservedForms(activeId).then(
+      (groups) => {
+        if (requestId !== observedFormsRequestId.current) return;
+        setObservedFormsState({ kind: "live", lexicalUnitId: activeId, groups });
+      },
+      (observedError: unknown) => {
+        if (requestId !== observedFormsRequestId.current) return;
+        setObservedFormsState({
+          kind: "error",
+          lexicalUnitId: activeId,
+          error: observedError instanceof Error ? observedError.message : "Could not load observed forms.",
+        });
+      },
+    );
+  }, [activeId, activeItem?.lexicalUnit.updatedAt, view]);
+
+  useEffect(() => {
+    if (!editingId || !editDraft) {
+      setCanonicalizationState({ kind: "idle" });
+      return;
+    }
+
+    if (!editDraft.canonicalText.trim()) {
+      setCanonicalizationState({
+        kind: "error",
+        error: "Canonical form cannot be empty.",
+      });
+      return;
+    }
+
+    const requestId = ++canonicalizationRequestId.current;
+    setCanonicalizationState({ kind: "loading" });
+    void repository.previewCanonicalization(
+      editingId,
+      editDraft.canonicalText,
+      editDraft.language,
+    ).then(
+      (preview) => {
+        if (requestId !== canonicalizationRequestId.current) return;
+        setCanonicalizationState({ kind: "live", preview });
+      },
+      (previewError: unknown) => {
+        if (requestId !== canonicalizationRequestId.current) return;
+        setCanonicalizationState({
+          kind: "error",
+          error: previewError instanceof Error
+            ? previewError.message
+            : "Could not preview this canonical change.",
+        });
+      },
+    );
+  }, [editDraft?.canonicalText, editDraft?.language, editingId]);
 
   function selectActiveId(id: string | null): void {
     activeIdRef.current = id;
@@ -617,6 +747,8 @@ function App(): React.ReactElement {
   }
 
   function cancelEdit(): void {
+    canonicalizationRequestId.current += 1;
+    setCanonicalizationState({ kind: "idle" });
     setEditingId(null);
     setEditDraft(null);
   }
@@ -629,6 +761,28 @@ function App(): React.ReactElement {
     setNotice("");
 
     try {
+      const latestPreview = await repository.previewCanonicalization(
+        id,
+        editDraft.canonicalText,
+        editDraft.language,
+      );
+      const shownPreview = canonicalizationState.kind === "live"
+        ? canonicalizationState.preview
+        : undefined;
+      setCanonicalizationState({ kind: "live", preview: latestPreview });
+
+      if (latestPreview.kind === "conflict") {
+        setError(latestPreview.conflictReason ?? "This canonical change cannot be applied safely.");
+        return;
+      }
+
+      if (!shownPreview || !sameCanonicalizationPreview(shownPreview, latestPreview)) {
+        setError(
+          "Canonical identity changed while you were editing. Review the updated preview, then save again.",
+        );
+        return;
+      }
+
       const updated = await repository.update(id, editDraft);
       const proposal = proposeLearningCard(updated);
       if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
@@ -1871,6 +2025,49 @@ function App(): React.ReactElement {
                 <span className="pill">{unit.status}</span>
               </div>
 
+              <section className="canonical-evidence" aria-label="Canonical and observed forms">
+                <div className="canonical-current">
+                  <span>Canonical form</span>
+                  <strong dir="auto">{unit.canonicalText}</strong>
+                </div>
+                {observedFormsState.kind === "loading"
+                  && observedFormsState.lexicalUnitId === unit.id && (
+                    <div className="setting-help">Loading observed forms…</div>
+                  )}
+                {observedFormsState.kind === "error"
+                  && observedFormsState.lexicalUnitId === unit.id && (
+                    <div className="proposal-warning" role="status">{observedFormsState.error}</div>
+                  )}
+                {observedFormsState.kind === "live"
+                  && observedFormsState.lexicalUnitId === unit.id && (
+                    <details className="other-occurrences observed-forms" open={observedFormsState.groups.length <= 3}>
+                      <summary>
+                        Observed forms ({observedFormsState.groups.length})
+                      </summary>
+                      <div className="observed-form-list">
+                        {observedFormsState.groups.map((group) => (
+                          <div className="observed-form-group" key={group.normalizedSurfaceText}>
+                            <div className="observed-form-head">
+                              <strong dir="auto">{group.surfaceForms.join(" · ")}</strong>
+                              <span className="pill">{group.count}×</span>
+                            </div>
+                            <div className="observed-form-contexts">
+                              {group.occurrences.map((occurrence) => (
+                                <div className="occurrence-row" key={occurrence.id}>
+                                  {occurrence.context && occurrence.context !== occurrence.surfaceText && (
+                                    <span dir="auto">{occurrence.context}</span>
+                                  )}
+                                  <span className="setting-help">{sourceLabel(occurrence)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+              </section>
+
               {editing ? (
                 <form
                   className="editor"
@@ -1901,6 +2098,15 @@ function App(): React.ReactElement {
                       onChange={(event) => setEditDraft({ ...editDraft, language: event.target.value })}
                     />
                   </label>
+                  <div
+                    className={`canonicalization-preview${canonicalizationState.kind === "live" ? ` ${canonicalizationState.preview.kind}` : ""}`}
+                    role={canonicalizationState.kind === "live" && canonicalizationState.preview.kind === "conflict" ? "alert" : "status"}
+                    aria-live="polite"
+                  >
+                    {canonicalizationState.kind === "loading" && "Checking canonical identity…"}
+                    {canonicalizationState.kind === "error" && canonicalizationState.error}
+                    {canonicalizationState.kind === "live" && canonicalizationPreviewMessage(canonicalizationState.preview)}
+                  </div>
                   <label>
                     Context
                     <textarea
@@ -1919,7 +2125,17 @@ function App(): React.ReactElement {
                     />
                   </label>
                   <div className="card-actions">
-                    <button className="primary" type="submit" disabled={busy}>Save</button>
+                    <button
+                      className="primary"
+                      type="submit"
+                      disabled={
+                        busy
+                        || canonicalizationState.kind !== "live"
+                        || canonicalizationState.preview.kind === "conflict"
+                      }
+                    >
+                      Save
+                    </button>
                     <button className="ghost" type="button" disabled={busy} onClick={cancelEdit}>Cancel</button>
                   </div>
                 </form>
@@ -2005,27 +2221,6 @@ function App(): React.ReactElement {
                       </strong>
                       <span>{proposal.occurrenceSelection.reason}</span>
                     </div>
-                  )}
-
-                  {item.occurrences.length > 1 && (
-                    <details className="other-occurrences">
-                      <summary>
-                        Other occurrences ({item.occurrences.filter((occurrence) => occurrence.id !== selectedOccurrence?.id).length})
-                      </summary>
-                      <div className="occurrence-list">
-                        {item.occurrences
-                          .filter((occurrence) => occurrence.id !== selectedOccurrence?.id)
-                          .map((occurrence) => (
-                            <div className="occurrence-row" key={occurrence.id}>
-                              <strong dir="auto">{occurrence.surfaceText}</strong>
-                              {occurrence.context && occurrence.context !== occurrence.surfaceText && (
-                                <span dir="auto">{occurrence.context}</span>
-                              )}
-                              <span className="setting-help">{sourceLabel(occurrence)}</span>
-                            </div>
-                          ))}
-                      </div>
-                    </details>
                   )}
 
                   <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
