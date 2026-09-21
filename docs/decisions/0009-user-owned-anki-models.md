@@ -45,6 +45,8 @@ Collector Basic remains the safe default for users who do not want custom mappin
 
 Custom-profile setup needs compatibility validation and a preview of where semantic values will be written.
 
+Once a mapped profile owns durable reserved/exported bindings, its deck/model identity is not an innocuous profile edit: changing that identity in place is blocked and a new profile is required for future cards. Field mapping remains profile-level by design, so an explicit remap may change which fields future updates write for already-bound notes. ACCP-018 therefore requires an explicit consequence acknowledgement for such a remap and does not rewrite existing Anki note content merely because profile mapping changed.
+
 Idempotent export logic must support both CollectorID-field lookup and exact reserved-tag lookup. Missing confirmed deck/model IDs are treated as incomplete legacy configuration and must be reconfirmed before a mapped write.
 
 Collector must not assume that all user-owned models have one card template or the same field semantics.
