@@ -120,7 +120,9 @@ describe("mapped user-model field mapping", () => {
   });
 
   it("uses a stable hex-only exact tag query for arbitrary Collector ids", () => {
-    expect(collectorIdentityTag("unit-1")).toBe("collector::id::756e69742d31");
+    expect(collectorIdentityTag("unit-1")).toBe(
+      "collector::id::0075006e00690074002d0031",
+    );
 
     for (const id of ["unit_1", "unit*1", "unit(1)", "parent::child"]) {
       const tag = collectorIdentityTag(id);
@@ -132,6 +134,9 @@ describe("mapped user-model field mapping", () => {
       expect(exactPattern.test(tag)).toBe(true);
       expect(exactPattern.test(tag + "::child")).toBe(false);
     }
+
+    expect(collectorIdentityTag("\ud800")).not.toBe(collectorIdentityTag("\ufffd"));
+    expect(collectorIdentityTag("é")).not.toBe(collectorIdentityTag("e\u0301"));
 
     expect(() => collectorIdentityTag("")).toThrow("cannot be empty");
   });
