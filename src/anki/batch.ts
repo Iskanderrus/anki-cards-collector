@@ -9,6 +9,7 @@ import { resolveExportRoute, validateProfileForCurrentExport } from "./routing";
 export interface AnkiExportClient {
   ping(): Promise<number>;
   ensureDeckAndModel(profile: ExportProfile): Promise<void>;
+  preflight(item: CollectedItem, profile: ExportProfile): Promise<void>;
   upsert(item: CollectedItem, profile: ExportProfile, existingNoteId?: number): Promise<number>;
 }
 
@@ -77,7 +78,9 @@ function resolvedDestinationKey(profile: ExportProfile): string {
   return JSON.stringify([
     profile.id,
     profile.deckName,
+    profile.deckId ?? "",
     profile.modelName,
+    profile.modelId ?? "",
     profile.mode,
   ]);
 }
@@ -138,6 +141,8 @@ export async function exportBatch(
       });
 
       try {
+        await client.preflight(item, profile);
+
         let effectiveBinding = binding;
         const needsReservation =
           binding?.ankiNoteId === undefined
@@ -150,7 +155,9 @@ export async function exportBatch(
             profileId: profile.id,
             state: "reserved",
             deckName: profile.deckName,
+            ...(profile.deckId ? { deckId: profile.deckId } : {}),
             modelName: profile.modelName,
+            ...(profile.modelId ? { modelId: profile.modelId } : {}),
             updatedAt: new Date().toISOString(),
           };
           await persistBinding(reserved);
@@ -169,7 +176,9 @@ export async function exportBatch(
           state: "exported",
           ankiNoteId: noteId,
           deckName: profile.deckName,
+          ...(profile.deckId ? { deckId: profile.deckId } : {}),
           modelName: profile.modelName,
+          ...(profile.modelId ? { modelId: profile.modelId } : {}),
           updatedAt: new Date().toISOString(),
         };
 
