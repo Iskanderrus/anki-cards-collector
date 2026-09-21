@@ -409,4 +409,90 @@ describe("exportBatch profile routing", () => {
     expect(second).toMatchObject({ exported: 1, failed: 0, warnings: 0 });
   });
 
+
+  it("routes a Ready item through an explicitly configured mapped user-owned profile", async () => {
+    const mapped: ExportProfile = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "mapped-user-model",
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [mapped, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: mapped.id }],
+    };
+    const current = item("he-mapped", "שלום", "he");
+    const exportClient = client({ upsert: vi.fn(async () => 7070) });
+    const persisted: ExportBinding[] = [];
+
+    const report = await exportBatch(
+      [current],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async (binding) => {
+        persisted.push(binding);
+      },
+    );
+
+    expect(exportClient.ensureDeckAndModel).toHaveBeenCalledWith(mapped);
+    expect(exportClient.upsert).toHaveBeenCalledWith(current, mapped, undefined);
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        lexicalUnitId: "he-mapped",
+        profileId: "he-existing",
+        state: "reserved",
+        deckName: "Hebrew RU",
+        modelName: "Hebrew Existing",
+      }),
+      expect.objectContaining({
+        lexicalUnitId: "he-mapped",
+        profileId: "he-existing",
+        state: "exported",
+        ankiNoteId: 7070,
+        deckName: "Hebrew RU",
+        modelName: "Hebrew Existing",
+      }),
+    ]);
+    expect(report).toMatchObject({ exported: 1, failed: 0, warnings: 0 });
+  });
+
+  it("blocks an incomplete mapped profile before any Anki mutation", async () => {
+    const incomplete: ExportProfile = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "mapped-user-model",
+      fieldMapping: { Prompt: "Hebrew" },
+    };
+    const mappedSettings: CollectorSettings = {
+      ...settings,
+      exportProfiles: [incomplete, profiles[2]!],
+      languageRoutes: [{ language: "he", profileId: incomplete.id }],
+    };
+    const exportClient = client();
+
+    const report = await exportBatch(
+      [item("he-mapped", "שלום", "he")],
+      mappedSettings,
+      new Map(),
+      exportClient,
+      async () => undefined,
+    );
+
+    expect(exportClient.ensureDeckAndModel).not.toHaveBeenCalled();
+    expect(exportClient.upsert).not.toHaveBeenCalled();
+    expect(report.results[0]).toMatchObject({
+      kind: "failed",
+    });
+    expect((report.results[0] as { error: string }).error).toContain("Map Collector Answer");
+  });
+
 });
