@@ -78,6 +78,23 @@ type ObservedFormsUiState =
   | { kind: "live"; lexicalUnitId: string; groups: ObservedFormGroup[] }
   | { kind: "error"; lexicalUnitId: string; error: string };
 
+function sameCanonicalizationPreview(
+  left: CanonicalizationPreview,
+  right: CanonicalizationPreview,
+): boolean {
+  return (
+    left.kind === right.kind
+    && left.currentId === right.currentId
+    && left.requestedCanonicalText === right.requestedCanonicalText
+    && left.requestedLanguage === right.requestedLanguage
+    && left.target?.id === right.target?.id
+    && left.survivingLexicalUnitId === right.survivingLexicalUnitId
+    && left.resultingOccurrenceCount === right.resultingOccurrenceCount
+    && left.preservedAnkiNoteId === right.preservedAnkiNoteId
+    && left.conflictReason === right.conflictReason
+  );
+}
+
 function canonicalizationPreviewMessage(preview: CanonicalizationPreview): string {
   if (preview.kind === "unchanged") {
     return "Canonical identity is unchanged.";
@@ -744,6 +761,28 @@ function App(): React.ReactElement {
     setNotice("");
 
     try {
+      const latestPreview = await repository.previewCanonicalization(
+        id,
+        editDraft.canonicalText,
+        editDraft.language,
+      );
+      const shownPreview = canonicalizationState.kind === "live"
+        ? canonicalizationState.preview
+        : undefined;
+      setCanonicalizationState({ kind: "live", preview: latestPreview });
+
+      if (latestPreview.kind === "conflict") {
+        setError(latestPreview.conflictReason ?? "This canonical change cannot be applied safely.");
+        return;
+      }
+
+      if (!shownPreview || !sameCanonicalizationPreview(shownPreview, latestPreview)) {
+        setError(
+          "Canonical identity changed while you were editing. Review the updated preview, then save again.",
+        );
+        return;
+      }
+
       const updated = await repository.update(id, editDraft);
       const proposal = proposeLearningCard(updated);
       if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
@@ -2091,12 +2130,8 @@ function App(): React.ReactElement {
                       type="submit"
                       disabled={
                         busy
-                        || canonicalizationState.kind === "loading"
-                        || canonicalizationState.kind === "error"
-                        || (
-                          canonicalizationState.kind === "live"
-                          && canonicalizationState.preview.kind === "conflict"
-                        )
+                        || canonicalizationState.kind !== "live"
+                        || canonicalizationState.preview.kind === "conflict"
                       }
                     >
                       Save
