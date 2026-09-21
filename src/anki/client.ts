@@ -300,7 +300,10 @@ export class AnkiClient {
         deckName: profile.deckName,
         modelName: profile.modelName,
         fields,
-        options: { allowDuplicate: false },
+        // Collector identity for user-owned models lives in the reserved
+        // tag, not necessarily in the model's first field. Allow equal prompt
+        // values there so unrelated notes do not block a valid Collector note.
+        options: { allowDuplicate: profile.mode === "mapped-user-model" },
         tags: [
           "anki-cards-collector",
           `collector::${proposal.cardKind}`,
