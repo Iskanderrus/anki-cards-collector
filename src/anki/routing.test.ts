@@ -7,6 +7,7 @@ import type {
 import {
   assertDestinationChangeReconciled,
   resolveExportRoute,
+  validateProfileForCurrentExport,
 } from "./routing";
 
 function item(language = "he"): CollectedItem {
@@ -133,6 +134,37 @@ describe("resolveExportRoute", () => {
     expect(() => assertDestinationChangeReconciled(binding)).toThrow(
       "Retry export before changing its destination",
     );
+  });
+
+
+  it("accepts a mapped user-owned profile only when required field mapping is explicit", () => {
+    const mapped = {
+      id: "he-existing",
+      name: "Hebrew existing",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "mapped-user-model" as const,
+      fieldMapping: {
+        Prompt: "Hebrew",
+        Answer: "Russian",
+      },
+    };
+
+    expect(() => validateProfileForCurrentExport(mapped)).not.toThrow();
+    expect(() => validateProfileForCurrentExport({
+      ...mapped,
+      fieldMapping: { Prompt: "Hebrew" },
+    })).toThrow("Map Collector Answer");
+  });
+
+  it("still refuses arbitrary note types marked as Collector-managed", () => {
+    expect(() => validateProfileForCurrentExport({
+      id: "unsafe",
+      name: "Unsafe",
+      deckName: "Hebrew RU",
+      modelName: "Hebrew Existing",
+      mode: "collector-managed",
+    })).toThrow("Collector-managed export is only supported");
   });
 
 });
