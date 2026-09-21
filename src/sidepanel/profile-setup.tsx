@@ -109,7 +109,9 @@ export function GuidedProfileSetup({
   const [representativeIndex, setRepresentativeIndex] = useState(0);
   const [remapAcknowledged, setRemapAcknowledged] = useState(false);
   const [profileStatus, setProfileStatus] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
   const requestId = useRef(0);
+  const saveInFlight = useRef(false);
 
   const originalProfile = draft?.profileId
     ? settings.exportProfiles.find((profile) => profile.id === draft.profileId) ?? null
@@ -290,10 +292,12 @@ export function GuidedProfileSetup({
         }
       : current
     );
+    const id = ++requestId.current;
     setRepresentativeIndex(0);
     setRemapAcknowledged(false);
     setModelState({ kind: "loading", modelName });
     const result = await catalogService.inspectModel(modelName);
+    if (requestId.current !== id) return;
     setModelState(result);
   }
 
@@ -375,6 +379,11 @@ export function GuidedProfileSetup({
   }
 
   async function saveProfile(): Promise<void> {
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setSaving(true);
+
+    try {
     if (!draft || !nextProfile || !liveModelDetail || catalogKind !== "live") {
       onError("Complete the live language, deck, note-type, and mapping steps before saving.");
       return;
@@ -461,6 +470,10 @@ export function GuidedProfileSetup({
     setProfileStatus((current) => ({ ...current, [profileId]: "Live validation passed." }));
     setDraft(null);
     resetEvidence();
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
   }
 
   async function useForCapture(profile: ExportProfile): Promise<void> {
@@ -488,7 +501,7 @@ export function GuidedProfileSetup({
             Language → live deck → explicit note type → representative card → field mapping → payload preview.
           </div>
         </div>
-        <button type="button" onClick={beginNew} disabled={catalogKind !== "live"}>
+        <button type="button" onClick={beginNew} disabled={saving || catalogKind !== "live"}>
           New profile
         </button>
       </div>
@@ -529,7 +542,7 @@ export function GuidedProfileSetup({
                 <div className="profile-validation-status" role="status">{profileStatus[profile.id]}</div>
               )}
               <div className="language-deck-actions">
-                <button className="ghost" type="button" onClick={() => void useForCapture(profile)} disabled={!language}>
+                <button className="ghost" type="button" onClick={() => void useForCapture(profile)} disabled={saving || !language}>
                   Use for capture
                 </button>
                 {profile.mode === "mapped-user-model" && (
@@ -537,12 +550,12 @@ export function GuidedProfileSetup({
                     <button
                       className="ghost"
                       type="button"
-                      disabled={catalogKind !== "live"}
+                      disabled={saving || catalogKind !== "live"}
                       onClick={() => beginEdit(profile)}
                     >
                       Edit
                     </button>
-                    <button className="ghost" type="button" disabled={catalogKind !== "live"} onClick={() => void revalidate(profile)}>
+                    <button className="ghost" type="button" disabled={saving || catalogKind !== "live"} onClick={() => void revalidate(profile)}>
                       Revalidate
                     </button>
                   </>
@@ -788,7 +801,8 @@ export function GuidedProfileSetup({
               className="primary"
               type="submit"
               disabled={
-                catalogKind !== "live"
+                saving
+                || catalogKind !== "live"
                 || !draft.language
                 || !isGuidedLanguageCode(draft.language)
                 || !draft.deckId
@@ -799,11 +813,12 @@ export function GuidedProfileSetup({
                 || Boolean(editSafety?.durableBindingCount && editSafety.fieldMappingChanged && !remapAcknowledged)
               }
             >
-              Save profile + language route
+              {saving ? "Saving…" : "Save profile + language route"}
             </button>
             <button
               className="ghost"
               type="button"
+              disabled={saving}
               onClick={() => {
                 setDraft(null);
                 resetEvidence();
