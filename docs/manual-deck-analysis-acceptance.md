@@ -70,3 +70,21 @@ For the public acceptance record, document only:
 - whether any mutation was observed.
 
 Representative card contents remain local.
+
+
+## Final live acceptance — 2026-09-21
+
+Status: **PASSED** on real Anki Desktop + AnkiConnect.
+
+Verified without publishing representative study content:
+
+- inspection ran against a real existing language deck containing 417 cards;
+- Collector inspected a bounded deterministic sample of 24 cards rather than loading the entire deck;
+- the sampled evidence contained more than one note type/model;
+- the sample distribution remained explicit as separate model evidence (23/24 and 1/24 in the observed sample) rather than being converted into an automatic recommendation;
+- representative Front and Back previews rendered successfully from real Anki card content and matched recognizable existing cards;
+- CSS/template metadata was displayed as inspection evidence only;
+- no mutation was reported during the live inspection;
+- automated browser acceptance independently verifies that Inspect issues only read-only `findCards` + `cardsInfo` actions and no deck/card/model mutation action.
+
+Screenshots used during acceptance are intentionally not attached to the public repository because they contain study content.
