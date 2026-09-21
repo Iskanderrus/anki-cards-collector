@@ -29,6 +29,7 @@ import {
   COMMON_PROFILE_LANGUAGES,
   assessUsedMappedProfileEdit,
   buildMappedPayloadPreview,
+  isGuidedLanguageCode,
   languageLabel,
   profileLanguageFromSavedState,
   validateMappedProfileAgainstLive,
@@ -372,6 +373,10 @@ export function GuidedProfileSetup({
       onError("Choose the profile language.");
       return;
     }
+    if (!isGuidedLanguageCode(draft.language)) {
+      onError("Use a language tag such as he, sr, es, or es-UY.");
+      return;
+    }
     if (!mappingValidation.valid) {
       onError(mappingValidation.errors.join(" "));
       return;
@@ -436,8 +441,14 @@ export function GuidedProfileSetup({
       onError("This legacy profile has no unambiguous language. Edit it through guided setup first.");
       return;
     }
-    await persistSettings((current) => ({ ...current, captureProfileId: profile.id }));
-    onNotice(languageLabel(language) + " is now the active capture profile.");
+    await persistSettings((current) =>
+      assignLanguageRoute(
+        { ...current, captureProfileId: profile.id },
+        language,
+        profile.id,
+      )
+    );
+    onNotice(languageLabel(language) + " is now the active capture profile and language route.");
   }
 
   return (
@@ -751,6 +762,7 @@ export function GuidedProfileSetup({
               disabled={
                 catalogKind !== "live"
                 || !draft.language
+                || !isGuidedLanguageCode(draft.language)
                 || !draft.deckId
                 || !draft.modelId
                 || !liveModelDetail
