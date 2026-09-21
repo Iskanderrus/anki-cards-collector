@@ -30,6 +30,16 @@ Secondary candidate:
 
 The current repository demonstrates the workflow primarily through the operator’s own real use and technical/manual acceptance. Broader segment evidence is still limited.
 
+## 2A. Evidence-before-build / validation mode
+
+- Problem economics: **NOT_APPLICABLE** for the current free/open-source mode.
+- Current validation mode: `open_source_pilot` + observed real-user workflow.
+- External evidence sources: Chrome Web Store behavior/reviews where available, GitHub issues,
+  Anki/language-learning communities, opt-in pilot sessions and support questions.
+- Build discipline: new morphology/AI/card-policy complexity should not be treated as validated
+  merely because it is implementable; onboarding/export friction and repeat-use evidence come first.
+- Monetization remains dormant unless a separate product decision changes the mode.
+
 ## 3. SLC
 
 ### Simple
