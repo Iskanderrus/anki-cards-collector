@@ -17,7 +17,9 @@ function mappedProfile(): ExportProfile {
     id: "mapped-he",
     name: "Hebrew existing",
     deckName: "Hebrew RU",
+    deckId: "2",
     modelName: "Hebrew Existing",
+    modelId: "11",
     mode: "mapped-user-model",
     fieldMapping: {
       Prompt: "Hebrew",
@@ -518,8 +520,8 @@ describe("AnkiClient", () => {
       actions.push(request.action);
 
       const resultByAction: Record<string, unknown> = {
-        deckNames: ["Hebrew RU"],
-        modelNames: ["Hebrew Existing"],
+        deckNamesAndIds: { "Hebrew RU": 2 },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
         modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example", "Private Notes"],
       };
       return new Response(JSON.stringify({
@@ -531,7 +533,7 @@ describe("AnkiClient", () => {
     await new AnkiClient("http://127.0.0.1:8765", fetcher)
       .ensureDeckAndModel(mappedProfile());
 
-    expect(actions).toEqual(["deckNames", "modelNames", "modelFieldNames"]);
+    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds", "modelFieldNames"]);
     expect(actions).not.toContain("createModel");
     expect(actions).not.toContain("modelFieldAdd");
     expect(actions).not.toContain("updateModelTemplates");
@@ -544,8 +546,8 @@ describe("AnkiClient", () => {
       const request = JSON.parse(String(init?.body)) as { action: string };
       actions.push(request.action);
       const resultByAction: Record<string, unknown> = {
-        deckNames: ["Hebrew RU"],
-        modelNames: ["Hebrew Existing"],
+        deckNamesAndIds: { "Hebrew RU": 2 },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
         modelFieldNames: ["Hebrew", "Russian", "Lemma"],
       };
       return new Response(JSON.stringify({
@@ -559,7 +561,7 @@ describe("AnkiClient", () => {
         .ensureDeckAndModel(mappedProfile()),
     ).rejects.toThrow('Mapped Anki field "Example"');
 
-    expect(actions).toEqual(["deckNames", "modelNames", "modelFieldNames"]);
+    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds", "modelFieldNames"]);
   });
 
   it("updates only explicitly mapped user-owned fields and maintains the reserved identity tag", async () => {
@@ -809,6 +811,55 @@ describe("AnkiClient", () => {
       new AnkiClient("http://127.0.0.1:8765", fetcher)
         .upsert(item(), mappedProfile(), 4242),
     ).rejects.toThrow("did not report its note type");
+  });
+
+
+  it("blocks mapped export when the saved live model id no longer matches", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      const resultByAction: Record<string, unknown> = {
+        deckNamesAndIds: { "Hebrew RU": 2 },
+        modelNamesAndIds: { "Hebrew Existing": 999 },
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .ensureDeckAndModel(mappedProfile()),
+    ).rejects.toThrow("note-type identity");
+
+    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds"]);
+    expect(actions).not.toContain("modelFieldNames");
+  });
+
+  it("blocks mapped export when the saved live deck id no longer matches", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      const resultByAction: Record<string, unknown> = {
+        deckNamesAndIds: { "Hebrew RU": 999 },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .ensureDeckAndModel(mappedProfile()),
+    ).rejects.toThrow("deck identity");
+
+    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds"]);
+    expect(actions).not.toContain("modelFieldNames");
   });
 
 });
