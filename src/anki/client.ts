@@ -118,19 +118,32 @@ export class AnkiClient {
       );
     }
 
-    const decks = await this.invoke<string[]>("deckNames");
-    if (!decks.includes(profile.deckName)) {
-      throw new Error(
-        `Anki deck "${profile.deckName}" is not available. Refresh the live catalog, choose an existing deck, or create this saved deck explicitly.`,
-      );
-    }
-
-    const models = await this.invoke<string[]>("modelNames");
-
     if (profile.mode === "mapped-user-model") {
-      if (!models.includes(profile.modelName)) {
+      const [decks, models] = await Promise.all([
+        this.deckNamesAndIds(),
+        this.modelNamesAndIds(),
+      ]);
+      const deckId = decks[profile.deckName];
+      if (deckId === undefined) {
+        throw new Error(
+          `Anki deck "${profile.deckName}" is not available. Refresh the live catalog and choose an existing deck.`,
+        );
+      }
+      if (profile.deckId && String(deckId) !== profile.deckId) {
+        throw new Error(
+          `Saved Anki deck identity for "${profile.deckName}" no longer matches the live deck. Refresh and re-confirm this export profile before writing.`,
+        );
+      }
+
+      const modelId = models[profile.modelName];
+      if (modelId === undefined) {
         throw new Error(
           `Anki note type "${profile.modelName}" is not available. Refresh the live catalog and choose an existing note type.`,
+        );
+      }
+      if (profile.modelId && String(modelId) !== profile.modelId) {
+        throw new Error(
+          `Saved Anki note-type identity for "${profile.modelName}" no longer matches the live model. Refresh and re-confirm this export profile before writing.`,
         );
       }
 
@@ -141,6 +154,14 @@ export class AnkiClient {
       return;
     }
 
+    const decks = await this.invoke<string[]>("deckNames");
+    if (!decks.includes(profile.deckName)) {
+      throw new Error(
+        `Anki deck "${profile.deckName}" is not available. Refresh the live catalog, choose an existing deck, or create this saved deck explicitly.`,
+      );
+    }
+
+    const models = await this.invoke<string[]>("modelNames");
     if (!models.includes(profile.modelName)) {
       await this.invoke("createModel", {
         modelName: profile.modelName,
