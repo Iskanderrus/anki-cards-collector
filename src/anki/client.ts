@@ -2,10 +2,12 @@ import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
 import {
+  collectorIdentityQuery,
   collectorIdentityTag,
   mappedAnkiFields,
   mappedSemanticValues,
   validateMappedProfile,
+  validateMappedQuestionFields,
 } from "./mapping";
 
 interface AnkiResponse<T> {
@@ -125,6 +127,8 @@ export class AnkiClient {
     }
 
     if (profile.mode === "mapped-user-model") {
+      validateMappedProfile(profile);
+
       const [decks, models] = await Promise.all([
         this.deckNamesAndIds(),
         this.modelNamesAndIds(),
@@ -135,7 +139,7 @@ export class AnkiClient {
           `Anki deck "${profile.deckName}" is not available. Refresh the live catalog and choose an existing deck.`,
         );
       }
-      if (profile.deckId && String(deckId) !== profile.deckId) {
+      if (String(deckId) !== profile.deckId) {
         throw new Error(
           `Saved Anki deck identity for "${profile.deckName}" no longer matches the live deck. Refresh and re-confirm this export profile before writing.`,
         );
@@ -147,7 +151,7 @@ export class AnkiClient {
           `Anki note type "${profile.modelName}" is not available. Refresh the live catalog and choose an existing note type.`,
         );
       }
-      if (profile.modelId && String(modelId) !== profile.modelId) {
+      if (String(modelId) !== profile.modelId) {
         throw new Error(
           `Saved Anki note-type identity for "${profile.modelName}" no longer matches the live model. Refresh and re-confirm this export profile before writing.`,
         );
@@ -157,6 +161,12 @@ export class AnkiClient {
         modelName: profile.modelName,
       });
       validateMappedProfile(profile, fields);
+
+      const fieldsOnTemplates = await this.invoke<RawAnkiFieldsOnTemplates>(
+        "modelFieldsOnTemplates",
+        { modelName: profile.modelName },
+      );
+      validateMappedQuestionFields(profile, fieldsOnTemplates);
 
       const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
         modelName: profile.modelName,
@@ -227,6 +237,39 @@ export class AnkiClient {
     }
   }
 
+  async preflight(item: CollectedItem, profile: ExportProfile): Promise<void> {
+    if (profile.mode !== "mapped-user-model") return;
+
+    validateMappedProfile(profile);
+    const proposal = proposeLearningCard(item);
+    if (!proposal.recommended) {
+      throw new Error(proposal.warning ?? "This item needs review before export.");
+    }
+
+    const fields = mappedAnkiFields(item, profile);
+    const identityTag = collectorIdentityTag(item.lexicalUnit.id);
+    const candidate = {
+      deckName: profile.deckName,
+      modelName: profile.modelName,
+      fields,
+      options: { allowDuplicate: true },
+      tags: [
+        "anki-cards-collector",
+        `collector::${proposal.cardKind}`,
+        identityTag,
+      ],
+    };
+
+    const canAdd = await this.invoke<boolean[]>("canAddNotes", {
+      notes: [candidate],
+    });
+    if (canAdd.length !== 1 || canAdd[0] !== true) {
+      throw new Error(
+        `Mapped export for "${item.lexicalUnit.canonicalText}" cannot produce an Anki card with the confirmed field mapping. Review the note-type template and mapping before exporting.`,
+      );
+    }
+  }
+
   async upsert(
     item: CollectedItem,
     profile: ExportProfile,
@@ -237,7 +280,6 @@ export class AnkiClient {
       throw new Error(proposal.warning ?? "This item needs review before export.");
     }
 
-    const occurrence = proposal.occurrenceSelection?.occurrence;
     const semanticValues = mappedSemanticValues(item);
     const fields = profile.mode === "mapped-user-model"
       ? mappedAnkiFields(item, profile)
@@ -289,7 +331,7 @@ export class AnkiClient {
     if (noteId === undefined) {
       const found = await this.invoke<number[]>("findNotes", {
         query: profile.mode === "mapped-user-model"
-          ? `tag:${identityTag}`
+          ? collectorIdentityQuery(item.lexicalUnit.id)
           : `CollectorID:${item.lexicalUnit.id}`,
       });
       if (found.length > 1) {
