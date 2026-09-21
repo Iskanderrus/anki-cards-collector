@@ -37,10 +37,16 @@ export function resolveExportRoute(
       );
     }
 
-    const profile = {
+    const profile: ExportProfile = {
       ...configuredProfile,
       deckName: binding.deckName ?? configuredProfile.deckName,
       modelName: binding.modelName ?? configuredProfile.modelName,
+      ...(configuredProfile.mode === "mapped-user-model"
+        ? {
+            deckId: binding.deckId,
+            modelId: binding.modelId,
+          }
+        : {}),
     };
 
     return { profile, source: "binding", binding };
