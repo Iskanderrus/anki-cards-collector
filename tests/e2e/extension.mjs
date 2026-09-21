@@ -426,6 +426,22 @@ async function sendPanelMessage(panel, message, label, timeoutMs = 10000) {
   );
 }
 
+async function waitForPanelMessage(panel, message, label, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now());
+    const response = await sendPanelMessage(
+      panel,
+      message,
+      label,
+      Math.min(2000, remaining),
+    );
+    if (predicate(response)) return response;
+    await panel.waitForTimeout(100);
+  }
+  throw new Error(`Timed out waiting for extension state: ${label}`);
+}
+
 async function ensureQueue(panel) {
   if (await panel.locator(".queue").count() === 0) {
     await panel.getByRole("button", { name: "Queue", exact: true }).click();
@@ -561,12 +577,10 @@ try {
   });
   assert.equal(typeof tabId, "number");
 
-  const contextMenuResult = await panel.evaluate(
-    async (activeTabId) => chrome.runtime.sendMessage({
-      type: "E2E_CONTEXT_MENU_CLICK",
-      tabId: activeTabId,
-    }),
-    tabId,
+  const contextMenuResult = await sendPanelMessage(
+    panel,
+    { type: "E2E_CONTEXT_MENU_CLICK", tabId },
+    "initial context-menu capture",
   );
   assert.equal(contextMenuResult?.ok, true, contextMenuResult?.error);
   await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
@@ -669,8 +683,10 @@ try {
     3,
     "Staged Duolingo evidence should be inspectable without entering the corpus.",
   );
-  const initialStagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const initialStagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "initial staged-batch readback",
   );
   assert.equal(initialStagedBatch?.ok, true);
   assert.equal(
@@ -699,8 +715,10 @@ try {
   await stopExtensionServiceWorker(context, panel, extensionId);
   await panel.waitForTimeout(100);
 
-  const restoredAfterWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const restoredAfterWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "staged-batch readback after worker restart",
   );
   assert.equal(restoredAfterWorkerRestart?.ok, true);
   assert.equal(
@@ -724,8 +742,10 @@ try {
   await clickPanelButton(panel, "Start backfill session");
   await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
 
-  const liveStatusBeforeWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const liveStatusBeforeWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status before worker restart",
   );
   assert.equal(liveStatusBeforeWorkerRestart?.ok, true);
   assert.equal(liveStatusBeforeWorkerRestart?.status?.active, true);
@@ -739,8 +759,10 @@ try {
   await panel.waitForTimeout(100);
   await contentPage.bringToFront();
 
-  const liveStatusAfterWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const liveStatusAfterWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after worker restart",
   );
   assert.equal(liveStatusAfterWorkerRestart?.ok, true);
   assert.equal(liveStatusAfterWorkerRestart?.status?.active, true);
@@ -785,16 +807,20 @@ try {
   // still address the Duolingo tab that owns the explicit session.
   await contentPage.bringToFront();
 
-  const injectPersistenceFailure = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE" }),
+  const injectPersistenceFailure = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE" },
+    "inject staged persistence failure",
   );
   assert.equal(injectPersistenceFailure?.ok, true);
 
   await clickPanelButton(panel, "Stop & stage session");
   await panel.locator(".notice.error", { hasText: "Injected staged-session persistence failure." }).waitFor();
 
-  const statusAfterFailedExplicitStop = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const statusAfterFailedExplicitStop = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after failed explicit stop",
   );
   assert.equal(statusAfterFailedExplicitStop?.ok, true);
   assert.equal(
@@ -823,8 +849,10 @@ try {
     "Stopping a Duolingo session must stage evidence without creating study items.",
   );
 
-  const stagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const stagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "staged-batch readback after explicit stop",
   );
   assert.equal(stagedBatch?.ok, true);
   assert.equal(stagedBatch?.batch?.candidates?.length, 6);
@@ -905,21 +933,27 @@ try {
   );
   await panel.locator(".notice", { hasText: "preserved" }).waitFor();
 
-  const awayStatus = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const awayStatus = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after SPA navigation",
   );
   assert.equal(awayStatus?.ok, true);
   assert.equal(awayStatus?.status?.active, false);
   assert.equal(awayStatus?.supported, false);
 
-  await panel.waitForFunction(async () => {
-    const response = await chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" });
-    return response?.batch?.candidates?.some(
+  await waitForPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "auto-staged batch after SPA navigation",
+    (response) => response?.batch?.candidates?.some(
       (candidate) => candidate.surfaceText === "ראיה אוטומטית חדשה",
-    ) === true;
-  });
-  const autoStagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+    ) === true,
+  );
+  const autoStagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "auto-staged batch readback",
   );
   assert.equal(autoStagedBatch?.ok, true);
   assert.equal(
@@ -947,8 +981,10 @@ try {
       .find((candidate) => candidate.textContent?.trim() === "Scan visible Duolingo");
     return button instanceof HTMLButtonElement && !button.disabled;
   });
-  const pairScanResult = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_SCAN_ACTIVE" }),
+  const pairScanResult = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_SCAN_ACTIVE" },
+    "matching-pairs Duolingo scan",
   );
   assert.equal(pairScanResult?.ok, true, pairScanResult?.error);
   assert.equal(
@@ -957,8 +993,10 @@ try {
     `Matching-pairs extractor should return five Hebrew leaves, got ${JSON.stringify(pairScanResult)}`,
   );
 
-  const pairsBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const pairsBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "matching-pairs staged-batch readback",
   );
   assert.equal(pairsBatch?.ok, true);
   assert.equal(pairsBatch?.batch?.candidates?.length, 12);
