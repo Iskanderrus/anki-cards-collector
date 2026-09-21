@@ -359,6 +359,17 @@ async function openSettings(panel) {
   await panel.locator(".settings").waitFor();
 }
 
+async function setCaptureLanguage(panel, language) {
+  await openSettings(panel);
+  const input = panel.getByPlaceholder("es, sr, he…");
+  await input.fill(language);
+  await panel.waitForFunction(async (expectedLanguage) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings?.defaultLanguage === expectedLanguage;
+  }, language);
+  await ensureQueue(panel);
+}
+
 async function termCount(panel) {
   await ensureQueue(panel);
   return panel.locator(".queue-row .term").count();
@@ -542,14 +553,7 @@ try {
   );
 
   // Duolingo visible backfill is explicitly activated and remains staged.
-  await openSettings(panel);
-  const languageInput = panel.getByPlaceholder("es, sr, he…");
-  await languageInput.fill("he");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "he";
-  });
-  await ensureQueue(panel);
+  await setCaptureLanguage(panel, "he");
 
   const duolingoPage = await context.newPage();
   await duolingoPage.goto(`${fixtureUrl}duolingo`);
@@ -673,11 +677,7 @@ try {
 
   // Session evidence owns the language captured at session start. Changing the
   // current setting must not relabel already observed Hebrew evidence.
-  await languageInput.fill("sr");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "sr";
-  });
+  await setCaptureLanguage(panel, "sr");
 
   // Switch away from the originating tab before stopping. The service worker must
   // still address the Duolingo tab that owns the explicit session.
@@ -761,11 +761,7 @@ try {
     "Changing Settings mid-session must not relabel observed Hebrew evidence as Serbian.",
   );
 
-  await languageInput.fill("he");
-  await panel.waitForFunction(async () => {
-    const stored = await chrome.storage.local.get("collectorSettings");
-    return stored.collectorSettings?.defaultLanguage === "he";
-  });
+  await setCaptureLanguage(panel, "he");
 
   // A same-document Duolingo SPA transition away from lesson/review content must
   // stop the active observer even though the hostname and document stay the same.
