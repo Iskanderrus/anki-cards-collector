@@ -232,7 +232,9 @@ function buildRestorePlan(
       && current.state === incoming.state
       && current.ankiNoteId === incoming.ankiNoteId
       && current.deckName === incoming.deckName
-      && current.modelName === incoming.modelName;
+      && current.deckId === incoming.deckId
+      && current.modelName === incoming.modelName
+      && current.modelId === incoming.modelId;
 
     if (same) {
       preview.exportBindingsSkipped += 1;
@@ -284,9 +286,23 @@ function consolidationConflictReason(
       return "Cannot consolidate these forms because they use different export destinations.";
     }
     if (
+      leftBinding.deckId
+      && rightBinding.deckId
+      && leftBinding.deckId !== rightBinding.deckId
+    ) {
+      return "Cannot consolidate these forms because they use different export destinations.";
+    }
+    if (
       leftBinding.modelName
       && rightBinding.modelName
       && leftBinding.modelName !== rightBinding.modelName
+    ) {
+      return "Cannot consolidate these forms because they use different export destinations.";
+    }
+    if (
+      leftBinding.modelId
+      && rightBinding.modelId
+      && leftBinding.modelId !== rightBinding.modelId
     ) {
       return "Cannot consolidate these forms because they use different export destinations.";
     }
@@ -860,7 +876,9 @@ export class CaptureRepository {
           const sameDestination =
             current.profileId === binding.profileId
             && current.deckName === binding.deckName
-            && current.modelName === binding.modelName;
+            && current.deckId === binding.deckId
+            && current.modelName === binding.modelName
+            && current.modelId === binding.modelId;
           const validReconciliation =
             sameDestination
             && (
