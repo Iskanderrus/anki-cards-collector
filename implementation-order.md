@@ -17,7 +17,8 @@ The following work is already part of the current baseline:
 - **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata;
 - **ACCP-019** — source-agnostic staged batch capture, deterministic dedupe/classification, and transactional corpus commit;
 - **ACCP-020** — opt-in Duolingo visible lesson backfill with MV3-safe staged/session lifecycle;
-- **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle.
+- **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle;
+- **ACCP-017** — bounded read-only deck/model analysis with representative existing-card previews and real-Anki acceptance.
 
 ---
 
@@ -27,13 +28,9 @@ ACCP-019 now provides the staged candidate/commit boundary required by source-sp
 
 ---
 
-## Gate B — destination routing, source adapters, and discovery evidence
+## Gate B — completed destination discovery evidence
 
-### ACCP-017 — deck/model analysis and representative existing-card preview
-
-Depends on completed ACCP-016.
-
-Can run in parallel with much of ACCP-013.
+ACCP-017 is now baseline work alongside ACCP-013 and ACCP-016.
 
 ## Gate C — interaction shell and canonical review
 
@@ -109,19 +106,18 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-017 — deck/model analysis + existing-card preview
-2. ACCP-011 — sidebar redesign
-3. ACCP-003 — canonicalization workflow
-4. ACCP-014 — existing note type mapping
-5. ACCP-018 — guided export-profile setup
-6. ACCP-021 — batch backfill review/import
-7. ACCP-012 — onboarding/user journey
-8. ACCP-004 — explicit merge/split
-9. ACCP-005 — learning-card policy v2
-10. ACCP-006 — morphology assistance
-11. ACCP-007 — learning-value decision
+1. ACCP-011 — sidebar redesign
+2. ACCP-003 — canonicalization workflow
+3. ACCP-014 — existing note type mapping
+4. ACCP-018 — guided export-profile setup
+5. ACCP-021 — batch backfill review/import
+6. ACCP-012 — onboarding/user journey
+7. ACCP-004 — explicit merge/split
+8. ACCP-005 — learning-card policy v2
+9. ACCP-006 — morphology assistance
+10. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, and ACCP-013 are now baseline work. ACCP-017 is the next linear merge gate.
+ACCP-019, ACCP-020, ACCP-013, and ACCP-017 are now baseline work. ACCP-011 is the next linear merge gate.
 
 ---
 
