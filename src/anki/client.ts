@@ -1,6 +1,12 @@
 import type { CollectedItem, ExportProfile } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
+import {
+  collectorIdentityTag,
+  mappedAnkiFields,
+  mappedSemanticValues,
+  validateMappedProfile,
+} from "./mapping";
 
 interface AnkiResponse<T> {
   result: T;
@@ -104,8 +110,8 @@ export class AnkiClient {
 
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
     if (
-      profile.mode !== "collector-managed"
-      || profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
+      profile.mode === "collector-managed"
+      && profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
     ) {
       throw new Error(
         `Collector refuses to modify Anki note type "${profile.modelName}" because it is not the recognized Collector-managed model.`,
@@ -120,6 +126,21 @@ export class AnkiClient {
     }
 
     const models = await this.invoke<string[]>("modelNames");
+
+    if (profile.mode === "mapped-user-model") {
+      if (!models.includes(profile.modelName)) {
+        throw new Error(
+          `Anki note type "${profile.modelName}" is not available. Refresh the live catalog and choose an existing note type.`,
+        );
+      }
+
+      const fields = await this.invoke<string[]>("modelFieldNames", {
+        modelName: profile.modelName,
+      });
+      validateMappedProfile(profile, fields);
+      return;
+    }
+
     if (!models.includes(profile.modelName)) {
       await this.invoke("createModel", {
         modelName: profile.modelName,
@@ -181,28 +202,45 @@ export class AnkiClient {
     }
 
     const occurrence = proposal.occurrenceSelection?.occurrence;
-    const fields = {
-      CollectorID: item.lexicalUnit.id,
-      Prompt: proposal.prompt,
-      Answer: proposal.answer,
-      CardKind: proposal.cardKind,
-      Why: proposal.reason,
-      Canonical: item.lexicalUnit.canonicalText,
-      Observed: occurrence?.surfaceText ?? item.lexicalUnit.canonicalText,
-      Expression: item.lexicalUnit.canonicalText,
-      Context: occurrence?.context ?? "",
-      Note: item.lexicalUnit.note,
-      Source: occurrence?.source.url ?? "",
-    };
+    const semanticValues = mappedSemanticValues(item);
+    const fields = profile.mode === "mapped-user-model"
+      ? mappedAnkiFields(item, profile)
+      : {
+          CollectorID: item.lexicalUnit.id,
+          Prompt: semanticValues.Prompt,
+          Answer: semanticValues.Answer,
+          CardKind: semanticValues.CardKind,
+          Why: semanticValues.Why,
+          Canonical: semanticValues.Canonical,
+          Observed: semanticValues.Observed,
+          Expression: item.lexicalUnit.canonicalText,
+          Context: semanticValues.Context,
+          Note: semanticValues.Note,
+          Source: semanticValues.Source,
+        };
+    const identityTag = collectorIdentityTag(item.lexicalUnit.id);
 
     let noteId = existingNoteId ?? item.lexicalUnit.ankiNoteId;
 
     if (noteId !== undefined) {
       const storedNoteId = noteId;
       try {
-        const notes = await this.invoke<Array<{ noteId?: number }>>("notesInfo", { notes: [storedNoteId] });
-        const storedNoteStillExists = notes.some((note) => note.noteId === storedNoteId);
-        if (!storedNoteStillExists) noteId = undefined;
+        const notes = await this.invoke<Array<{ noteId?: number; modelName?: string }>>(
+          "notesInfo",
+          { notes: [storedNoteId] },
+        );
+        const storedNote = notes.find((note) => note.noteId === storedNoteId);
+        if (!storedNote) {
+          noteId = undefined;
+        } else if (
+          profile.mode === "mapped-user-model"
+          && storedNote.modelName
+          && storedNote.modelName !== profile.modelName
+        ) {
+          throw new Error(
+            `Pinned Anki note ${storedNoteId} uses note type "${storedNote.modelName}", not "${profile.modelName}".`,
+          );
+        }
       } catch (error) {
         if (!isMissingNoteError(error, storedNoteId)) throw error;
         noteId = undefined;
@@ -211,15 +249,46 @@ export class AnkiClient {
 
     if (noteId === undefined) {
       const found = await this.invoke<number[]>("findNotes", {
-        query: `CollectorID:${item.lexicalUnit.id}`,
+        query: profile.mode === "mapped-user-model"
+          ? `tag:${identityTag}`
+          : `CollectorID:${item.lexicalUnit.id}`,
       });
+      if (found.length > 1) {
+        throw new Error(
+          `Multiple Anki notes match Collector identity ${item.lexicalUnit.id}; resolve the duplicate identity before exporting.`,
+        );
+      }
       noteId = found[0];
+
+      if (noteId !== undefined && profile.mode === "mapped-user-model") {
+        const recovered = await this.invoke<Array<{ noteId?: number; modelName?: string }>>(
+          "notesInfo",
+          { notes: [noteId] },
+        );
+        const recoveredNote = recovered.find((note) => note.noteId === noteId);
+        if (!recoveredNote) {
+          throw new Error(
+            `Anki identity lookup returned note ${noteId}, but the note could not be inspected.`,
+          );
+        }
+        if (recoveredNote.modelName && recoveredNote.modelName !== profile.modelName) {
+          throw new Error(
+            `Collector identity tag belongs to note type "${recoveredNote.modelName}", not "${profile.modelName}".`,
+          );
+        }
+      }
     }
 
     if (noteId !== undefined) {
       await this.invoke("updateNoteFields", {
         note: { id: noteId, fields },
       });
+      if (profile.mode === "mapped-user-model") {
+        await this.invoke("addTags", {
+          notes: [noteId],
+          tags: identityTag,
+        });
+      }
       return noteId;
     }
 
@@ -229,7 +298,11 @@ export class AnkiClient {
         modelName: profile.modelName,
         fields,
         options: { allowDuplicate: false },
-        tags: ["anki-cards-collector", `collector::${proposal.cardKind}`],
+        tags: [
+          "anki-cards-collector",
+          `collector::${proposal.cardKind}`,
+          ...(profile.mode === "mapped-user-model" ? [identityTag] : []),
+        ],
       },
     });
   }
