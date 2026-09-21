@@ -1018,25 +1018,26 @@ try {
   await analysisPanel.getByRole("button", { name: "Close" }).click();
   await analysisPanel.waitFor({ state: "detached" });
 
-  const firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
+  let firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   await firstRoutingCard.getByRole("button", { name: "Edit" }).click();
   await firstRoutingCard.locator(".editor").getByLabel("Language code").fill("he");
   await firstRoutingCard.getByRole("button", { name: "Save" }).click();
-  await firstRoutingCard.getByRole("button", { name: "Ready" }).click();
+  const firstReady = firstRoutingCard.getByRole("button", { name: "Ready" });
+  if (await firstReady.count()) await firstReady.click();
   await firstRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
-
-  const secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
-  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
-  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
-  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
-  await secondRoutingCard.getByRole("button", { name: "Ready" }).click();
-  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
-
   assert.match(
     await firstRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Hebrew RU/,
     "The Hebrew card should show only its resolved Anki deck.",
   );
+
+  let secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
+  await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
+  await secondRoutingCard.locator(".editor").getByLabel("Language code").fill("sr");
+  await secondRoutingCard.getByRole("button", { name: "Save" }).click();
+  const secondReady = secondRoutingCard.getByRole("button", { name: "Ready" });
+  if (await secondReady.count()) await secondReady.click();
+  await secondRoutingCard.locator(".pill", { hasText: "ready" }).waitFor();
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Serbian RU/,
@@ -1058,10 +1059,12 @@ try {
   assert.equal(deckByCanonical["Aunque llueva"], "Hebrew RU");
   assert.equal(deckByCanonical["Context menu phrase"], "Serbian RU");
 
+  firstRoutingCard = await cardForTerm(panel, "Aunque llueva");
   assert.match(
     await firstRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Hebrew RU.*note\s+\d+/s,
   );
+  secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   assert.match(
     await secondRoutingCard.locator(".export-destination").innerText(),
     /Anki:\s*Serbian RU.*note\s+\d+/s,
@@ -1106,7 +1109,30 @@ try {
   );
   assert.equal(await termCount(panel), 2, "Restricted-page failure must not add data.");
 
-  console.log("Browser extension capture, keyboard, accessibility, and permission checks passed.");
+  // ACCP-011: long study targets stay compact and scannable instead of expanding
+  // the queue into repeated full-card blocks.
+  const longTarget = "Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear";
+  await selectText(contentPage, "#long", longTarget);
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  const longRow = await queueRowForTerm(panel, longTarget);
+  await longRow.waitFor();
+  const longTermStyle = await longRow.locator(".term").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      lineClamp: style.getPropertyValue("-webkit-line-clamp"),
+      overflow: style.overflow,
+    };
+  });
+  assert.equal(longTermStyle.lineClamp, "2", "Long queue terms should clamp to two lines.");
+  assert.equal(longTermStyle.overflow, "hidden", "Long queue terms should not expand the entire review feed.");
+  assert.equal(
+    await panel.locator(".detail-card").count(),
+    0,
+    "Capturing a long item should keep the user in the compact queue.",
+  );
+
+  console.log("Browser extension capture, compact queue/detail, keyboard, accessibility, and permission checks passed.");
 } finally {
   await context?.close();
   await Promise.all([
