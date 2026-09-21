@@ -777,6 +777,7 @@ describe("AnkiClient", () => {
 
     phase = "retry";
     requests.length = 0;
+    delete value.lexicalUnit.ankiNoteId;
 
     await expect(
       client.upsert(value, mappedProfile()),
@@ -792,6 +793,22 @@ describe("AnkiClient", () => {
     expect(requests[1]?.params).toEqual({
       query: "tag:collector::id::unit-1",
     });
+  });
+
+
+  it("refuses to update a user-owned note when notesInfo cannot verify its model", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      const result = request.action === "notesInfo"
+        ? [{ noteId: 4242 }]
+        : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .upsert(item(), mappedProfile(), 4242),
+    ).rejects.toThrow("did not report its note type");
   });
 
 });
