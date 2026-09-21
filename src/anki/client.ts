@@ -7,7 +7,8 @@ import {
   mappedAnkiFields,
   mappedSemanticValues,
   validateMappedProfile,
-  validateMappedTemplateCompatibility,
+  validateMappedQuestionFields,
+  validateMappedTemplates,
 } from "./mapping";
 
 interface AnkiResponse<T> {
@@ -160,10 +161,12 @@ export class AnkiClient {
         "modelFieldsOnTemplates",
         { modelName: profile.modelName },
       );
+      validateMappedQuestionFields(profile, fieldsOnTemplates);
+
       const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
         modelName: profile.modelName,
       });
-      validateMappedTemplateCompatibility(profile, fieldsOnTemplates, templates);
+      validateMappedTemplates(profile, templates);
       return;
     }
 

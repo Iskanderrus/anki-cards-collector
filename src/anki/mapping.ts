@@ -166,13 +166,10 @@ export function validateMappedQuestionFields(
   }
 }
 
-export function validateMappedTemplateCompatibility(
+export function validateMappedTemplates(
   profile: ExportProfile,
-  fieldsOnTemplates: Record<string, [string[], string[]]>,
   templates: Record<string, MappedTemplateHtml>,
 ): void {
-  validateMappedQuestionFields(profile, fieldsOnTemplates);
-
   const usesCloze = Object.values(templates).some(
     (template) => /\{\{\s*cloze\s*:/i.test(`${template.Front}\n${template.Back}`),
   );

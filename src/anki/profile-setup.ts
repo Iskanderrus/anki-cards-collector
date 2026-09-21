@@ -10,7 +10,8 @@ import {
   COLLECTOR_SEMANTIC_FIELDS,
   normalizeFieldMapping,
   validateFieldMapping,
-  validateMappedTemplateCompatibility,
+  validateMappedQuestionFields,
+  validateMappedTemplates,
 } from "./mapping";
 
 export const COMMON_PROFILE_LANGUAGES = [
@@ -129,7 +130,8 @@ export function validateMappedProfileAgainstLive(
       ]),
     );
     try {
-      validateMappedTemplateCompatibility(profile, fieldsOnTemplates, templates);
+      validateMappedQuestionFields(profile, fieldsOnTemplates);
+      validateMappedTemplates(profile, templates);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Mapped note-type compatibility validation failed.");
     }
