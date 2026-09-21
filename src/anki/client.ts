@@ -280,15 +280,18 @@ export class AnkiClient {
     }
 
     if (noteId !== undefined) {
-      await this.invoke("updateNoteFields", {
-        note: { id: noteId, fields },
-      });
       if (profile.mode === "mapped-user-model") {
+        // Establish the stable recovery identity before field mutation. If the
+        // subsequent update fails, a reserved local binding can safely retry by
+        // this tag without creating a duplicate note.
         await this.invoke("addTags", {
           notes: [noteId],
           tags: identityTag,
         });
       }
+      await this.invoke("updateNoteFields", {
+        note: { id: noteId, fields },
+      });
       return noteId;
     }
 
