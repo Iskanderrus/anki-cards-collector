@@ -42,6 +42,7 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
+import { ReviewQueue } from "./queue";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -1369,48 +1370,26 @@ function App(): React.ReactElement {
       )}
 
       {view === "queue" && (
-        <section className="queue" aria-label="Review queue">
-          {items.length === 0 && (
-            <div className="empty">
-              Select something useful on a page, then click <strong>Collect selection</strong>.
-            </div>
-          )}
-          {items.map((item) => {
-            const unit = item.lexicalUnit;
+        <ReviewQueue
+          entries={items.map((item) => {
             const proposal = proposeLearningCard(item);
             const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
-            const binding = exportBindings[unit.id];
+            const binding = exportBindings[item.lexicalUnit.id];
             const route = resolvedRoute(item);
-            const deckName = binding?.deckName ?? route?.profile.deckName ?? "";
-            const active = unit.id === activeId;
-            return (
-              <button
-                type="button"
-                className="queue-row"
-                key={unit.id}
-                data-queue-id={unit.id}
-                data-active={active ? "true" : "false"}
-                aria-label={`Open ${unit.canonicalText}, ${unit.status}, ${item.occurrences.length} occurrence${item.occurrences.length === 1 ? "" : "s"}`}
-                onFocus={() => setActiveId(unit.id)}
-                onClick={() => openDetail(unit.id)}
-              >
-                <span className="queue-row-head">
-                  <span className="term" dir="auto">{unit.canonicalText}</span>
-                  <span className="pill">{unit.status}</span>
-                </span>
-                <span className="queue-meta">
-                  {unit.language} · {item.occurrences.length} occurrence{item.occurrences.length === 1 ? "" : "s"}
-                </span>
-                {selectedOccurrence?.context && (
-                  <span className="queue-context" dir="auto">{selectedOccurrence.context}</span>
-                )}
-                <span className="queue-destination">
-                  Anki: {deckName || "choose a deck in Settings"}
-                </span>
-              </button>
-            );
+            return {
+              id: item.lexicalUnit.id,
+              canonicalText: item.lexicalUnit.canonicalText,
+              language: item.lexicalUnit.language,
+              status: item.lexicalUnit.status,
+              occurrenceCount: item.occurrences.length,
+              context: selectedOccurrence?.context ?? "",
+              deckName: binding?.deckName ?? route?.profile.deckName ?? "",
+            };
           })}
-        </section>
+          activeId={activeId}
+          onActivate={setActiveId}
+          onOpen={openDetail}
+        />
       )}
 
       {view === "settings" && (
