@@ -513,7 +513,7 @@ try {
   await noteField.focus();
   await panel.keyboard.press("a");
   assert.equal(
-    await secondCard.locator(".pill").innerText(),
+    await secondCard.locator(".card-head > .pill").innerText(),
     "ready",
     "Typing inside an editor must not trigger the Archive shortcut.",
   );
