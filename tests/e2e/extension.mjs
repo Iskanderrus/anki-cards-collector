@@ -1293,10 +1293,35 @@ try {
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
 
+  // Missing live objects must be reported distinctly and must not alter saved identity.
+  ankiDecks.delete("Hebrew RU");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Saved deck is missing from live Anki/).waitFor();
+  revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.deckId,
+    "2",
+  );
+  ankiDecks.set("Hebrew RU", 2);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
   // Same-name note-type replacement must also be rejected without identity rewriting.
   ankiModels.set("Hebrew Existing", 99);
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText(/Same-name note-type replacement rejected/).waitFor();
+  revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.modelId,
+    "11",
+  );
+  ankiModels.set("Hebrew Existing", 11);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  ankiModels.delete("Hebrew Existing");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Saved note type is missing from live Anki/).waitFor();
   revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   assert.equal(
     revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.modelId,
