@@ -523,6 +523,10 @@ describe("AnkiClient", () => {
         deckNamesAndIds: { "Hebrew RU": 2 },
         modelNamesAndIds: { "Hebrew Existing": 11 },
         modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example", "Private Notes"],
+        modelFieldsOnTemplates: {
+          Recognition: [["Hebrew"], ["Hebrew", "Russian"]],
+          Reverse: [["Russian"], ["Russian", "Hebrew"]],
+        },
         modelTemplates: {
           Recognition: {
             Front: "{{Hebrew}}",
@@ -547,6 +551,7 @@ describe("AnkiClient", () => {
       "deckNamesAndIds",
       "modelNamesAndIds",
       "modelFieldNames",
+      "modelFieldsOnTemplates",
       "modelTemplates",
     ]);
     expect(actions).not.toContain("createModel");
@@ -605,7 +610,7 @@ describe("AnkiClient", () => {
     ]);
     expect(requests[1]?.params).toEqual({
       notes: [4242],
-      tags: "collector::id::unit-1",
+      tags: "collector::id::756e69742d31",
     });
     expect(requests[2]?.params).toEqual({
       note: {
@@ -656,7 +661,7 @@ describe("AnkiClient", () => {
       "updateNoteFields",
     ]);
     expect(requests[1]?.params).toEqual({
-      query: "tag:collector::id::unit-1",
+      query: "tag:re:^collector::id::756e69742d31$",
     });
   });
 
@@ -697,7 +702,7 @@ describe("AnkiClient", () => {
         tags: [
           "anki-cards-collector",
           "collector::context-production",
-          "collector::id::unit-1",
+          "collector::id::756e69742d31",
         ],
       },
     });
@@ -807,7 +812,7 @@ describe("AnkiClient", () => {
       "updateNoteFields",
     ]);
     expect(requests[0]?.params).toEqual({
-      query: "tag:collector::id::unit-1",
+      query: "tag:re:^collector::id::756e69742d31$",
     });
   });
 
@@ -886,6 +891,9 @@ describe("AnkiClient", () => {
         deckNamesAndIds: { "Hebrew RU": 2 },
         modelNamesAndIds: { "Hebrew Existing": 11 },
         modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example"],
+        modelFieldsOnTemplates: {
+          Cloze: [["Hebrew"], ["Hebrew", "Russian"]],
+        },
         modelTemplates: {
           Cloze: {
             Front: "{{cloze:Hebrew}}",
@@ -914,6 +922,114 @@ describe("AnkiClient", () => {
     expect(actions).not.toContain("updateNoteFields");
     expect(actions).not.toContain("modelFieldAdd");
     expect(actions).not.toContain("updateModelTemplates");
+  });
+
+
+  it("rejects a mapping whose Prompt field is absent from every question side", async () => {
+    const actions: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      actions.push(request.action);
+      const resultByAction: Record<string, unknown> = {
+        deckNamesAndIds: { "Hebrew RU": 2 },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
+        modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example"],
+        modelFieldsOnTemplates: {
+          Recognition: [["Lemma"], ["Russian"]],
+        },
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .ensureDeckAndModel(mappedProfile()),
+    ).rejects.toThrow('Mapped Prompt field "Hebrew" is not used on the question side');
+
+    expect(actions).toEqual([
+      "deckNamesAndIds",
+      "modelNamesAndIds",
+      "modelFieldNames",
+      "modelFieldsOnTemplates",
+    ]);
+    expect(actions).not.toContain("addNote");
+    expect(actions).not.toContain("updateNoteFields");
+  });
+
+  it("preflights the actual mapped note non-mutatively before reservation", async () => {
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      return new Response(JSON.stringify({
+        result: request.action === "canAddNotes" ? [true] : null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher)
+      .preflight(item(), mappedProfile());
+
+    expect(requests.map(({ action }) => action)).toEqual(["canAddNotes"]);
+    expect(requests[0]?.params).toMatchObject({
+      notes: [expect.objectContaining({
+        deckName: "Hebrew RU",
+        modelName: "Hebrew Existing",
+        options: { allowDuplicate: true },
+        tags: expect.arrayContaining(["collector::id::756e69742d31"]),
+      })],
+    });
+  });
+
+  it("blocks a mapped note when Anki says the actual mapped values cannot create a card", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { action: string };
+      return new Response(JSON.stringify({
+        result: request.action === "canAddNotes" ? [false] : null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new AnkiClient("http://127.0.0.1:8765", fetcher)
+        .preflight(item(), mappedProfile()),
+    ).rejects.toThrow("cannot produce an Anki card");
+  });
+
+  it("uses an exact anchored tag regex for restored ids containing Anki search metacharacters", async () => {
+    const value = item();
+    value.lexicalUnit.id = "unit_*()::child";
+    delete value.lexicalUnit.ankiNoteId;
+    const requests: Array<{ action: string; params: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      requests.push(request);
+      const result = request.action === "findNotes"
+        ? []
+        : request.action === "addNote"
+          ? 9002
+          : null;
+      return new Response(JSON.stringify({ result, error: null }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new AnkiClient("http://127.0.0.1:8765", fetcher)
+      .upsert(value, mappedProfile());
+
+    const query = String(requests[0]?.params.query ?? "");
+    expect(query).toMatch(/^tag:re:\^collector::id::[0-9a-f]+\$$/);
+    expect(query).not.toContain("*");
+    expect(query).not.toContain("_");
+    expect(query).not.toContain("(");
+    expect(query).not.toContain(")");
   });
 
 });
