@@ -298,7 +298,7 @@ export function GuidedProfileSetup({
   }
 
   async function revalidate(profile: ExportProfile): Promise<void> {
-    if (catalogKind !== "live" || !catalogSnapshot) {
+    if (catalogKind !== "live") {
       setProfileStatus((current) => ({
         ...current,
         [profile.id]: "Live revalidation requires Anki Desktop + AnkiConnect.",
@@ -313,7 +313,17 @@ export function GuidedProfileSetup({
       return;
     }
 
-    const liveDeck = catalogSnapshot.decks.find((deck) => deck.name === profile.deckName);
+    const refreshed = await catalogService.refresh();
+    if (refreshed.kind !== "live") {
+      setProfileStatus((current) => ({
+        ...current,
+        [profile.id]: "Could not refresh live Anki metadata: " + refreshed.error,
+      }));
+      return;
+    }
+    const liveSnapshot = refreshed.snapshot;
+
+    const liveDeck = liveSnapshot.decks.find((deck) => deck.name === profile.deckName);
     if (!liveDeck) {
       setProfileStatus((current) => ({ ...current, [profile.id]: "Saved deck is missing from live Anki." }));
       return;
@@ -326,7 +336,7 @@ export function GuidedProfileSetup({
       return;
     }
 
-    const liveModel = catalogSnapshot.models.find((model) => model.name === profile.modelName);
+    const liveModel = liveSnapshot.models.find((model) => model.name === profile.modelName);
     if (!liveModel) {
       setProfileStatus((current) => ({ ...current, [profile.id]: "Saved note type is missing from live Anki." }));
       return;
@@ -348,7 +358,7 @@ export function GuidedProfileSetup({
       return;
     }
 
-    const validation = validateMappedProfileAgainstLive(profile, catalogSnapshot, inspected.detail);
+    const validation = validateMappedProfileAgainstLive(profile, liveSnapshot, inspected.detail);
     if (!validation.valid) {
       setProfileStatus((current) => ({ ...current, [profile.id]: validation.errors.join(" ") }));
       return;
@@ -365,7 +375,7 @@ export function GuidedProfileSetup({
   }
 
   async function saveProfile(): Promise<void> {
-    if (!draft || !nextProfile || !liveModelDetail || !catalogSnapshot || catalogKind !== "live") {
+    if (!draft || !nextProfile || !liveModelDetail || catalogKind !== "live") {
       onError("Complete the live language, deck, note-type, and mapping steps before saving.");
       return;
     }
@@ -382,7 +392,25 @@ export function GuidedProfileSetup({
       return;
     }
 
-    const validation = validateMappedProfileAgainstLive(nextProfile, catalogSnapshot, liveModelDetail);
+    const refreshed = await catalogService.refresh();
+    if (refreshed.kind !== "live") {
+      onError("Live Anki revalidation failed before Save: " + refreshed.error);
+      return;
+    }
+    const inspected = await catalogService.inspectModel(nextProfile.modelName);
+    if (inspected.kind !== "live") {
+      onError(
+        "Live note-type revalidation failed before Save"
+        + (inspected.kind === "stale" ? ": " + inspected.error : "."),
+      );
+      return;
+    }
+
+    const validation = validateMappedProfileAgainstLive(
+      nextProfile,
+      refreshed.snapshot,
+      inspected.detail,
+    );
     if (!validation.valid) {
       onError(validation.errors.join(" "));
       return;
