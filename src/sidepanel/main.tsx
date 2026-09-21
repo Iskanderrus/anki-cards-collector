@@ -35,6 +35,11 @@ import {
   type AnkiModelInspectionResult,
 } from "../anki/catalog";
 import { ChromeAnkiCatalogCache } from "../anki/catalog-cache";
+import {
+  DeckAnalysisService,
+  type DeckAnalysis,
+  type RepresentativeAnkiCard,
+} from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 
@@ -47,6 +52,72 @@ type ModelUiState =
   | { kind: "idle" }
   | { kind: "loading"; detail: AnkiModelDetail | null }
   | AnkiModelInspectionResult;
+
+type DeckAnalysisUiState =
+  | { kind: "idle" }
+  | { kind: "loading"; deckName: string }
+  | { kind: "live"; analysis: DeckAnalysis }
+  | { kind: "error"; deckName: string; error: string };
+
+function safePreviewCss(css: string): string {
+  return css.replace(/<\/style/gi, "<\\/style");
+}
+
+function sanitizeRepresentativeHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+
+  template.content
+    .querySelectorAll("script, iframe, object, embed, link, meta, base, form")
+    .forEach((node) => node.remove());
+
+  const urlAttributes = new Set([
+    "action",
+    "formaction",
+    "href",
+    "poster",
+    "src",
+    "srcset",
+  ]);
+
+  for (const element of template.content.querySelectorAll("*")) {
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (!urlAttributes.has(name)) continue;
+
+      const value = attribute.value.trim().toLowerCase();
+      if (!value.startsWith("data:") && !value.startsWith("blob:")) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  }
+
+  return template.innerHTML;
+}
+
+function representativePreviewDocument(
+  card: RepresentativeAnkiCard,
+  side: "question" | "answer",
+): string {
+  const rawBody = side === "question" ? card.question : card.answer;
+  const body = sanitizeRepresentativeHtml(rawBody);
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; frame-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:;">
+<style>
+html, body { margin: 0; padding: 8px; background: transparent; }
+${safePreviewCss(card.css)}
+</style>
+</head>
+<body>${body}</body>
+</html>`;
+}
 
 
 interface VisibleSessionStatus {
@@ -165,6 +236,7 @@ function App(): React.ReactElement {
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
   const [modelState, setModelState] = useState<ModelUiState>({ kind: "idle" });
+  const [deckAnalysisState, setDeckAnalysisState] = useState<DeckAnalysisUiState>({ kind: "idle" });
   const [backfill, setBackfill] = useState<BackfillUiState>({
     supported: false,
     status: { active: false, candidateCount: 0 },
@@ -173,12 +245,18 @@ function App(): React.ReactElement {
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
+  const deckAnalysisRequestId = useRef(0);
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
       () => new Date(),
       new ChromeAnkiCatalogCache(),
     ),
+    [],
+  );
+
+  const deckAnalysisService = useMemo(
+    () => new DeckAnalysisService(new AnkiClient()),
     [],
   );
 
@@ -844,6 +922,34 @@ function App(): React.ReactElement {
     setModelState(result);
   }
 
+  async function inspectAnkiDeck(deckName: string): Promise<void> {
+    if (!deckName) return;
+
+    const requestId = deckAnalysisRequestId.current + 1;
+    deckAnalysisRequestId.current = requestId;
+    setDeckAnalysisState({ kind: "loading", deckName });
+
+    try {
+      const analysis = await deckAnalysisService.analyze(deckName);
+      if (deckAnalysisRequestId.current !== requestId) return;
+      setDeckAnalysisState({ kind: "live", analysis });
+    } catch (analysisError) {
+      if (deckAnalysisRequestId.current !== requestId) return;
+      setDeckAnalysisState({
+        kind: "error",
+        deckName,
+        error: analysisError instanceof Error
+          ? analysisError.message
+          : "Could not inspect this Anki deck.",
+      });
+    }
+  }
+
+  function closeDeckAnalysis(): void {
+    deckAnalysisRequestId.current += 1;
+    setDeckAnalysisState({ kind: "idle" });
+  }
+
   async function refreshAnkiCatalog(): Promise<void> {
     setCatalogState({
       kind: "loading",
@@ -1250,11 +1356,15 @@ function App(): React.ReactElement {
               );
               const deckName = profile?.deckName ?? "";
               const missing = catalogState.kind === "live"
-                && deckName
+                && Boolean(deckName)
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
-                <div className="language-deck-row" key={route.language}>
+                <div
+                  className="language-deck-row"
+                  key={route.language}
+                  data-language={route.language}
+                >
                   <strong>{route.language}</strong>
                   <select
                     aria-label={`Anki deck for ${route.language}`}
@@ -1270,19 +1380,29 @@ function App(): React.ReactElement {
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
                   </select>
-                  <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
-                    Remove
-                  </button>
-                  {missing && (
+                  <div className="language-deck-actions">
                     <button
                       className="ghost"
                       type="button"
-                      disabled={busy}
-                      onClick={() => void createSavedDeck(deckName)}
+                      disabled={catalogState.kind !== "live" || missing}
+                      onClick={() => void inspectAnkiDeck(deckName)}
                     >
-                      Create deck
+                      Inspect
                     </button>
-                  )}
+                    <button className="ghost" type="button" onClick={() => void removeLanguageRoute(route.language)}>
+                      Remove
+                    </button>
+                    {missing && (
+                      <button
+                        className="ghost"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void createSavedDeck(deckName)}
+                      >
+                        Create deck
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1319,11 +1439,14 @@ function App(): React.ReactElement {
               );
               const deckName = fallback?.deckName ?? "";
               const missing = catalogState.kind === "live"
-                && deckName
+                && Boolean(deckName)
                 && !catalogState.snapshot.decks.some((deck) => deck.name === deckName);
 
               return (
-                <div className="language-deck-row fallback-deck-row">
+                <div
+                  className="language-deck-row fallback-deck-row"
+                  data-language="other"
+                >
                   <strong>Other languages</strong>
                   <select
                     aria-label="Anki deck for other languages"
@@ -1339,20 +1462,130 @@ function App(): React.ReactElement {
                       <option key={String(deck.id)} value={deck.name}>{deck.name}</option>
                     ))}
                   </select>
-                  {missing && (
+                  <div className="language-deck-actions">
                     <button
                       className="ghost"
                       type="button"
-                      disabled={busy}
-                      onClick={() => void createSavedDeck(deckName)}
+                      disabled={catalogState.kind !== "live" || missing}
+                      onClick={() => void inspectAnkiDeck(deckName)}
                     >
-                      Create deck
+                      Inspect
                     </button>
-                  )}
+                    {missing && (
+                      <button
+                        className="ghost"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void createSavedDeck(deckName)}
+                      >
+                        Create deck
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })()}
           </div>
+
+          {deckAnalysisState.kind !== "idle" && (
+            <section className="deck-analysis" aria-live="polite">
+              {deckAnalysisState.kind === "loading" && (
+                <div className="deck-analysis-status">
+                  Inspecting a bounded sample from <strong>{deckAnalysisState.deckName}</strong>…
+                </div>
+              )}
+
+              {deckAnalysisState.kind === "error" && (
+                <div className="deck-analysis-status error" role="alert">
+                  Could not inspect {deckAnalysisState.deckName}: {deckAnalysisState.error}
+                </div>
+              )}
+
+              {deckAnalysisState.kind === "live" && (() => {
+                const analysis = deckAnalysisState.analysis;
+                return (
+                  <>
+                    <div className="deck-analysis-head">
+                      <div>
+                        <strong>Existing cards in {analysis.deckName}</strong>
+                        <div className="setting-help">
+                          {analysis.totalCardCount === 0
+                            ? "This deck is empty."
+                            : `Inspected ${analysis.inspectedCardCount} of ${analysis.sampledCardCount} sampled card${analysis.sampledCardCount === 1 ? "" : "s"} from ${analysis.totalCardCount} total.`}
+                        </div>
+                      </div>
+                      <button
+                        className="ghost"
+                        type="button"
+                        onClick={closeDeckAnalysis}
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    {analysis.totalCardCount > 0 && (
+                      <div className="setting-help">
+                        Sample evidence only. Collector does not choose a note type automatically.
+                        {analysis.truncated ? " Large deck sampling is bounded." : ""}
+                        {analysis.unavailableSampleCount > 0
+                          ? ` ${analysis.unavailableSampleCount} sampled card${analysis.unavailableSampleCount === 1 ? " was" : "s were"} unavailable or malformed.`
+                          : ""}
+                      </div>
+                    )}
+
+                    {analysis.models.map((model) => (
+                      <details className="deck-model-sample" key={model.modelName}>
+                        <summary>
+                          <strong>{model.modelName}</strong>
+                          <span>{model.sampledCount}/{analysis.inspectedCardCount} inspected</span>
+                        </summary>
+
+                        <div className="representative-cards">
+                          {model.representatives.map((card) => (
+                            <article
+                              className="representative-card"
+                              key={String(card.cardId)}
+                            >
+                              <div className="representative-meta">
+                                <span>
+                                  {card.templateOrdinal === undefined
+                                    ? "Card ordinal unavailable"
+                                    : `Card ordinal #${card.templateOrdinal + 1}`}
+                                </span>
+                                <span>{card.css.length} CSS chars</span>
+                              </div>
+
+                              <div className="representative-side">
+                                <strong>Front</strong>
+                                <iframe
+                                  className="anki-preview-frame"
+                                  sandbox=""
+                                  referrerPolicy="no-referrer"
+                                  title={`${model.modelName} representative front`}
+                                  srcDoc={representativePreviewDocument(card, "question")}
+                                />
+                              </div>
+
+                              <div className="representative-side">
+                                <strong>Back</strong>
+                                <iframe
+                                  className="anki-preview-frame"
+                                  sandbox=""
+                                  referrerPolicy="no-referrer"
+                                  title={`${model.modelName} representative back`}
+                                  srcDoc={representativePreviewDocument(card, "answer")}
+                                />
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </>
+                );
+              })()}
+            </section>
+          )}
 
           <details className="advanced-settings">
             <summary>Advanced</summary>

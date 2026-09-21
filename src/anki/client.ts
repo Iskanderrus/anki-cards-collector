@@ -94,6 +94,14 @@ export class AnkiClient {
     return this.invoke<RawAnkiModelStyling>("modelStyling", { modelName });
   }
 
+  async findCards(query: string): Promise<RawAnkiObjectId[]> {
+    return this.invoke<RawAnkiObjectId[]>("findCards", { query });
+  }
+
+  async cardsInfo(cards: RawAnkiObjectId[]): Promise<unknown[]> {
+    return this.invoke<unknown[]>("cardsInfo", { cards });
+  }
+
   async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
     if (
       profile.mode !== "collector-managed"
@@ -233,7 +241,7 @@ export class AnkiClient {
   }
 
   async moveNoteToDeck(noteId: number, deckName: string): Promise<void> {
-    const cards = await this.invoke<number[]>("findCards", { query: `nid:${noteId}` });
+    const cards = await this.findCards(`nid:${noteId}`);
     if (cards.length === 0) {
       throw new Error(`No Anki cards were found for note ${noteId}.`);
     }

@@ -104,6 +104,19 @@ The proposal is intentionally not stored. Editing the source material recomputes
 
 See [learning-card policy](learning-card-policy.md).
 
+### Read-only Anki deck evidence
+
+`DeckAnalysisService` sits above the AnkiConnect client as a read-only evidence boundary.
+
+A selected deck is inspected in two stages:
+
+1. `findCards` returns matching card IDs;
+2. only a deterministic bounded sample (24 by default) is passed to `cardsInfo`.
+
+The service aggregates model counts only within that inspected sample and keeps representative rendered cards per sampled model/card ordinal. It never converts frequency into a model choice. Missing/malformed cards are treated as unavailable sample evidence, which also makes races with cards changing in Anki safe.
+
+Representative HTML/CSS stays local. The side-panel preview uses a sandboxed iframe with external resource loading disabled. No deck-analysis path owns or calls mutation actions.
+
 ### Anki boundary
 
 `AnkiClient` is the only code that knows the AnkiConnect protocol.
