@@ -676,6 +676,59 @@ if (__COLLECTOR_E2E__) {
       return false;
     }
 
+    if (message?.type === "E2E_REPLACE_STAGED_BATCH") {
+      const evidence = Array.isArray(message.evidence)
+        ? message.evidence as BatchCaptureEvidence[]
+        : [];
+      void withStagedBatchLock(async () => {
+        const result = await batchPipeline.stageBatch(
+          String(message.batchId ?? `e2e-${crypto.randomUUID()}`),
+          evidence,
+        );
+        await persistStagedBatch(result);
+        return result;
+      })
+        .then((batch) => sendResponse({ ok: true, batch, staged: stagedSummary(batch) }))
+        .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+      return true;
+    }
+
+    if (message?.type === "E2E_SEED_AMBIGUOUS_OWNERS") {
+      void (async () => {
+        const source = {
+          kind: "web" as const,
+          adapter: "e2e-ambiguous-owner",
+          url: "https://example.test/ambiguous",
+          title: "E2E ambiguous ownership fixture",
+        };
+        const owners: string[] = [];
+        for (const [index, canonicalText] of ["בעלים ראשון", "בעלים שני"].entries()) {
+          const capturedAt = `2026-09-22T12:0${index}:00.000Z`;
+          const item = await repository.capture({
+            text: canonicalText,
+            context: `${canonicalText} בהקשר.`,
+            language: "he",
+            source,
+            capturedAt,
+          });
+          const updated = await repository.update(item.lexicalUnit.id, {
+            canonicalText,
+            language: "he",
+            note: "",
+            occurrenceId: item.occurrences[0]?.id,
+            surfaceText: "כתב",
+            context: `${canonicalText} בהקשר.`,
+          });
+          owners.push(updated.lexicalUnit.id);
+        }
+        chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
+        return owners;
+      })()
+        .then((ownerIds) => sendResponse({ ok: true, ownerIds }))
+        .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+      return true;
+    }
+
     if (message?.type !== "E2E_CONTEXT_MENU_CLICK") return false;
 
     const tabId = Number(message.tabId);
