@@ -1915,6 +1915,7 @@ try {
   ankiRequests.length = 0;
   await panel.getByRole("button", { name: /^Staged/ }).click();
   await stagedReview.waitFor();
+  await stagedReview.getByText("55 visible of 55 staged").waitFor();
   assert.equal(
     await stagedReview.locator(".staged-review-row").count(),
     55,
