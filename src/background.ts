@@ -416,12 +416,38 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
     const existing = await restoreStagedBatchUnlocked();
     if (!existing) throw new Error("No staged batch is active.");
 
-    if (__COLLECTOR_E2E__ && failNextStagedCommitForE2E) {
-      failNextStagedCommitForE2E = false;
-      throw new Error("Injected staged commit failure.");
+    let result;
+    try {
+      if (__COLLECTOR_E2E__ && failNextStagedCommitForE2E) {
+        failNextStagedCommitForE2E = false;
+        throw new Error("Injected staged commit failure.");
+      }
+
+      result = await batchPipeline.commit(request);
+    } catch (error) {
+      let active = batchPipeline.getActiveBatch();
+      let recoveryDetail = "";
+
+      try {
+        // A failed transaction may mean corpus ownership changed after staging.
+        // Refresh the retained batch before returning control so the UI can expose
+        // the current Needs review owner set instead of trapping the user in a
+        // stale retry loop.
+        active = await batchPipeline.refreshActiveBatch();
+        await persistStagedBatch(active);
+      } catch (recoveryError) {
+        active = batchPipeline.getActiveBatch();
+        recoveryDetail = ` Staged evidence was retained, but its recovery snapshot could not be refreshed: ${errorMessage(recoveryError)}.`;
+      }
+
+      return {
+        ok: false as const,
+        error: `${errorMessage(error)}${recoveryDetail}`,
+        batch: active,
+        staged: stagedSummary(active),
+      };
     }
 
-    const result = await batchPipeline.commit(request);
     const active = batchPipeline.getActiveBatch();
     let warning: string | undefined;
 
@@ -441,6 +467,7 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
 
     chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
     return {
+      ok: true as const,
       result,
       batch: active,
       staged: stagedSummary(active),
@@ -693,6 +720,47 @@ if (__COLLECTOR_E2E__) {
       return true;
     }
 
+    if (message?.type === "E2E_SEED_OBSERVED_OWNER") {
+      void (async () => {
+        const surfaceText = String(message.surfaceText ?? "").trim();
+        const canonicalText = String(message.canonicalText ?? "").trim();
+        const language = String(message.language ?? "he").trim() || "he";
+        if (!surfaceText || !canonicalText) {
+          throw new Error("E2E observed-owner fixture requires surfaceText and canonicalText.");
+        }
+
+        const capturedAt = String(
+          message.capturedAt ?? "2026-09-22T15:30:00.000Z",
+        );
+        const source = {
+          kind: "web" as const,
+          adapter: "e2e-late-owner",
+          url: "https://example.test/late-owner",
+          title: "E2E late ownership fixture",
+        };
+        const item = await repository.capture({
+          text: canonicalText,
+          context: `${canonicalText} fixture context.`,
+          language,
+          source,
+          capturedAt,
+        });
+        const updated = await repository.update(item.lexicalUnit.id, {
+          canonicalText,
+          language,
+          note: "",
+          occurrenceId: item.occurrences[0]?.id,
+          surfaceText,
+          context: `${canonicalText} fixture context.`,
+        });
+        chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
+        return updated.lexicalUnit.id;
+      })()
+        .then((ownerId) => sendResponse({ ok: true, ownerId }))
+        .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+      return true;
+    }
+
     if (message?.type === "E2E_SEED_AMBIGUOUS_OWNERS") {
       void (async () => {
         const source = {
@@ -829,7 +897,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ? message.resolutions as Record<string, string>
       : undefined;
     void commitStagedCandidates({ candidateIds, resolutions })
-      .then((result) => sendResponse({ ok: true, ...result }))
+      .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
     return true;
   }
