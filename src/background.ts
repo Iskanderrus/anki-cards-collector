@@ -51,6 +51,7 @@ let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
 let failNextStagedBatchPersistenceForE2E = false;
 let failNextStagedCommitForE2E = false;
+let failNextPostCommitStagedRefreshForE2E = false;
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
   return {
@@ -417,10 +418,27 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
     if (!existing) throw new Error("No staged batch is active.");
 
     let result;
+    let restoreRepositoryListForE2E: (() => void) | undefined;
     try {
       if (__COLLECTOR_E2E__ && failNextStagedCommitForE2E) {
         failNextStagedCommitForE2E = false;
         throw new Error("Injected staged commit failure.");
+      }
+
+      if (__COLLECTOR_E2E__ && failNextPostCommitStagedRefreshForE2E) {
+        failNextPostCommitStagedRefreshForE2E = false;
+        const originalList = repository.list.bind(repository);
+        let injected = false;
+        repository.list = async (status) => {
+          if (!injected) {
+            injected = true;
+            throw new Error("Injected post-commit staged refresh failure.");
+          }
+          return originalList(status);
+        };
+        restoreRepositoryListForE2E = () => {
+          repository.list = originalList;
+        };
       }
 
       result = await batchPipeline.commit(request);
@@ -446,6 +464,8 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
         batch: active,
         staged: stagedSummary(active),
       };
+    } finally {
+      restoreRepositoryListForE2E?.();
     }
 
     const active = batchPipeline.getActiveBatch();
@@ -700,6 +720,12 @@ if (__COLLECTOR_E2E__) {
 
     if (message?.type === "E2E_FAIL_NEXT_STAGED_COMMIT") {
       failNextStagedCommitForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "E2E_FAIL_NEXT_POST_COMMIT_STAGED_REFRESH") {
+      failNextPostCommitStagedRefreshForE2E = true;
       sendResponse({ ok: true });
       return false;
     }
