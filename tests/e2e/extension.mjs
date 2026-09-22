@@ -1971,6 +1971,19 @@ try {
   await stagedReview.getByRole("button", { name: "Clear all selection" }).click();
   await stagedFilter.selectOption("all");
 
+  // A temporarily empty filter must restore a valid active row when the list
+  // becomes visible again, otherwise row-level J/K navigation loses its anchor.
+  await stagedSearch.fill("definitely-no-staged-match");
+  await stagedReview.getByText("No candidates match this search/filter.").waitFor();
+  await stagedSearch.fill("");
+  const restoredActiveRow = stagedReview.locator('.staged-review-row[data-active="true"]');
+  await restoredActiveRow.first().waitFor();
+  assert.equal(
+    await restoredActiveRow.count(),
+    1,
+    "Clearing an empty staged filter should restore exactly one active row.",
+  );
+
   // Keyboard-only row navigation/selection/inspection uses the ACCP-011 conventions
   // without stealing keystrokes from form controls.
   const firstStagedRow = stagedReview.locator(".staged-review-row").first();
