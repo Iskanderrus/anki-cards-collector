@@ -615,7 +615,7 @@ export class CaptureRepository {
 
   private async captureBatchEntryWithinTransaction(
     entry: CaptureBatchEntry,
-  ): Promise<CaptureBatchOutcome> {
+  ): Promise<{ kind: CaptureBatchOutcomeKind; lexicalUnitId: string }> {
     const surfaceText = normalizeText(entry.draft.text);
     if (!surfaceText) throw new Error("Nothing selected.");
 
@@ -667,10 +667,9 @@ export class CaptureRepository {
     }
 
     if (exactOwnerIds.size === 1) {
-      const lexicalUnitId = [...exactOwnerIds][0]!;
       return {
         kind: "unchanged",
-        item: await this.collectedItem(lexicalUnitId),
+        lexicalUnitId: [...exactOwnerIds][0]!,
       };
     }
 
@@ -685,7 +684,7 @@ export class CaptureRepository {
       if (exactOwnerIds.has(targetLexicalUnitId)) {
         return {
           kind: "unchanged",
-          item: await this.collectedItem(targetLexicalUnitId),
+          lexicalUnitId: targetLexicalUnitId,
         };
       }
     } else if (matchingOwners.size === 1) {
@@ -709,29 +708,32 @@ export class CaptureRepository {
       await this.database.lexicalUnits.put(lexicalUnit);
     }
 
-    return {
-      kind,
-      item: await this.collectedItem(lexicalUnit.id),
-    };
+    return { kind, lexicalUnitId: lexicalUnit.id };
   }
 
   async captureBatch(entries: readonly CaptureBatchEntry[]): Promise<CaptureBatchOutcome[]> {
     if (entries.length === 0) return [];
 
-    const outcomes: CaptureBatchOutcome[] = [];
-
-    await this.database.transaction(
+    return this.database.transaction(
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
       async () => {
+        const pending: Array<{
+          kind: CaptureBatchOutcomeKind;
+          lexicalUnitId: string;
+        }> = [];
+
         for (const entry of entries) {
-          outcomes.push(await this.captureBatchEntryWithinTransaction(entry));
+          pending.push(await this.captureBatchEntryWithinTransaction(entry));
         }
+
+        return Promise.all(pending.map(async ({ kind, lexicalUnitId }) => ({
+          kind,
+          item: await this.collectedItem(lexicalUnitId),
+        })));
       },
     );
-
-    return outcomes;
   }
 
   async list(status?: ReviewStatus): Promise<CollectedItem[]> {
