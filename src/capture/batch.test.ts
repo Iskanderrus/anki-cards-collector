@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BatchCaptureEvidence, BatchSourceAdapter } from "./batch";
+import type { CollectedItem } from "../core/types";
 import { BatchCapturePipeline } from "./batch";
 import { CollectorDatabase } from "../storage/database";
 import { CaptureRepository } from "../storage/repository";
@@ -366,10 +367,27 @@ describe("BatchCapturePipeline", () => {
     ).rejects.toThrow("needs an explicit matching lexical-unit resolution");
 
     captureBatchSpy.mockRestore();
-    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
-      "late-ambiguity:0001",
-    ]);
-    expect((await repository.list()).flatMap((item) => item.occurrences)).toHaveLength(2);
+    const refreshed = pipeline.getActiveBatch()?.candidates[0];
+    expect(refreshed?.id).toBe("late-ambiguity:0001");
+    expect(refreshed?.disposition).toBe("needs-review");
+    expect(refreshed?.matchingLexicalUnitIds).toEqual(
+      [first.lexicalUnit.id, second.lexicalUnit.id].sort(),
+    );
+
+    const retried = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+      resolutions: {
+        [staged.candidates[0]!.id]: first.lexicalUnit.id,
+      },
+    });
+    expect(retried.summary.evidenceAdded).toBe(1);
+    expect(pipeline.getActiveBatch()).toBeNull();
+
+    const corpus = await repository.list();
+    expect(corpus.flatMap((item) => item.occurrences)).toHaveLength(3);
+    expect(
+      corpus.find((item) => item.lexicalUnit.id === first.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(2);
   });
 
   it("rejects a resolution that stops being a current matching owner before mutation", async () => {
@@ -434,7 +452,16 @@ describe("BatchCapturePipeline", () => {
     ).rejects.toThrow("no longer a current matching owner");
 
     captureBatchSpy.mockRestore();
-    expect(pipeline.getActiveBatch()?.candidates[0]?.id).toBe("stale-resolution:0001");
+    const refreshed = pipeline.getActiveBatch()?.candidates[0];
+    expect(refreshed?.id).toBe("stale-resolution:0001");
+    expect(refreshed?.disposition).toBe("repeated-evidence");
+    expect(refreshed?.matchingLexicalUnitIds).toEqual([second.lexicalUnit.id]);
+
+    const retried = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+    expect(retried.summary.evidenceAdded).toBe(1);
+    expect(retried.committed[0]?.item.lexicalUnit.id).toBe(second.lexicalUnit.id);
   });
 
   it("derives new-versus-evidence summary from transaction-time ownership", async () => {
@@ -470,6 +497,69 @@ describe("BatchCapturePipeline", () => {
     const corpus = await repository.list();
     expect(corpus).toHaveLength(1);
     expect(corpus[0]?.occurrences).toHaveLength(2);
+  });
+
+  it("uses normalized language semantics for restored mixed-case observed owners", async () => {
+    const ownerId = "mixed-case-language-owner";
+    await database.lexicalUnits.add({
+      id: ownerId,
+      contentKey: "he::לכתוב",
+      canonicalText: "לכתוב",
+      normalizedCanonicalText: "לכתוב",
+      language: "HE",
+      note: "",
+      status: "inbox",
+      createdAt: "2026-09-19T08:00:00.000Z",
+      updatedAt: "2026-09-19T08:00:00.000Z",
+    });
+    await database.occurrences.add({
+      id: "mixed-case-language-occurrence",
+      lexicalUnitId: ownerId,
+      surfaceText: "כתב",
+      normalizedSurfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+      capturedAt: "2026-09-19T08:00:00.000Z",
+    });
+
+    const exact = await pipeline.stageBatch("mixed-case-exact", [
+      evidence("כתב", "הוא כתב מכתב."),
+    ]);
+    expect(exact.candidates[0]?.disposition).toBe("already-represented");
+
+    const exactResult = await pipeline.commit({
+      candidateIds: [exact.candidates[0]!.id],
+    });
+    expect(exactResult.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 0,
+      unchanged: 1,
+      needsReview: 0,
+    });
+
+    const additional = await pipeline.stageBatch("mixed-case-additional", [
+      evidence("כתב", "הוא כתב שוב."),
+    ]);
+    expect(additional.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const additionalResult = await pipeline.commit({
+      candidateIds: [additional.candidates[0]!.id],
+    });
+    expect(additionalResult.summary.evidenceAdded).toBe(1);
+    expect(additionalResult.committed[0]?.item.lexicalUnit.id).toBe(ownerId);
+
+    const normalCapture = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב בפעם השלישית.",
+      language: "he",
+      capturedAt: "2026-09-19T12:05:00.000Z",
+      source: evidence("כתב", "הוא כתב בפעם השלישית.").source,
+    });
+    expect(normalCapture.lexicalUnit.id).toBe(ownerId);
+
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(3);
   });
 
   it("edits staged evidence in place and reclassifies it against the corpus", async () => {
@@ -666,6 +756,31 @@ describe("BatchCapturePipeline", () => {
     });
     expect(retried.summary.newUnits).toBe(2);
     expect(await repository.list()).toHaveLength(2);
+  });
+
+  it("rolls back if transactional outcome hydration fails", async () => {
+    const internals = repository as unknown as {
+      collectedItem(id: string): Promise<CollectedItem>;
+    };
+    const collectedItem = vi.spyOn(internals, "collectedItem")
+      .mockRejectedValueOnce(new Error("Injected outcome hydration failure."));
+
+    await expect(
+      repository.captureBatch([
+        {
+          draft: {
+            text: "לחם",
+            context: "יש לחם על השולחן.",
+            language: "he",
+            capturedAt: "2026-09-19T13:00:00.000Z",
+            source: evidence("לחם", "יש לחם על השולחן.").source,
+          },
+        },
+      ]),
+    ).rejects.toThrow("Injected outcome hydration failure.");
+
+    collectedItem.mockRestore();
+    expect(await repository.list()).toEqual([]);
   });
 
   it("rolls back the whole repository batch on a commit failure", async () => {
