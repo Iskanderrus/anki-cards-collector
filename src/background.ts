@@ -1,6 +1,12 @@
 declare const __COLLECTOR_E2E__: boolean;
 
-import { BatchCapturePipeline, type BatchCaptureEvidence, type BatchCaptureResult } from "./capture/batch";
+import {
+  BatchCapturePipeline,
+  type BatchCandidateEdit,
+  type BatchCaptureEvidence,
+  type BatchCaptureResult,
+  type BatchCommitRequest,
+} from "./capture/batch";
 import { sanitizeSourceUrl } from "./capture/source-url";
 import type { CaptureDraft, SourceUrlMode } from "./core/types";
 import { captureLanguageForSettings, loadSettings } from "./settings";
@@ -44,6 +50,7 @@ interface StoredVisibleSessionOwner {
 let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
 let failNextStagedBatchPersistenceForE2E = false;
+let failNextStagedCommitForE2E = false;
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
   return {
@@ -366,6 +373,82 @@ async function stageVisibleEvidence(
   });
 }
 
+async function mutateStagedBatch(
+  operation: (active: BatchCaptureResult) => Promise<BatchCaptureResult | null>,
+): Promise<BatchCaptureResult | null> {
+  return withStagedBatchLock(async () => {
+    const existing = await restoreStagedBatchUnlocked();
+    if (!existing) throw new Error("No staged batch is active.");
+
+    const previousEvidence = evidenceFromResult(existing);
+    try {
+      const result = await operation(existing);
+      await persistStagedBatch(result);
+      return result;
+    } catch (error) {
+      await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+      throw error;
+    }
+  });
+}
+
+async function editStagedCandidate(
+  candidateId: string,
+  changes: BatchCandidateEdit,
+): Promise<BatchCaptureResult> {
+  const result = await mutateStagedBatch(
+    () => batchPipeline.editCandidate(candidateId, changes),
+  );
+  if (!result) throw new Error("Staged batch disappeared during edit.");
+  return result;
+}
+
+async function discardStagedCandidates(
+  candidateIds: readonly string[],
+): Promise<BatchCaptureResult | null> {
+  return mutateStagedBatch(
+    () => batchPipeline.discardCandidates(candidateIds),
+  );
+}
+
+async function commitStagedCandidates(request: BatchCommitRequest) {
+  return withStagedBatchLock(async () => {
+    const existing = await restoreStagedBatchUnlocked();
+    if (!existing) throw new Error("No staged batch is active.");
+
+    if (__COLLECTOR_E2E__ && failNextStagedCommitForE2E) {
+      failNextStagedCommitForE2E = false;
+      throw new Error("Injected staged commit failure.");
+    }
+
+    const result = await batchPipeline.commit(request);
+    const active = batchPipeline.getActiveBatch();
+    let warning: string | undefined;
+
+    try {
+      await persistStagedBatch(active);
+    } catch (error) {
+      try {
+        // A transient session-storage failure must not make a completed corpus
+        // transaction look uncommitted. Retry the transient snapshot once; even
+        // if it remains unavailable, a stale snapshot reclassifies committed
+        // evidence as already represented on the next worker start.
+        await persistStagedBatch(active);
+      } catch {
+        warning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Reload Staged review before retrying; committed evidence will reclassify as already represented.`;
+      }
+    }
+
+    chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
+    return {
+      result,
+      batch: active,
+      staged: stagedSummary(active),
+      warning,
+    };
+  });
+}
+
 async function scanVisibleDuolingo(): Promise<{
   foundCount: number;
   staged: ReturnType<typeof stagedSummary>;
@@ -587,6 +670,12 @@ if (__COLLECTOR_E2E__) {
       return false;
     }
 
+    if (message?.type === "E2E_FAIL_NEXT_STAGED_COMMIT") {
+      failNextStagedCommitForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type !== "E2E_CONTEXT_MENU_CLICK") return false;
 
     const tabId = Number(message.tabId);
@@ -650,6 +739,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "DUOLINGO_STOP_ACTIVE_SESSION") {
     void stopVisibleDuolingoSession()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "EDIT_STAGED_CANDIDATE") {
+    void editStagedCandidate(String(message.candidateId ?? ""), message.changes ?? {})
+      .then((batch) => sendResponse({
+        ok: true,
+        batch,
+        staged: stagedSummary(batch),
+      }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "DISCARD_STAGED_CANDIDATES") {
+    void discardStagedCandidates(
+      Array.isArray(message.candidateIds) ? message.candidateIds.map(String) : [],
+    )
+      .then((batch) => sendResponse({
+        ok: true,
+        batch,
+        staged: stagedSummary(batch),
+      }))
+      .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "COMMIT_STAGED_CANDIDATES") {
+    const candidateIds = Array.isArray(message.candidateIds)
+      ? message.candidateIds.map(String)
+      : [];
+    const resolutions = message.resolutions && typeof message.resolutions === "object"
+      ? message.resolutions as Record<string, string>
+      : undefined;
+    void commitStagedCandidates({ candidateIds, resolutions })
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
     return true;
