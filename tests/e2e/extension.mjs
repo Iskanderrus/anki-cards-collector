@@ -2172,6 +2172,89 @@ try {
   }).waitFor();
   await lateRow.waitFor({ state: "detached" });
 
+  markE2eStage("accp021-post-commit-refresh-warning");
+  const postCommitEvidence = [
+    {
+      surfaceText: "post-commit-refresh-a-he",
+      context: "first staged item committed before refresh failure",
+      language: "he",
+      source: e2eBatchSource,
+      capturedAt: "2026-09-22T15:40:00.000Z",
+    },
+    {
+      surfaceText: "post-commit-refresh-b-he",
+      context: "second staged item must remain staged",
+      language: "he",
+      source: e2eBatchSource,
+      capturedAt: "2026-09-22T15:41:00.000Z",
+    },
+  ];
+  const postCommitBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp021-post-commit-refresh",
+      evidence: postCommitEvidence,
+    },
+    "ACCP-021 post-commit refresh failure fixture",
+  );
+  assert.equal(postCommitBatch?.ok, true, postCommitBatch?.error);
+  assert.deepEqual(
+    postCommitBatch.batch.candidates.map((candidate) => candidate.disposition),
+    ["new", "new"],
+  );
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const committedBeforeRefreshRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "post-commit-refresh-a-he",
+  });
+  const remainingAfterRefreshRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "post-commit-refresh-b-he",
+  });
+  await committedBeforeRefreshRow.getByRole("checkbox").check();
+
+  const failPostCommitRefresh = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_POST_COMMIT_STAGED_REFRESH" },
+    "ACCP-021 post-commit staged refresh failure",
+  );
+  assert.equal(failPostCommitRefresh?.ok, true);
+
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "Corpus import completed, but remaining staged evidence could not be reclassified",
+  }).waitFor();
+  assert.equal(
+    await panel.locator(".notice.error").count(),
+    0,
+    "A post-commit staged refresh failure must not be surfaced as an import error.",
+  );
+  await committedBeforeRefreshRow.waitFor({ state: "detached" });
+  await remainingAfterRefreshRow.waitFor();
+  await stagedReview.getByText("1 visible of 1 staged").waitFor();
+
+  const postCommitReadback = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-021 post-commit staged readback",
+  );
+  assert.equal(postCommitReadback?.ok, true, postCommitReadback?.error);
+  assert.deepEqual(
+    postCommitReadback.batch.candidates.map((candidate) => candidate.surfaceText),
+    ["post-commit-refresh-b-he"],
+    "Only the unselected candidate may remain staged after durable corpus success.",
+  );
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await queueRowForTerm(panel, "post-commit-refresh-a-he");
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: "post-commit-refresh-b-he" }).count(),
+    0,
+    "The unselected candidate must not be committed when remaining staged refresh fails.",
+  );
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+
   const stagedAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
