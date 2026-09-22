@@ -449,7 +449,7 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
     }
 
     const active = batchPipeline.getActiveBatch();
-    let warning: string | undefined;
+    let warning = result.warning;
 
     try {
       await persistStagedBatch(active);
@@ -461,7 +461,8 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
         // evidence as already represented on the next worker start.
         await persistStagedBatch(active);
       } catch {
-        warning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Reload Staged review before retrying; committed evidence will reclassify as already represented.`;
+        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Reload Staged review before retrying; committed evidence will reclassify as already represented.`;
+        warning = warning ? `${warning} ${persistenceWarning}` : persistenceWarning;
       }
     }
 
