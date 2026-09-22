@@ -1,4 +1,4 @@
-import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
+import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
 import type { CaptureSource, CollectedItem } from "../core/types";
 import type { CaptureBatchEntry, CaptureRepository } from "../storage/repository";
 
@@ -70,10 +70,6 @@ export interface BatchCommitResult {
   summary: BatchCommitSummary;
 }
 
-function normalizedLanguage(language: string): string {
-  return language.trim().toLowerCase() || "und";
-}
-
 function sourceFingerprint(source: CaptureSource): string {
   return [source.kind, source.adapter, source.url, source.title].join("\u0000");
 }
@@ -83,7 +79,7 @@ function duplicateFingerprint(candidate: BatchCaptureEvidence): string {
   // Occurrences cannot store it, so metadata-only differences must not survive
   // staging as separate candidates that would become identical persisted rows.
   return [
-    normalizedLanguage(candidate.language),
+    normalizeLanguage(candidate.language),
     normalizeIdentityText(candidate.surfaceText),
     normalizeText(candidate.context),
     sourceFingerprint(candidate.source),
@@ -97,7 +93,7 @@ function occurrenceEvidenceFingerprint(
   source: CaptureSource,
 ): string {
   return [
-    normalizedLanguage(language),
+    normalizeLanguage(language),
     normalizeIdentityText(surfaceText),
     normalizeText(context),
     sourceFingerprint(source),
@@ -155,7 +151,7 @@ export class BatchCapturePipeline {
       const normalized: BatchCaptureEvidence = {
         surfaceText,
         context: normalizeText(value.context).slice(0, 800),
-        language: normalizedLanguage(value.language),
+        language: normalizeLanguage(value.language),
         source: { ...value.source },
         capturedAt: value.capturedAt || new Date().toISOString(),
         adapterMetadata: value.adapterMetadata ? { ...value.adapterMetadata } : undefined,
@@ -220,7 +216,7 @@ export class BatchCapturePipeline {
       : normalizeText(changes.context).slice(0, 800);
     const language = changes.language === undefined
       ? current.language
-      : normalizedLanguage(changes.language);
+      : normalizeLanguage(changes.language);
 
     const edited: BatchCaptureCandidate = {
       ...current,
@@ -300,7 +296,13 @@ export class BatchCapturePipeline {
       resolutionLexicalUnitId: request.resolutions?.[candidate.id],
     }));
 
-    const outcomes = await this.repository.captureBatch(entries);
+    let outcomes;
+    try {
+      outcomes = await this.repository.captureBatch(entries);
+    } catch (error) {
+      await this.refreshActiveBatch();
+      throw error;
+    }
     const committed: BatchCommitResult["committed"] = [];
     const unchangedCandidateIds: string[] = [];
     let newUnits = 0;
@@ -350,6 +352,16 @@ export class BatchCapturePipeline {
     };
   }
 
+  async refreshActiveBatch(): Promise<BatchCaptureResult | null> {
+    if (!this.activeBatch) return null;
+
+    this.activeBatch = {
+      ...this.activeBatch,
+      candidates: await this.classify(this.activeBatch.candidates),
+    };
+    return cloneResult(this.activeBatch);
+  }
+
   private async classify(
     candidates: readonly BatchCaptureCandidate[],
   ): Promise<BatchCaptureCandidate[]> {
@@ -363,7 +375,7 @@ export class BatchCapturePipeline {
       canonicalOwners.set(unit.contentKey, unit.id);
 
       for (const occurrence of item.occurrences) {
-        const observedKey = `${normalizedLanguage(unit.language)}::${occurrence.normalizedSurfaceText}`;
+        const observedKey = `${normalizeLanguage(unit.language)}::${occurrence.normalizedSurfaceText}`;
         const observed = observedOwners.get(observedKey) ?? new Set<string>();
         observed.add(unit.id);
         observedOwners.set(observedKey, observed);
