@@ -1942,8 +1942,8 @@ try {
     assert.equal(compactStyle.overflow, "hidden");
   }
 
-  const stagedSearch = stagedReview.getByLabel("Search staged evidence");
-  const stagedFilter = stagedReview.getByLabel("Disposition");
+  const stagedSearch = stagedReview.getByRole("textbox", { name: "Search staged evidence", exact: true });
+  const stagedFilter = stagedReview.getByRole("combobox", { name: "Disposition", exact: true });
 
   // Visible-scope bulk selection must never mutate hidden selection.
   await stagedFilter.selectOption("new");
