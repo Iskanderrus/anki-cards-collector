@@ -553,6 +553,17 @@ try {
   await panel.locator("h1").waitFor();
   assert.equal(await termCount(panel), 0);
 
+  // ACCP-021 starts with a dedicated empty staged surface. Staged review has no
+  // direct Anki action and stays visually separate from the normal corpus queue.
+  await panel.getByRole("button", { name: "Staged", exact: true }).click();
+  await panel.getByText("No staged evidence.").waitFor();
+  assert.equal(
+    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    0,
+    "Staged review must not expose a direct staged-to-Anki action.",
+  );
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+
   // Explicit selection capture through the same runtime message used by the side-panel button.
   await selectText(contentPage, "#first", "Aunque llueva");
   await contentPage.bringToFront();
