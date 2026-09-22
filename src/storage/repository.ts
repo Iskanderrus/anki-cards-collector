@@ -7,7 +7,7 @@ import type {
   Occurrence,
   ReviewStatus,
 } from "../core/types";
-import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
+import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
@@ -362,7 +362,7 @@ export class CaptureRepository {
 
     const units = (await this.database.lexicalUnits.bulkGet(ids))
       .filter((unit): unit is LexicalUnit => unit !== undefined)
-      .filter((unit) => unit.language === language);
+      .filter((unit) => normalizeLanguage(unit.language) === normalizeLanguage(language));
 
     return units.length === 1 ? units[0] : undefined;
   }
@@ -375,7 +375,7 @@ export class CaptureRepository {
     if (!surfaceText) throw new Error("Nothing selected.");
 
     const normalizedSurfaceText = normalizeIdentityText(surfaceText);
-    const language = draft.language.trim().toLowerCase() || "und";
+    const language = normalizeLanguage(draft.language);
     const directContentKey = makeContentKey(surfaceText, language);
     const now = draft.capturedAt || new Date().toISOString();
     let lexicalUnit: LexicalUnit;
@@ -383,7 +383,7 @@ export class CaptureRepository {
     if (targetLexicalUnitId) {
       const target = await this.database.lexicalUnits.get(targetLexicalUnitId);
       if (!target) throw new Error("Target lexical unit no longer exists.");
-      if (target.language !== language) {
+      if (normalizeLanguage(target.language) !== language) {
         throw new Error("Target lexical unit uses a different language.");
       }
 
@@ -474,7 +474,7 @@ export class CaptureRepository {
     const canonicalText = normalizeText(requestedCanonicalText);
     if (!canonicalText) throw new Error("Canonical form cannot be empty.");
 
-    const language = requestedLanguage.trim().toLowerCase() || "und";
+    const language = normalizeLanguage(requestedLanguage);
     const contentKey = makeContentKey(canonicalText, language);
     const current = await this.database.lexicalUnits.get(id);
     if (!current) throw new Error("Collected item no longer exists.");
@@ -487,7 +487,7 @@ export class CaptureRepository {
     if (
       current.contentKey === contentKey
       && current.canonicalText === canonicalText
-      && current.language === language
+      && normalizeLanguage(current.language) === language
     ) {
       return {
         kind: "unchanged",
@@ -615,12 +615,12 @@ export class CaptureRepository {
 
   private async captureBatchEntryWithinTransaction(
     entry: CaptureBatchEntry,
-  ): Promise<{ kind: CaptureBatchOutcomeKind; lexicalUnitId: string }> {
+  ): Promise<CaptureBatchOutcome> {
     const surfaceText = normalizeText(entry.draft.text);
     if (!surfaceText) throw new Error("Nothing selected.");
 
     const normalizedSurfaceText = normalizeIdentityText(surfaceText);
-    const language = entry.draft.language.trim().toLowerCase() || "und";
+    const language = entry.normalizeLanguage(draft.language);
     const context = normalizeText(entry.draft.context).slice(0, 800);
     const directContentKey = makeContentKey(surfaceText, language);
     const source = entry.draft.source;
@@ -634,7 +634,7 @@ export class CaptureRepository {
     )];
     const observedUnits = (await this.database.lexicalUnits.bulkGet(observedOwnerIds))
       .filter((unit): unit is LexicalUnit => unit !== undefined)
-      .filter((unit) => unit.language === language);
+      .filter((unit) => normalizeLanguage(unit.language) === language);
     const matchingOwners = new Map(observedUnits.map((unit) => [unit.id, unit]));
 
     const directOwner = await this.database.lexicalUnits
@@ -667,9 +667,10 @@ export class CaptureRepository {
     }
 
     if (exactOwnerIds.size === 1) {
+      const lexicalUnitId = [...exactOwnerIds][0]!;
       return {
         kind: "unchanged",
-        lexicalUnitId: [...exactOwnerIds][0]!,
+        item: await this.collectedItem(lexicalUnitId),
       };
     }
 
@@ -684,7 +685,7 @@ export class CaptureRepository {
       if (exactOwnerIds.has(targetLexicalUnitId)) {
         return {
           kind: "unchanged",
-          lexicalUnitId: targetLexicalUnitId,
+          item: await this.collectedItem(targetLexicalUnitId),
         };
       }
     } else if (matchingOwners.size === 1) {
@@ -708,16 +709,16 @@ export class CaptureRepository {
       await this.database.lexicalUnits.put(lexicalUnit);
     }
 
-    return { kind, lexicalUnitId: lexicalUnit.id };
+    return {
+      kind,
+      item: await this.collectedItem(lexicalUnit.id),
+    };
   }
 
   async captureBatch(entries: readonly CaptureBatchEntry[]): Promise<CaptureBatchOutcome[]> {
     if (entries.length === 0) return [];
 
-    const outcomes: Array<{
-      kind: CaptureBatchOutcomeKind;
-      lexicalUnitId: string;
-    }> = [];
+    const outcomes: CaptureBatchOutcome[] = [];
 
     await this.database.transaction(
       "rw",
@@ -730,10 +731,7 @@ export class CaptureRepository {
       },
     );
 
-    return Promise.all(outcomes.map(async ({ kind, lexicalUnitId }) => ({
-      kind,
-      item: await this.collectedItem(lexicalUnitId),
-    })));
+    return outcomes;
   }
 
   async list(status?: ReviewStatus): Promise<CollectedItem[]> {
@@ -762,7 +760,7 @@ export class CaptureRepository {
     const canonicalText = normalizeText(changes.canonicalText);
     if (!canonicalText) throw new Error("Canonical form cannot be empty.");
 
-    const language = changes.language.trim().toLowerCase() || "und";
+    const language = normalizeLanguage(changes.language);
     const normalizedCanonicalText = normalizeIdentityText(canonicalText);
     const contentKey = makeContentKey(canonicalText, language);
     const requestedNote = changes.note.trim().slice(0, 2000);
