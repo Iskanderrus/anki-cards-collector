@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BatchCaptureEvidence, BatchSourceAdapter } from "./batch";
 import { BatchCapturePipeline } from "./batch";
 import { CollectorDatabase } from "../storage/database";
@@ -314,6 +314,131 @@ describe("BatchCapturePipeline", () => {
     expect(result.committed).toEqual([]);
     expect(result.unchangedCandidateIds).toEqual(["stale:0001"]);
     expect((await repository.list())[0]?.occurrences).toHaveLength(1);
+  });
+
+  it("edits staged evidence in place and reclassifies it against the corpus", async () => {
+    await repository.capture({
+      text: "שלום",
+      context: "שלום, דנה.",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("שלום", "שלום, דנה.").source,
+    });
+
+    const staged = await pipeline.stageBatch("edit", [
+      evidence("שלם", "שלם כאן."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("new");
+
+    const edited = await pipeline.editCandidate(staged.candidates[0]!.id, {
+      surfaceText: " שלום ",
+      context: "שלום, דנה.",
+      language: "HE",
+    });
+
+    expect(edited.candidates[0]?.id).toBe("edit:0001");
+    expect(edited.candidates[0]?.surfaceText).toBe("שלום");
+    expect(edited.candidates[0]?.language).toBe("he");
+    expect(edited.candidates[0]?.disposition).toBe("already-represented");
+    expect(edited.candidates[0]?.source).toEqual(staged.candidates[0]?.source);
+    expect(edited.candidates[0]?.capturedAt).toBe(staged.candidates[0]?.capturedAt);
+  });
+
+  it("rejects an edit that would collapse two stable staged identities", async () => {
+    const staged = await pipeline.stageBatch("edit-duplicate", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+
+    await expect(
+      pipeline.editCandidate(staged.candidates[1]!.id, {
+        surfaceText: "אחד",
+        context: "אחד כאן.",
+      }),
+    ).rejects.toThrow("duplicate another staged candidate");
+
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "edit-duplicate:0001",
+      "edit-duplicate:0002",
+    ]);
+  });
+
+  it("discards only the requested candidates from the current staged batch", async () => {
+    const staged = await pipeline.stageBatch("discard-selected", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    const remaining = await pipeline.discardCandidates([
+      staged.candidates[0]!.id,
+      staged.candidates[2]!.id,
+    ]);
+
+    expect(remaining?.candidates.map((candidate) => candidate.id)).toEqual([
+      "discard-selected:0002",
+    ]);
+    expect(await repository.list()).toEqual([]);
+
+    const empty = await pipeline.discardCandidates(["discard-selected:0002"]);
+    expect(empty).toBeNull();
+    expect(pipeline.getActiveBatch()).toBeNull();
+  });
+
+  it("returns commit-time domain outcome counts and keeps imported material in Inbox", async () => {
+    await repository.capture({
+      text: "שלום",
+      context: "שלום, דנה.",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("שלום", "שלום, דנה.").source,
+    });
+
+    const staged = await pipeline.stageBatch("summary", [
+      evidence("שלום", "שלום, דנה."),
+      evidence("שלום", "שלום, יואב."),
+      evidence("בית", "זה בית גדול."),
+    ]);
+
+    const result = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+
+    expect(result.summary).toEqual({
+      newUnits: 1,
+      evidenceAdded: 1,
+      unchanged: 1,
+      needsReview: 0,
+    });
+    expect((await repository.list()).every((item) => item.lexicalUnit.status === "inbox")).toBe(true);
+  });
+
+  it("retains the entire staged batch when the transactional commit fails so retry is safe", async () => {
+    const staged = await pipeline.stageBatch("retry", [
+      evidence("לחם", "יש לחם על השולחן."),
+      evidence("מים", "המים קרים."),
+    ]);
+    const captureBatch = vi.spyOn(repository, "captureBatch")
+      .mockRejectedValueOnce(new Error("Injected repository failure."));
+
+    await expect(
+      pipeline.commit({
+        candidateIds: staged.candidates.map((candidate) => candidate.id),
+      }),
+    ).rejects.toThrow("Injected repository failure.");
+
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "retry:0001",
+      "retry:0002",
+    ]);
+    expect(await repository.list()).toEqual([]);
+
+    captureBatch.mockRestore();
+    const retried = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+    expect(retried.summary.newUnits).toBe(2);
+    expect(await repository.list()).toHaveLength(2);
   });
 
   it("rolls back the whole repository batch on a commit failure", async () => {
