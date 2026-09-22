@@ -54,6 +54,21 @@ Only an explicit commit crosses the persistence boundary. Selected candidates ar
 
 Manual single-selection capture remains independent from this staging path.
 
+### Staged review and import
+
+ACCP-021 keeps review orchestration above the ACCP-019 domain boundary rather than teaching React or source adapters how to mutate the corpus.
+
+The side panel receives the current transient `BatchCaptureResult` from the extension service worker. Search, disposition filters, visible-scope selection, and candidate inspection are UI state only. Evidence corrections are sent back through the service worker, where the existing staged-batch lock serializes edit/discard/commit operations and persists the updated reconstruction payload to `chrome.storage.session`.
+
+A selected import never calls Anki. It asks `BatchCapturePipeline.commit()` to reclassify the selected candidate IDs against the current corpus and then uses the existing transactional `CaptureRepository.captureBatch()` boundary. Any lexical unit that actually receives accepted batch evidence is returned to `inbox` when necessary, including units that were previously `ready` or `archived`; exact already-represented no-ops do not mutate the corpus or status.
+
+Commit summaries are derived from the actual repository result rather than the pre-commit disposition labels. This matters when two staged `new` contexts collapse onto the same newly created lexical unit: the result is one new lexical unit plus one added occurrence.
+
+The corpus transaction and transient staged snapshot have different durability. If the corpus transaction fails, the staged batch remains intact for retry. If the corpus transaction succeeds but updating `chrome.storage.session` fails, Collector never attempts to undo the successful corpus transaction. A later service-worker reconstruction may temporarily resurrect the stale staged evidence, but reclassification turns already committed exact evidence into safe no-ops before any subsequent commit.
+
+The dedicated Staged view intentionally has no direct Anki export action. Accepted evidence must first enter the normal corpus and complete ordinary review/card policy before it can become Ready and follow the normal routed export path.
+
+
 ### Persistence
 
 IndexedDB contains three persistent entities. Learning content remains separate from operational Anki destination state.
