@@ -710,12 +710,15 @@ try {
 
   await clickPanelButton(panel, "Scan visible Duolingo");
   await panel.locator(".backfill-status", { hasText: "3 staged candidates" }).waitFor();
-  await panel.locator(".staged-candidate-text", { hasText: "שלום עולם" }).waitFor();
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const initialStagedReview = panel.locator(".staged-review");
+  await initialStagedReview.locator(".staged-row-head strong", { hasText: "שלום עולם" }).waitFor();
   assert.equal(
-    await panel.locator(".staged-candidate").count(),
+    await initialStagedReview.locator(".staged-review-row").count(),
     3,
-    "Staged Duolingo evidence should be inspectable without entering the corpus.",
+    "Staged Duolingo evidence should be inspectable in the dedicated review surface without entering the corpus.",
   );
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
   const initialStagedBatch = await sendPanelMessage(
     panel,
     { type: "GET_STAGED_BATCH" },
