@@ -3,6 +3,11 @@ import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
 import type {
+  BatchCandidateEdit,
+  BatchCaptureCandidate,
+  BatchCommitResult,
+} from "../capture/batch";
+import type {
   CollectedItem,
   CollectorSettings,
   ExportBinding,
@@ -50,6 +55,7 @@ import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { ReviewQueue } from "./queue";
 import { GuidedProfileSetup } from "./profile-setup";
+import { StagedReview, type StagedImportResult } from "./staged-review";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -67,7 +73,7 @@ type DeckAnalysisUiState =
   | { kind: "live"; analysis: DeckAnalysis }
   | { kind: "error"; deckName: string; error: string };
 
-type SidepanelView = "queue" | "detail" | "settings";
+type SidepanelView = "queue" | "detail" | "staged" | "settings";
 
 type CanonicalizationUiState =
   | { kind: "idle" }
@@ -215,14 +221,7 @@ interface BackfillUiState {
   staged: StagedBatchSummary;
 }
 
-interface StagedCandidatePreview {
-  id: string;
-  surfaceText: string;
-  context: string;
-  language: string;
-  disposition: "new" | "already-represented" | "repeated-evidence" | "needs-review";
-  duplicateCount: number;
-}
+type StagedCandidatePreview = BatchCaptureCandidate;
 
 interface LiveSessionCandidate {
   surfaceText: string;
@@ -264,6 +263,28 @@ const EMPTY_STAGED_BATCH: StagedBatchSummary = {
     "needs-review": 0,
   },
 };
+
+function stagedSummaryForCandidates(
+  batchId: string | null | undefined,
+  candidates: readonly StagedCandidatePreview[],
+): StagedBatchSummary {
+  return {
+    batchId: batchId ?? null,
+    candidateCount: candidates.length,
+    dispositions: {
+      new: candidates.filter((candidate) => candidate.disposition === "new").length,
+      "already-represented": candidates.filter(
+        (candidate) => candidate.disposition === "already-represented",
+      ).length,
+      "repeated-evidence": candidates.filter(
+        (candidate) => candidate.disposition === "repeated-evidence",
+      ).length,
+      "needs-review": candidates.filter(
+        (candidate) => candidate.disposition === "needs-review",
+      ).length,
+    },
+  };
+}
 
 interface EditDraft {
   canonicalText: string;
@@ -319,6 +340,7 @@ function App(): React.ReactElement {
     staged: EMPTY_STAGED_BATCH,
   });
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
+  const [stagedImportResult, setStagedImportResult] = useState<StagedImportResult | null>(null);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const deckAnalysisRequestId = useRef(0);
@@ -536,6 +558,17 @@ function App(): React.ReactElement {
     });
   }
 
+  function showStaged(): void {
+    cancelEdit();
+    setView("staged");
+    void refreshStagedCandidates();
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(".staged-review-search")?.focus({
+        preventScroll: true,
+      });
+    });
+  }
+
   function showSettings(): void {
     cancelEdit();
     closeDeckAnalysis();
@@ -569,14 +602,145 @@ function App(): React.ReactElement {
         type: "GET_STAGED_BATCH",
       }) as {
         ok: boolean;
-        batch?: { candidates?: StagedCandidatePreview[] } | null;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
       };
 
       if (!response.ok) return;
-      setStagedCandidates(response.batch?.candidates ?? []);
+      const candidates = response.batch?.candidates ?? [];
+      setStagedCandidates(candidates);
+      setBackfill((current) => ({
+        ...current,
+        staged: stagedSummaryForCandidates(response.batch?.batchId, candidates),
+      }));
     } catch {
       // Staging is ephemeral; an unavailable service-worker snapshot simply has no preview.
       setStagedCandidates([]);
+    }
+  }
+
+  function applyStagedMutationResponse(
+    batch: { batchId?: string; candidates?: StagedCandidatePreview[] } | null | undefined,
+    staged?: StagedBatchSummary,
+  ): void {
+    const candidates = batch?.candidates ?? [];
+    setStagedCandidates(candidates);
+    setBackfill((current) => ({
+      ...current,
+      staged: staged ?? stagedSummaryForCandidates(batch?.batchId, candidates),
+    }));
+  }
+
+  async function editStagedCandidate(
+    candidateId: string,
+    changes: BatchCandidateEdit,
+  ): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setStagedImportResult(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "EDIT_STAGED_CANDIDATE",
+        candidateId,
+        changes,
+      }) as {
+        ok: boolean;
+        error?: string;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
+        staged?: StagedBatchSummary;
+      };
+      if (!response.ok) throw new Error(response.error ?? "Could not edit staged evidence.");
+
+      applyStagedMutationResponse(response.batch, response.staged);
+      setNotice("Staged evidence corrected and reclassified. Nothing was promoted to Ready.");
+    } catch (editError) {
+      const failure = editError instanceof Error
+        ? editError
+        : new Error("Could not edit staged evidence.");
+      setError(failure.message);
+      throw failure;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function discardStagedCandidates(candidateIds: string[]): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setStagedImportResult(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "DISCARD_STAGED_CANDIDATES",
+        candidateIds,
+      }) as {
+        ok: boolean;
+        error?: string;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
+        staged?: StagedBatchSummary;
+      };
+      if (!response.ok) throw new Error(response.error ?? "Could not discard staged evidence.");
+
+      applyStagedMutationResponse(response.batch, response.staged);
+      setNotice(
+        `Removed ${candidateIds.length} candidate${candidateIds.length === 1 ? "" : "s"} from the current staged batch. Normal corpus material was not changed.`,
+      );
+    } catch (discardError) {
+      const failure = discardError instanceof Error
+        ? discardError
+        : new Error("Could not discard staged evidence.");
+      setError(failure.message);
+      throw failure;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commitStagedCandidates(
+    candidateIds: string[],
+    resolutions: Record<string, string>,
+  ): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setStagedImportResult(null);
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "COMMIT_STAGED_CANDIDATES",
+        candidateIds,
+        resolutions,
+      }) as {
+        ok: boolean;
+        error?: string;
+        result?: BatchCommitResult;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
+        staged?: StagedBatchSummary;
+        warning?: string;
+      };
+      if (!response.ok || !response.result) {
+        throw new Error(response.error ?? "Could not import staged evidence.");
+      }
+
+      applyStagedMutationResponse(response.batch, response.staged);
+      setStagedImportResult({
+        summary: response.result.summary,
+        warning: response.warning,
+      });
+      await load();
+      setNotice(
+        `Imported selected staged evidence into the normal Inbox: ${response.result.summary.newUnits} new, ${response.result.summary.evidenceAdded} evidence additions, ${response.result.summary.unchanged} already represented. No item was marked Ready automatically.`,
+      );
+    } catch (commitError) {
+      const failure = commitError instanceof Error
+        ? commitError
+        : new Error("Could not import staged evidence.");
+      setError(failure.message);
+      throw failure;
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1324,7 +1488,7 @@ function App(): React.ReactElement {
         showQueue();
         return;
       }
-      if (view === "settings" || items.length === 0) return;
+      if (view === "settings" || view === "staged" || items.length === 0) return;
 
       const currentIndex = Math.max(
         0,
@@ -1384,14 +1548,16 @@ function App(): React.ReactElement {
         <p>Keep the language worth remembering. Leave the rest on the page.</p>
       </header>
 
-      <div className="toolbar">
-        <button className="primary" disabled={busy} onClick={() => void capture()}>
-          Collect selection
-        </button>
-        <button disabled={busy || counts.ready === 0} onClick={() => void exportToAnki()}>
-          Send ready to Anki
-        </button>
-      </div>
+      {view !== "staged" && (
+        <div className="toolbar">
+          <button className="primary" disabled={busy} onClick={() => void capture()}>
+            Collect selection
+          </button>
+          <button disabled={busy || counts.ready === 0} onClick={() => void exportToAnki()}>
+            Send ready to Anki
+          </button>
+        </div>
+      )}
 
       <nav className="view-tabs" aria-label="Collector views">
         <button
@@ -1400,6 +1566,13 @@ function App(): React.ReactElement {
           onClick={showQueue}
         >
           Queue
+        </button>
+        <button
+          type="button"
+          aria-current={view === "staged" ? "page" : undefined}
+          onClick={showStaged}
+        >
+          Staged{stagedCandidates.length > 0 ? ` (${stagedCandidates.length})` : ""}
         </button>
         <button
           type="button"
@@ -1481,29 +1654,15 @@ function App(): React.ReactElement {
           </details>
         )}
         {stagedCandidates.length > 0 && (
-          <details className="staged-preview" open={!backfill.status.active && stagedCandidates.length <= 3}>
-            <summary>{backfill.status.active ? "Previously staged evidence" : "Preview staged evidence"} ({stagedCandidates.length})</summary>
-            <div className="staged-preview-list">
-              {stagedCandidates.map((candidate) => (
-                <article className="staged-candidate" key={candidate.id}>
-                  <div className="staged-candidate-head">
-                    <strong className="staged-candidate-text" dir="auto">{candidate.surfaceText}</strong>
-                    <span className="pill">{candidate.disposition}</span>
-                  </div>
-                  <div className="meta">
-                    {candidate.language}
-                    {candidate.duplicateCount > 1 ? ` · seen ${candidate.duplicateCount}× in this batch` : ""}
-                  </div>
-                  {candidate.context && candidate.context !== candidate.surfaceText && (
-                    <div className="staged-candidate-context" dir="auto">{candidate.context}</div>
-                  )}
-                </article>
-              ))}
-            </div>
-            <div className="setting-help">
-              Preview only. These items are still staged evidence, not corpus cards; review/import controls belong to ACCP-021.
-            </div>
-          </details>
+          <div className="staged-review-affordance">
+            <button type="button" className="primary" onClick={showStaged}>
+              Review staged candidates ({stagedCandidates.length})
+            </button>
+            <span className="setting-help">
+              Review, filter, correct, select, import, or discard these captured candidates in the
+              separate Staged view.
+            </span>
+          </div>
         )}
       </section>
 
@@ -1517,6 +1676,25 @@ function App(): React.ReactElement {
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
+
+      {view === "staged" && (
+        <StagedReview
+          candidates={stagedCandidates}
+          ownerLabels={Object.fromEntries(
+            items.map((item) => [
+              item.lexicalUnit.id,
+              `${item.lexicalUnit.canonicalText} (${item.lexicalUnit.language})`,
+            ]),
+          )}
+          busy={busy}
+          importResult={stagedImportResult}
+          onEdit={editStagedCandidate}
+          onCommit={commitStagedCandidates}
+          onDiscard={discardStagedCandidates}
+          onBack={showQueue}
+        />
+      )}
+
       {exportProgress && (
         <div className="export-progress" role="status" aria-live="polite">
           <div>
@@ -1531,7 +1709,7 @@ function App(): React.ReactElement {
         </div>
       )}
 
-      {view !== "settings" && (
+      {view !== "settings" && view !== "staged" && (
         <div className="shortcuts" aria-label="Keyboard shortcuts">
           <span><kbd>J</kbd>/<kbd>↓</kbd> next</span>
           <span><kbd>K</kbd>/<kbd>↑</kbd> previous</span>
