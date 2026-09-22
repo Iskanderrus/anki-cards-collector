@@ -729,6 +729,9 @@ function App(): React.ReactElement {
         warning?: string;
       };
       if (!response.ok || !response.result) {
+        if (response.batch !== undefined || response.staged !== undefined) {
+          applyStagedMutationResponse(response.batch, response.staged);
+        }
         throw new Error(response.error ?? "Could not import staged evidence.");
       }
 
