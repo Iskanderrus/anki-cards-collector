@@ -413,6 +413,30 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list()).every((item) => item.lexicalUnit.status === "inbox")).toBe(true);
   });
 
+  it("returns an existing Ready unit to Inbox when batch import adds new evidence", async () => {
+    const existing = await repository.capture({
+      text: "מרק",
+      context: "מרק",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("מרק", "מרק").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+
+    const staged = await pipeline.stageBatch("ready-evidence", [
+      evidence("מרק", "אני אוכל מרק."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.summary.evidenceAdded).toBe(1);
+    expect(result.committed[0]?.item.lexicalUnit.status).toBe("inbox");
+    expect((await repository.list())[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
   it("retains the entire staged batch when the transactional commit fails so retry is safe", async () => {
     const staged = await pipeline.stageBatch("retry", [
       evidence("לחם", "יש לחם על השולחן."),
