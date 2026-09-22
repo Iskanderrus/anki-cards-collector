@@ -119,8 +119,10 @@ export function StagedReview({
   }, [candidates]);
 
   useEffect(() => {
-    if (!activeId || visibleCandidates.some((candidate) => candidate.id === activeId)) return;
-    setActiveId(visibleCandidates[0]?.id ?? null);
+    if (activeId && visibleCandidates.some((candidate) => candidate.id === activeId)) return;
+    const nextActiveId = visibleCandidates[0]?.id ?? null;
+    if (nextActiveId === activeId) return;
+    setActiveId(nextActiveId);
     setEditingId(null);
     setEditDraft(null);
   }, [activeId, visibleCandidates]);
