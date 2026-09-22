@@ -341,6 +341,7 @@ function App(): React.ReactElement {
   });
   const [stagedCandidates, setStagedCandidates] = useState<StagedCandidatePreview[]>([]);
   const [stagedImportResult, setStagedImportResult] = useState<StagedImportResult | null>(null);
+  const stagedBatchIdRef = useRef<string | null>(null);
   const [liveSessionCandidates, setLiveSessionCandidates] = useState<LiveSessionCandidate[]>([]);
   const settingsMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const deckAnalysisRequestId = useRef(0);
@@ -435,6 +436,7 @@ function App(): React.ReactElement {
         setLiveSessionCandidates(event.status.active ? event.evidence ?? [] : []);
       }
       if (event.type === "DUOLINGO_VISIBLE_SESSION_AUTO_STAGED" && event.staged) {
+        setStagedImportResult(null);
         setBackfill({
           supported: false,
           status: { active: false, candidateCount: event.foundCount ?? 0 },
@@ -607,10 +609,15 @@ function App(): React.ReactElement {
 
       if (!response.ok) return;
       const candidates = response.batch?.candidates ?? [];
+      const nextBatchId = response.batch?.batchId ?? null;
+      if (stagedBatchIdRef.current !== nextBatchId) {
+        setStagedImportResult(null);
+      }
+      stagedBatchIdRef.current = nextBatchId;
       setStagedCandidates(candidates);
       setBackfill((current) => ({
         ...current,
-        staged: stagedSummaryForCandidates(response.batch?.batchId, candidates),
+        staged: stagedSummaryForCandidates(nextBatchId, candidates),
       }));
     } catch {
       // Staging is ephemeral; an unavailable service-worker snapshot simply has no preview.
@@ -623,6 +630,7 @@ function App(): React.ReactElement {
     staged?: StagedBatchSummary,
   ): void {
     const candidates = batch?.candidates ?? [];
+    stagedBatchIdRef.current = batch?.batchId ?? null;
     setStagedCandidates(candidates);
     setBackfill((current) => ({
       ...current,
@@ -793,6 +801,7 @@ function App(): React.ReactElement {
 
       if (!response.ok) throw new Error(response.error ?? "Duolingo scan failed.");
       const staged = response.staged ?? EMPTY_STAGED_BATCH;
+      setStagedImportResult(null);
       setBackfill((current) => ({
         ...current,
         supported: true,
@@ -863,6 +872,7 @@ function App(): React.ReactElement {
 
       if (!response.ok) throw new Error(response.error ?? "Could not stop Duolingo backfill.");
       const staged = response.staged ?? backfill.staged;
+      setStagedImportResult(null);
       setBackfill({
         supported: true,
         status: response.status ?? { active: false, candidateCount: 0 },
