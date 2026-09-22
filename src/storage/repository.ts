@@ -620,7 +620,7 @@ export class CaptureRepository {
     if (!surfaceText) throw new Error("Nothing selected.");
 
     const normalizedSurfaceText = normalizeIdentityText(surfaceText);
-    const language = entry.normalizeLanguage(draft.language);
+    const language = normalizeLanguage(entry.draft.language);
     const context = normalizeText(entry.draft.context).slice(0, 800);
     const directContentKey = makeContentKey(surfaceText, language);
     const source = entry.draft.source;
