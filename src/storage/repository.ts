@@ -621,7 +621,7 @@ export class CaptureRepository {
             entry.draft,
             entry.targetLexicalUnitId,
           );
-          if (lexicalUnit.status === "ready") {
+          if (lexicalUnit.status !== "inbox") {
             lexicalUnit = {
               ...lexicalUnit,
               status: "inbox",
