@@ -617,10 +617,18 @@ export class CaptureRepository {
       this.database.occurrences,
       async () => {
         for (const entry of entries) {
-          const lexicalUnit = await this.captureWithinTransaction(
+          let lexicalUnit = await this.captureWithinTransaction(
             entry.draft,
             entry.targetLexicalUnitId,
           );
+          if (lexicalUnit.status === "ready") {
+            lexicalUnit = {
+              ...lexicalUnit,
+              status: "inbox",
+              updatedAt: entry.draft.capturedAt || new Date().toISOString(),
+            };
+            await this.database.lexicalUnits.put(lexicalUnit);
+          }
           lexicalUnitIds.push(lexicalUnit.id);
         }
       },
