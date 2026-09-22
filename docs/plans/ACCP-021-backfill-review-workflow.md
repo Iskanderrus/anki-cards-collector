@@ -19,7 +19,7 @@ Implemented by PR #70 through the existing ACCP-019/020 boundaries.
 
 Automated browser acceptance covers 50+ mixed-disposition candidates, long Hebrew/Serbian/Spanish content, filtering/bulk scope, evidence edits, no-op import, pre-existing and late-arriving ambiguous-owner resolution, injected commit failure/retry, discard, keyboard flow, accessibility, and the Duolingo -> Staged -> Inbox -> ordinary review -> ACCP-018 mapped fake-Anki path.
 
-Real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md` completed **PASS** at the original accepted head, after the first transaction-boundary remediation at `991ebb6d2c1de76d44a4b8da21b5105976ff4027`, and after the F3/F4/F5 remediation at `ae0e1ccc18b70e04b335ec24a0d6861e6f290562`, each with a clean worktree. The manual document remains the reproducible procedure. For later runtime remediations, the PR acceptance record is the authoritative immutable-head evidence so recording that result does not itself move the tested head.
+Real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md` has passed at multiple immutable runtime checkpoints, including the first transaction-boundary remediation at `991ebb6d2c1de76d44a4b8da21b5105976ff4027` and the F3/F4/F5 remediation at `ae0e1ccc18b70e04b335ec24a0d6861e6f290562`, with clean worktrees. The manual document remains the reproducible procedure. **Current immutable-head acceptance is recorded in PR #70 acceptance evidence rather than by editing this file after the run**, because such an edit would itself create a new untested head. Every later runtime remediation must pass the same canonical procedure before the PR returns to independent review.
 
 
 ## Dependencies
