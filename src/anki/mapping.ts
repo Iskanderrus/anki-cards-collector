@@ -208,7 +208,7 @@ export function mappedAnkiFields(
 ): Record<string, string> {
   const mapping = validateMappedProfile(profile);
   const values = mappedSemanticValues(item);
-  const fields: Record<string, string> = {};
+  const fields = Object.create(null) as Record<string, string>;
 
   for (const semantic of COLLECTOR_SEMANTIC_FIELDS) {
     const target = mapping[semantic];
