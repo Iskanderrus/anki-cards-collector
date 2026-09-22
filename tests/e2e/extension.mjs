@@ -1708,6 +1708,389 @@ try {
   );
   await contentPage.bringToFront();
 
+  markE2eStage("accp021-duolingo-review-import");
+  // ACCP-021 closes the original visible-Duolingo -> staged review -> Inbox path.
+  // Import remains local until the resulting normal corpus item is explicitly
+  // reviewed and marked Ready.
+  const fullWorkflowCandidate = profileDrivenBatch.batch.candidates.find(
+    (candidate) => candidate.surfaceText === "מרק" && candidate.language === "he",
+  );
+  assert.ok(fullWorkflowCandidate, "Expected the staged Hebrew Duolingo candidate מרק.");
+
+  const corpusCountBeforeStagedImport = await termCount(panel);
+  ankiRequests.length = 0;
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const stagedReview = panel.locator(".staged-review");
+  await stagedReview.waitFor();
+  assert.equal(
+    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    0,
+    "The staged surface must not expose the Anki export action.",
+  );
+
+  const duolingoStagedRow = stagedReview.locator(".staged-review-row").filter({
+    has: stagedReview.locator(".staged-row-head strong", { hasText: "מרק" }),
+  });
+  await duolingoStagedRow.waitFor();
+  await duolingoStagedRow.getByRole("checkbox", { name: "Select מרק" }).check();
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", { hasText: "1 new lexical unit" }).waitFor();
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Committing staged evidence to the corpus must not call Anki.",
+  );
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const importedHebrewRow = await queueRowForTerm(panel, "מרק");
+  await importedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
+  assert.equal(
+    await termCount(panel),
+    corpusCountBeforeStagedImport + 1,
+    "A selected new staged candidate should enter the normal corpus exactly once.",
+  );
+
+  // Normal review remains a separate explicit action after import.
+  let importedHebrewCard = await cardForTerm(panel, "מרק");
+  const importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
+  assert.equal(await importedReady.count(), 1, "Imported staged evidence must arrive in Inbox.");
+  await importedReady.click();
+  await importedHebrewCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.match(
+    await importedHebrewCard.locator(".export-destination").innerText(),
+    /Anki:\s*Hebrew RU/,
+    "The imported Hebrew item should resolve through the existing ACCP-018 language profile.",
+  );
+
+  // The fake Anki boundary proves integration with the same mapped, user-owned
+  // note type path that passed ACCP-018; no source-specific export path exists.
+  const importedHebrewId = await importedHebrewCard.getAttribute("data-card-id");
+  assert.ok(importedHebrewId);
+  const importedIdentityTag = collectorIdentityTagForE2e(importedHebrewId);
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
+
+  const importedAdd = ankiRequests.find(
+    (request) =>
+      request.action === "addNote"
+      && request.params?.note?.modelName === "Hebrew Existing"
+      && request.params?.note?.tags?.includes(importedIdentityTag),
+  );
+  assert.ok(importedAdd, "Imported Hebrew material should export through the existing Hebrew note type.");
+  assert.deepEqual(
+    Object.keys(importedAdd.params.note.fields).sort(),
+    ["Hebrew", "Russian"],
+    "ACCP-021 integration must still write only the mapped user-owned fields.",
+  );
+  assert.equal(
+    ankiRequests.some((request) =>
+      ["createModel", "modelFieldAdd", "updateModelTemplates", "updateModelStyling"]
+        .includes(request.action)
+    ),
+    false,
+    "The original staged-to-Anki workflow must not mutate the user-owned note type.",
+  );
+
+  importedHebrewCard = await cardForTerm(panel, "מרק");
+  const importedDestination = await importedHebrewCard.locator(".export-destination").innerText();
+  const importedNoteIdMatch = importedDestination.match(/note\s+(\d+)/);
+  assert.ok(importedNoteIdMatch, "Imported Hebrew export should expose its pinned Anki note ID.");
+  const importedNoteId = Number(importedNoteIdMatch[1]);
+
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
+  assert.equal(
+    ankiRequests.some(
+      (request) =>
+        request.action === "addNote"
+        && request.params?.note?.tags?.includes(importedIdentityTag),
+    ),
+    false,
+    "Repeat export of an ACCP-021-imported item must not create a duplicate Anki note.",
+  );
+  assert.equal(
+    ankiRequests.some(
+      (request) =>
+        request.action === "updateNoteFields"
+        && Number(request.params?.note?.id) === importedNoteId,
+    ),
+    true,
+    "Repeat export should update the same pinned Anki note.",
+  );
+
+  markE2eStage("accp021-large-mixed-batch");
+  // Seed only the corpus ambiguity needed to exercise the existing ACCP-019
+  // needs-review ownership contract. This hook is present only in the E2E build.
+  const ambiguousSeed = await sendPanelMessage(
+    panel,
+    { type: "E2E_SEED_AMBIGUOUS_OWNERS" },
+    "ACCP-021 ambiguous ownership fixture",
+  );
+  assert.equal(ambiguousSeed?.ok, true, ambiguousSeed?.error);
+  assert.equal(ambiguousSeed?.ownerIds?.length, 2);
+
+  const e2eBatchSource = {
+    kind: "web",
+    adapter: "e2e-batch",
+    url: "https://example.test/accp021",
+    title: "ACCP-021 browser fixture",
+  };
+  const longHebrew = "משפט עברי ארוך לבדיקת תצוגה קומפקטית של מועמד שנאסף יחד עם הקשר שימושי נוסף";
+  const longSerbian = "Ovo je veoma dugačka srpska fraza za proveru kompaktnog prikaza kandidata sa korisnim kontekstom";
+  const longSpanish = "Esta es una frase española deliberadamente larga para comprobar el diseño compacto de la revisión por lotes";
+  const languages = ["he", "sr", "es"];
+  const generatedNewEvidence = Array.from({ length: 52 }, (_, index) => {
+    const language = languages[index % languages.length];
+    let surfaceText;
+    if (index === 0) surfaceText = longHebrew;
+    else if (index === 1) surfaceText = longSerbian;
+    else if (index === 2) surfaceText = longSpanish;
+    else surfaceText = `batch-new-${String(index + 1).padStart(2, "0")}-${language}`;
+
+    return {
+      surfaceText,
+      context: `${surfaceText} · visible staged context ${index + 1}`,
+      language,
+      source: e2eBatchSource,
+      capturedAt: `2026-09-22T13:${String(index).padStart(2, "0")}:00.000Z`,
+    };
+  });
+
+  const syntheticEvidence = [
+    {
+      surfaceText: fullWorkflowCandidate.surfaceText,
+      context: fullWorkflowCandidate.context,
+      language: fullWorkflowCandidate.language,
+      source: fullWorkflowCandidate.source,
+      capturedAt: "2026-09-22T14:00:00.000Z",
+    },
+    {
+      surfaceText: fullWorkflowCandidate.surfaceText,
+      context: "אני אוכל מרק בהקשר חדש.",
+      language: fullWorkflowCandidate.language,
+      source: fullWorkflowCandidate.source,
+      capturedAt: "2026-09-22T14:01:00.000Z",
+    },
+    {
+      surfaceText: "כתב",
+      context: "כתב נוסף שדורש בחירת בעלים.",
+      language: "he",
+      source: e2eBatchSource,
+      capturedAt: "2026-09-22T14:02:00.000Z",
+    },
+    ...generatedNewEvidence,
+  ];
+
+  const largeBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp021-browser-55",
+      evidence: syntheticEvidence,
+    },
+    "ACCP-021 55-candidate fixture",
+  );
+  assert.equal(largeBatch?.ok, true, largeBatch?.error);
+  assert.equal(largeBatch?.batch?.candidates?.length, 55);
+  const dispositions = largeBatch.batch.candidates.reduce((counts, candidate) => {
+    counts[candidate.disposition] = (counts[candidate.disposition] ?? 0) + 1;
+    return counts;
+  }, {});
+  assert.deepEqual(
+    dispositions,
+    {
+      "already-represented": 1,
+      "repeated-evidence": 1,
+      "needs-review": 1,
+      new: 52,
+    },
+    "Large staged fixture should expose all ACCP-019 dispositions.",
+  );
+
+  ankiRequests.length = 0;
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  await stagedReview.waitFor();
+  assert.equal(
+    await stagedReview.locator(".staged-review-row").count(),
+    55,
+    "Staged review should keep a 50+ candidate batch practical without rendering full editors.",
+  );
+  await stagedReview.getByText("Existing", { exact: true }).first().waitFor();
+  await stagedReview.getByText("More evidence", { exact: true }).first().waitFor();
+  await stagedReview.getByText("Needs review", { exact: true }).first().waitFor();
+
+  // Long Hebrew/Serbian/Spanish material must remain compact and bidirectionally usable.
+  for (const text of [longHebrew, longSerbian, longSpanish]) {
+    const row = stagedReview.locator(".staged-review-row").filter({
+      has: stagedReview.locator(".staged-row-head strong", { hasText: text }),
+    });
+    await row.waitFor();
+    const compactStyle = await row.locator(".staged-row-head strong").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        lineClamp: style.getPropertyValue("-webkit-line-clamp"),
+        overflow: style.overflow,
+      };
+    });
+    assert.equal(compactStyle.lineClamp, "2");
+    assert.equal(compactStyle.overflow, "hidden");
+  }
+
+  const stagedSearch = stagedReview.getByLabel("Search staged evidence");
+  const stagedFilter = stagedReview.getByLabel("Disposition");
+
+  // Visible-scope bulk selection must never mutate hidden selection.
+  await stagedFilter.selectOption("new");
+  await stagedSearch.fill("batch-new-04-he");
+  await stagedReview.getByText("1 visible of 55 staged").waitFor();
+  await stagedReview.getByRole("button", { name: "Select visible New" }).click();
+  await stagedReview.getByText("1 selected across the full staged batch").waitFor();
+
+  await stagedSearch.fill("batch-new-05-sr");
+  await stagedReview.getByText("1 visible of 55 staged").waitFor();
+  await stagedReview.getByText("1 selected across the full staged batch").waitFor();
+  await stagedReview.getByRole("button", { name: "Select visible New" }).click();
+  await stagedReview.getByText("2 selected across the full staged batch").waitFor();
+
+  await stagedSearch.fill("");
+  await stagedFilter.selectOption("all");
+  await stagedReview.getByText("2 selected across the full staged batch").waitFor();
+  await stagedReview.getByRole("button", { name: "Clear all selection" }).click();
+  await stagedReview.getByText("0 selected across the full staged batch").waitFor();
+
+  // Repeated-evidence bulk action has the same explicit visible-only scope.
+  await stagedFilter.selectOption("repeated-evidence");
+  await stagedReview.getByRole("button", { name: "Select visible More evidence" }).click();
+  await stagedReview.getByText("1 selected across the full staged batch").waitFor();
+  await stagedReview.getByRole("button", { name: "Clear all selection" }).click();
+  await stagedFilter.selectOption("all");
+
+  // Keyboard-only row navigation/selection/inspection uses the ACCP-011 conventions
+  // without stealing keystrokes from form controls.
+  const firstStagedRow = stagedReview.locator(".staged-review-row").first();
+  await firstStagedRow.focus();
+  await panel.keyboard.press("Space");
+  assert.equal(await firstStagedRow.getByRole("checkbox").isChecked(), true);
+  await panel.keyboard.press("ArrowDown");
+  const secondStagedRow = stagedReview.locator(".staged-review-row").nth(1);
+  assert.equal(await secondStagedRow.getAttribute("data-active"), "true");
+  await panel.keyboard.press("Enter");
+  assert.equal(
+    await stagedReview.locator("[data-staged-detail]").evaluate(
+      (element) => element === document.activeElement,
+    ),
+    true,
+    "Enter on a staged row should move keyboard focus to candidate detail.",
+  );
+  await stagedReview.getByRole("button", { name: "Clear all selection" }).click();
+
+  // Exact already-represented evidence is a domain no-op and is summarized as such.
+  await stagedFilter.selectOption("already-represented");
+  const representedRow = stagedReview.locator(".staged-review-row").first();
+  await representedRow.getByRole("checkbox").check();
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", { hasText: "1 already represented / no-op" }).waitFor();
+  await stagedFilter.selectOption("all");
+
+  // Editing is evidence-only and must trigger domain reclassification without changing
+  // candidate identity or source provenance.
+  const editableRow = stagedReview.locator(".staged-review-row").filter({
+    has: stagedReview.locator(".staged-row-head strong", { hasText: "batch-new-04-he" }),
+  });
+  const editableId = await editableRow.getAttribute("data-staged-id");
+  assert.ok(editableId);
+  await editableRow.locator(".staged-row-open").click();
+  await stagedReview.getByRole("button", { name: "Edit evidence" }).click();
+  const stagedEditor = stagedReview.locator(".staged-editor");
+  await stagedEditor.getByLabel("Observed text").fill("מרק");
+  await stagedEditor.getByLabel("Language code").fill("he");
+  await stagedEditor.getByLabel("Context").fill("הקשר חדש למרק שנאסף בבדיקה.");
+  await stagedEditor.getByRole("button", { name: "Save evidence correction" }).click();
+
+  const editedRow = stagedReview.locator(`[data-staged-id="${editableId}"]`);
+  await editedRow.getByText("More evidence", { exact: true }).waitFor();
+  const afterEditBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-021 edited candidate readback",
+  );
+  const editedCandidate = afterEditBatch.batch.candidates.find(
+    (candidate) => candidate.id === editableId,
+  );
+  assert.equal(editedCandidate?.surfaceText, "מרק");
+  assert.equal(editedCandidate?.language, "he");
+  assert.equal(editedCandidate?.context, "הקשר חדש למרק שנאסף בבדיקה.");
+  assert.equal(
+    editedCandidate?.source?.adapter,
+    "e2e-batch",
+    "Editing staged text/language/context must preserve source evidence.",
+  );
+
+  // Infrastructure failure must consume nothing; the same selected candidate remains
+  // available for a safe retry, then evidence-only import returns the existing Ready
+  // item to Inbox for normal review.
+  await editedRow.getByRole("checkbox").check();
+  const failNextCommit = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_STAGED_COMMIT" },
+    "ACCP-021 staged commit failure",
+  );
+  assert.equal(failNextCommit?.ok, true);
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await panel.locator(".notice.error", { hasText: "Injected staged commit failure." }).waitFor();
+  assert.equal(await editedRow.getByRole("checkbox").isChecked(), true);
+  assert.equal(await editedRow.count(), 1, "Failed commit must retain staged evidence for retry.");
+
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", { hasText: "1 occurrence added to existing units" }).waitFor();
+  assert.equal(await editedRow.count(), 0, "Successful retry should consume the committed candidate.");
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const enrichedHebrewRow = await queueRowForTerm(panel, "מרק");
+  await enrichedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+
+  // Needs-review collisions remain distinct from infrastructure failures and require
+  // an explicit ACCP-019 ownership resolution before import.
+  await stagedFilter.selectOption("needs-review");
+  const needsReviewRow = stagedReview.locator(".staged-review-row").first();
+  await needsReviewRow.locator(".staged-row-open").click();
+  await needsReviewRow.getByRole("checkbox").check();
+  await stagedReview.getByText(/Resolve 1 selected Needs review candidate/).waitFor();
+  const ownership = stagedReview.getByLabel("Existing lexical unit for this evidence");
+  await ownership.selectOption({ index: 1 });
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", { hasText: "1 occurrence added to existing units" }).waitFor();
+  await stagedFilter.selectOption("all");
+
+  // Discard is deliberately narrow: remove from this transient batch only.
+  const discardRow = stagedReview.locator(".staged-review-row").filter({
+    has: stagedReview.locator(".staged-row-head strong", { hasText: "batch-new-05-sr" }),
+  });
+  await discardRow.getByRole("checkbox").check();
+  panel.once("dialog", (dialog) => void dialog.accept());
+  await stagedReview.getByRole("button", { name: "Discard selected from batch" }).click();
+  await discardRow.waitFor({ state: "detached" });
+
+  const stagedAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    stagedAccessibility.violations.length,
+    0,
+    "Staged review accessibility violations:\n"
+      + JSON.stringify(stagedAccessibility.violations, null, 2),
+  );
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Filtering, editing, importing-to-Inbox, resolving, and discarding staged evidence must never call Anki.",
+  );
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+
   markE2eStage("post-accp018-regression-suite");
   // ACCP-003: a canonical edit that would merge independently exported units is
   // blocked before any corpus mutation. Re-open the Serbian card because the
