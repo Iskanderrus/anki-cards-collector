@@ -20,7 +20,9 @@ The following work is already part of the current baseline:
 - **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle;
 - **ACCP-017** — bounded read-only deck/model analysis with representative existing-card previews and real-Anki acceptance;
 - **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell;
-- **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation.
+- **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation;
+- **ACCP-014** — mapped export through existing user-owned Anki note types with fail-closed validation;
+- **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance.
 
 ---
 
@@ -52,17 +54,15 @@ Canonical/observed review, rename/consolidation preview, and identity-safe conso
 
 ACCP-014 is now baseline behavior: mapped user-owned note types are pinned by live deck/model IDs, validated before writes, and updated through mapped-only fields.
 
-### ACCP-018 — guided export-profile setup
+### ACCP-018 — guided export-profile setup — completed
 
-Depends on completed ACCP-016, ACCP-017, ACCP-013, ACCP-014, and the ACCP-011 settings shell.
+Guided language/profile routing, live deck/model identity, mapped-only writes, and real-Anki acceptance are now baseline behavior.
 
-### ACCP-021 — batch backfill review and import
+### ACCP-021 — batch backfill review and import — current merge gate
 
-Depends on ACCP-019, ACCP-020, and ACCP-011.
+Depends on completed ACCP-019, ACCP-020, ACCP-011, and the completed ACCP-018 path used by its final real-Anki acceptance.
 
-Builds the staged-candidate UI and commits selected evidence into the normal corpus.
-
-Its full original-workflow acceptance should run after ACCP-018 so accepted Hebrew/Serbian/etc. material can be exported through a real existing user note type and deck.
+Builds the staged-candidate UI and commits selected evidence into the normal corpus. Imported evidence remains Inbox material until normal lexical/card review explicitly promotes it.
 
 ### ACCP-012 — onboarding and user journey
 
@@ -102,15 +102,14 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-018 — guided export-profile setup
-2. ACCP-021 — batch backfill review/import
-3. ACCP-012 — onboarding/user journey
-4. ACCP-004 — explicit merge/split
-5. ACCP-005 — learning-card policy v2
-6. ACCP-006 — morphology assistance
-7. ACCP-007 — learning-value decision
+1. ACCP-021 — batch backfill review/import
+2. ACCP-012 — onboarding/user journey
+3. ACCP-004 — explicit merge/split
+4. ACCP-005 — learning-card policy v2
+5. ACCP-006 — morphology assistance
+6. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, and ACCP-003 are now baseline work. ACCP-018 is the next linear merge gate and requires browser plus real-Anki acceptance before closure.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, and ACCP-018 are now baseline work. ACCP-021 is the next linear merge gate and requires browser plus full original-workflow real-Anki acceptance before closure.
 
 ---
 
