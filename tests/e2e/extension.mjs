@@ -1732,7 +1732,7 @@ try {
   );
 
   const duolingoStagedRow = stagedReview.locator(".staged-review-row").filter({
-    has: stagedReview.locator(".staged-row-head strong", { hasText: "מרק" }),
+    hasText: "מרק",
   });
   await duolingoStagedRow.waitFor();
   await duolingoStagedRow.getByRole("checkbox", { name: "Select מרק" }).check();
@@ -1927,7 +1927,7 @@ try {
   // Long Hebrew/Serbian/Spanish material must remain compact and bidirectionally usable.
   for (const text of [longHebrew, longSerbian, longSpanish]) {
     const row = stagedReview.locator(".staged-review-row").filter({
-      has: stagedReview.locator(".staged-row-head strong", { hasText: text }),
+      hasText: text,
     });
     await row.waitFor();
     const compactStyle = await row.locator(".staged-row-head strong").evaluate((node) => {
@@ -2000,7 +2000,7 @@ try {
   // Editing is evidence-only and must trigger domain reclassification without changing
   // candidate identity or source provenance.
   const editableRow = stagedReview.locator(".staged-review-row").filter({
-    has: stagedReview.locator(".staged-row-head strong", { hasText: "batch-new-04-he" }),
+    hasText: "batch-new-04-he",
   });
   const editableId = await editableRow.getAttribute("data-staged-id");
   assert.ok(editableId);
@@ -2070,7 +2070,7 @@ try {
 
   // Discard is deliberately narrow: remove from this transient batch only.
   const discardRow = stagedReview.locator(".staged-review-row").filter({
-    has: stagedReview.locator(".staged-row-head strong", { hasText: "batch-new-05-sr" }),
+    hasText: "batch-new-05-sr",
   });
   await discardRow.getByRole("checkbox").check();
   panel.once("dialog", (dialog) => void dialog.accept());
