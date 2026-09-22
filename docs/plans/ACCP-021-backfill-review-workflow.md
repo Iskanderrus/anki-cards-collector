@@ -4,6 +4,24 @@
 
 Make staged backfill usable with tens of candidates and complete the visible-material-to-normal-corpus workflow.
 
+## Implementation status
+
+Implemented by PR #70 through the existing ACCP-019/020 boundaries.
+
+- `src/sidepanel/staged-review.tsx` provides a dedicated compact Staged view with text/disposition filtering, visible-scope New / More-evidence bulk selection, individual selection, keyboard navigation, evidence inspection, and explicit destructive discard confirmation;
+- staged evidence editing changes only observed text, language, or context, preserves candidate/source identity, and reclassifies against the current corpus before commit;
+- `src/background.ts` serializes staged edit/discard/commit operations with the existing MV3 staged-batch lock and mirrors successful transient mutations back to `chrome.storage.session`;
+- selected import calls only `BatchCapturePipeline.commit()`; ACCP-019 revalidates against current corpus state immediately before the single repository transaction;
+- exact already-represented evidence is consumed as a no-op, while actual evidence mutations create/add occurrences and force any affected Ready or Archived lexical unit back to Inbox;
+- commit summaries are based on the actual post-transaction lexical-unit identities, so multiple new contexts that collapse onto one newly created lexical unit report one new unit plus added evidence rather than over-counting;
+- if the corpus transaction fails, staged evidence remains available for retry; if the corpus transaction succeeds but the transient staged snapshot cannot be updated, the corpus is not rolled back and a stale reconstructed snapshot fails safe by reclassifying committed evidence as already represented;
+- Staged review exposes no direct Anki export action.
+
+Automated browser acceptance covers 50+ mixed-disposition candidates, long Hebrew/Serbian/Spanish content, filtering/bulk scope, evidence edits, no-op import, ambiguous-owner resolution, injected commit failure/retry, discard, keyboard flow, accessibility, and the Duolingo -> Staged -> Inbox -> ordinary review -> ACCP-018 mapped fake-Anki path.
+
+Final closure still requires the real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md`.
+
+
 ## Dependencies
 
 - ACCP-019;
