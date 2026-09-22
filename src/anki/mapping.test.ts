@@ -119,6 +119,23 @@ describe("mapped user-model field mapping", () => {
     });
   });
 
+  it("preserves special Anki field keys in mapped payloads", () => {
+    const specialProfile: ExportProfile = {
+      ...profile(),
+      fieldMapping: {
+        ...profile().fieldMapping,
+        Context: "__proto__",
+      },
+    };
+
+    const fields = mappedAnkiFields(item(), specialProfile);
+    expect(Object.hasOwn(fields, "__proto__")).toBe(true);
+    expect(fields["__proto__"]).toBe("Hoy tengo ganas de salir a caminar por el centro.");
+    expect(JSON.parse(JSON.stringify(fields))["__proto__"]).toBe(
+      "Hoy tengo ganas de salir a caminar por el centro.",
+    );
+  });
+
   it("uses a stable hex-only exact tag query for arbitrary Collector ids", () => {
     expect(collectorIdentityTag("unit-1")).toBe(
       "collector::id::0075006e00690074002d0031",
