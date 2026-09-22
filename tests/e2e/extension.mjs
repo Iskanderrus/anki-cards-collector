@@ -2091,6 +2091,87 @@ try {
   await stagedReview.getByRole("button", { name: "Discard selected from batch" }).click();
   await discardRow.waitFor({ state: "detached" });
 
+  markE2eStage("accp021-late-ambiguity-recovery");
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+
+  const lateSurface = "צורת-בעלות-מאוחרת";
+  const firstLateOwner = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_SEED_OBSERVED_OWNER",
+      surfaceText: lateSurface,
+      canonicalText: "בעל מאוחר ראשון",
+      language: "he",
+      capturedAt: "2026-09-22T15:30:00.000Z",
+    },
+    "ACCP-021 first late owner fixture",
+  );
+  assert.equal(firstLateOwner?.ok, true, firstLateOwner?.error);
+  assert.ok(firstLateOwner?.ownerId);
+
+  const lateBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp021-late-ambiguity",
+      evidence: [{
+        surfaceText: lateSurface,
+        context: "הקשר חדש שנאסף לפני שינוי הבעלות.",
+        language: "he",
+        source: e2eBatchSource,
+        capturedAt: "2026-09-22T15:32:00.000Z",
+      }],
+    },
+    "ACCP-021 late ambiguity staged fixture",
+  );
+  assert.equal(lateBatch?.ok, true, lateBatch?.error);
+  assert.equal(lateBatch?.batch?.candidates?.[0]?.disposition, "repeated-evidence");
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const lateRow = stagedReview.locator(".staged-review-row").filter({ hasText: lateSurface });
+  await lateRow.getByText("More evidence", { exact: true }).waitFor();
+  await lateRow.getByRole("checkbox").check();
+
+  const secondLateOwner = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_SEED_OBSERVED_OWNER",
+      surfaceText: lateSurface,
+      canonicalText: "בעל מאוחר שני",
+      language: "he",
+      capturedAt: "2026-09-22T15:31:00.000Z",
+    },
+    "ACCP-021 second late owner fixture",
+  );
+  assert.equal(secondLateOwner?.ok, true, secondLateOwner?.error);
+  assert.ok(secondLateOwner?.ownerId);
+
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await panel.locator(".notice.error", {
+    hasText: "needs an explicit matching lexical-unit resolution",
+  }).waitFor();
+
+  await lateRow.getByText("Needs review", { exact: true }).waitFor();
+  assert.equal(
+    await lateRow.getByRole("checkbox").isChecked(),
+    true,
+    "Late-ambiguity failure should preserve the user's selection.",
+  );
+  await lateRow.locator(".staged-row-open").click();
+  await stagedReview.getByText(/Resolve 1 selected Needs review candidate/).waitFor();
+  const lateOwnership = stagedReview.getByLabel("Existing lexical unit for this evidence");
+  assert.equal(
+    await lateOwnership.locator("option").count(),
+    3,
+    "Recovered ambiguity should expose both current owners plus the placeholder.",
+  );
+  await lateOwnership.selectOption(firstLateOwner.ownerId);
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "1 occurrence added to existing units",
+  }).waitFor();
+  await lateRow.waitFor({ state: "detached" });
+
   const stagedAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
