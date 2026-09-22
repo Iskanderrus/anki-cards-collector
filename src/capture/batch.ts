@@ -283,65 +283,43 @@ export class BatchCapturePipeline {
     const candidatesById = new Map(
       this.activeBatch.candidates.map((candidate) => [candidate.id, candidate]),
     );
-    const selected = await this.classify(requestedIds.map((candidateId) => {
+    const selected = requestedIds.map((candidateId) => {
       const candidate = candidatesById.get(candidateId);
       if (!candidate) throw new Error(`Unknown staged candidate: ${candidateId}`);
       return candidate;
+    });
+
+    const entries: CaptureBatchEntry[] = selected.map((candidate) => ({
+      draft: {
+        text: candidate.surfaceText,
+        context: candidate.context,
+        language: candidate.language,
+        source: candidate.source,
+        capturedAt: candidate.capturedAt,
+      },
+      resolutionLexicalUnitId: request.resolutions?.[candidate.id],
     }));
 
+    const outcomes = await this.repository.captureBatch(entries);
+    const committed: BatchCommitResult["committed"] = [];
     const unchangedCandidateIds: string[] = [];
-    const entries: CaptureBatchEntry[] = [];
-    const mutationCandidateIds: string[] = [];
+    let newUnits = 0;
+    let evidenceAdded = 0;
 
-    for (const candidate of selected) {
-      if (candidate.disposition === "already-represented") {
-        unchangedCandidateIds.push(candidate.id);
-        continue;
+    outcomes.forEach((outcome, index) => {
+      const candidateId = selected[index]!.id;
+      if (outcome.kind === "unchanged") {
+        unchangedCandidateIds.push(candidateId);
+        return;
       }
 
-      let targetLexicalUnitId: string | undefined;
-
-      if (candidate.disposition === "repeated-evidence") {
-        targetLexicalUnitId = candidate.matchingLexicalUnitIds[0];
-      } else if (candidate.disposition === "needs-review") {
-        const resolution = request.resolutions?.[candidate.id];
-        if (!resolution || !candidate.matchingLexicalUnitIds.includes(resolution)) {
-          throw new Error(
-            `Candidate ${candidate.id} needs an explicit matching lexical-unit resolution.`,
-          );
-        }
-        targetLexicalUnitId = resolution;
+      committed.push({ candidateId, item: outcome.item });
+      if (outcome.kind === "new-unit") {
+        newUnits += 1;
+      } else {
+        evidenceAdded += 1;
       }
-
-      entries.push({
-        draft: {
-          text: candidate.surfaceText,
-          context: candidate.context,
-          language: candidate.language,
-          source: candidate.source,
-          capturedAt: candidate.capturedAt,
-        },
-        targetLexicalUnitId,
-      });
-      mutationCandidateIds.push(candidate.id);
-    }
-
-    const preCommitLexicalUnitIds = new Set(
-      (await this.repository.list()).map((item) => item.lexicalUnit.id),
-    );
-    const items = entries.length > 0
-      ? await this.repository.captureBatch(entries)
-      : [];
-
-    const committed = mutationCandidateIds.map((candidateId, index) => ({
-      candidateId,
-      item: items[index]!,
-    }));
-    const newlyCreatedLexicalUnitIds = new Set(
-      committed
-        .map(({ item }) => item.lexicalUnit.id)
-        .filter((lexicalUnitId) => !preCommitLexicalUnitIds.has(lexicalUnitId)),
-    );
+    });
 
     const selectedIds = new Set(requestedIds);
     const remaining = this.activeBatch.candidates.filter(
@@ -362,8 +340,8 @@ export class BatchCapturePipeline {
       unchangedCandidateIds,
       remainingCandidateIds: this.activeBatch?.candidates.map((candidate) => candidate.id) ?? [],
       summary: {
-        newUnits: newlyCreatedLexicalUnitIds.size,
-        evidenceAdded: committed.length - newlyCreatedLexicalUnitIds.size,
+        newUnits,
+        evidenceAdded,
         unchanged: unchangedCandidateIds.length,
         needsReview: this.activeBatch?.candidates.filter(
           (candidate) => candidate.disposition === "needs-review",
