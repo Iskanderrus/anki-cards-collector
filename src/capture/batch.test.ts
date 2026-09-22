@@ -676,6 +676,7 @@ describe("BatchCapturePipeline", () => {
       unchanged: 0,
       needsReview: 0,
     });
+    expect(result.committed.map(({ item }) => item.occurrences.length)).toEqual([2, 2]);
     const corpus = await repository.list();
     expect(corpus).toHaveLength(1);
     expect(corpus[0]?.occurrences).toHaveLength(2);
