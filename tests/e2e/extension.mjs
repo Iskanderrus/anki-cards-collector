@@ -1921,9 +1921,9 @@ try {
     55,
     "Staged review should keep a 50+ candidate batch practical without rendering full editors.",
   );
-  await stagedReview.getByText("Existing", { exact: true }).first().waitFor();
-  await stagedReview.getByText("More evidence", { exact: true }).first().waitFor();
-  await stagedReview.getByText("Needs review", { exact: true }).first().waitFor();
+  await stagedReview.locator(".staged-disposition", { hasText: "Existing" }).first().waitFor();
+  await stagedReview.locator(".staged-disposition", { hasText: "More evidence" }).first().waitFor();
+  await stagedReview.locator(".staged-disposition", { hasText: "Needs review" }).first().waitFor();
 
   // Long Hebrew/Serbian/Spanish material must remain compact and bidirectionally usable.
   for (const text of [longHebrew, longSerbian, longSpanish]) {
