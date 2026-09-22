@@ -68,6 +68,7 @@ export interface BatchCommitResult {
   unchangedCandidateIds: string[];
   remainingCandidateIds: string[];
   summary: BatchCommitSummary;
+  warning?: string;
 }
 
 function sourceFingerprint(source: CaptureSource): string {
@@ -334,13 +335,27 @@ export class BatchCapturePipeline {
       (candidate) => !selectedIds.has(candidate.id),
     );
 
+    let warning: string | undefined;
     if (remaining.length === 0) {
       this.activeBatch = null;
     } else {
+      // captureBatch() resolving is the irreversible corpus-commit boundary.
+      // Consume selected staged candidates before any best-effort refresh so a
+      // transient post-commit read failure can never masquerade as an uncommitted
+      // import or re-offer already committed evidence as pending work.
       this.activeBatch = {
         ...this.activeBatch,
-        candidates: await this.classify(remaining),
+        candidates: remaining,
       };
+
+      try {
+        this.activeBatch = {
+          ...this.activeBatch,
+          candidates: await this.classify(remaining),
+        };
+      } catch (error) {
+        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Reload Staged review before relying on the remaining disposition labels.`;
+      }
     }
 
     return {
@@ -355,6 +370,7 @@ export class BatchCapturePipeline {
           (candidate) => candidate.disposition === "needs-review",
         ).length ?? 0,
       },
+      warning,
     };
   }
 
