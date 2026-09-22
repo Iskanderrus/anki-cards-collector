@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LEGACY_DEFAULT_PROFILE_ID } from "./core/types";
 import {
   DEFAULT_SETTINGS,
+  assignLanguageRoute,
+  captureLanguageForSettings,
   mergeSettingsForRestore,
   migrateSettings,
 } from "./settings";
@@ -425,4 +427,84 @@ describe("settings migration", () => {
     ]);
   });
 
+});
+
+
+describe("ACCP-018 language-first profiles", () => {
+  it("preserves legacy global language while a guided profile becomes the active capture language", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "sr",
+      captureProfileId: "he-guided",
+      exportProfiles: [
+        {
+          id: "he-guided",
+          name: "Hebrew guided",
+          language: "he",
+          deckName: "Hebrew RU",
+          deckId: "2",
+          modelName: "Hebrew Existing",
+          modelId: "11",
+          mode: "mapped-user-model",
+          fieldMapping: { Prompt: "Hebrew", Answer: "Russian" },
+          identityStrategy: "collector-tag",
+          lastValidatedAt: "2026-09-21T18:00:00Z",
+        },
+        {
+          id: "fallback",
+          name: "Fallback",
+          deckName: "Collector Inbox",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+      languageRoutes: [{ language: "he", profileId: "he-guided" }],
+      fallbackProfileId: "fallback",
+    });
+
+    expect(settings.defaultLanguage).toBe("sr");
+    expect(settings.exportProfiles[0]).toMatchObject({
+      language: "he",
+      identityStrategy: "collector-tag",
+      lastValidatedAt: "2026-09-21T18:00:00Z",
+    });
+    expect(captureLanguageForSettings(settings)).toBe("he");
+  });
+
+  it("does not invent a first-class language for a legacy profile", () => {
+    const settings = migrateSettings({
+      defaultLanguage: "SR",
+      captureProfileId: "legacy",
+      exportProfiles: [{
+        id: "legacy",
+        name: "Legacy",
+        deckName: "Serbian RU",
+        modelName: "Collector Basic",
+        mode: "collector-managed",
+      }],
+      languageRoutes: [],
+      fallbackProfileId: "legacy",
+    });
+
+    expect(settings.exportProfiles[0]?.language).toBeUndefined();
+    expect(captureLanguageForSettings(settings)).toBe("sr");
+  });
+
+  it("updates one language route without rewriting unrelated routes", () => {
+    const current = migrateSettings({
+      exportProfiles: [
+        { id: "he", name: "Hebrew", language: "he", deckName: "Hebrew RU", modelName: "Collector Basic", mode: "collector-managed" },
+        { id: "sr", name: "Serbian", language: "sr", deckName: "Serbian RU", modelName: "Collector Basic", mode: "collector-managed" },
+      ],
+      languageRoutes: [
+        { language: "he", profileId: "he" },
+        { language: "sr", profileId: "sr" },
+      ],
+      fallbackProfileId: "sr",
+    });
+
+    expect(assignLanguageRoute(current, "es", "he", "he").languageRoutes).toEqual([
+      { language: "es", profileId: "he" },
+      { language: "sr", profileId: "sr" },
+    ]);
+  });
 });

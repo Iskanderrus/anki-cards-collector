@@ -48,11 +48,9 @@ Canonical/observed review, rename/consolidation preview, and identity-safe conso
 
 ## Gate D — existing Anki models, guided setup, and backfill review
 
-### ACCP-014 — existing note type mapping
+### ACCP-014 — existing note type mapping — completed
 
-Depends on ACCP-013 and completed ACCP-016.
-
-Consumes ACCP-017 representative-card evidence.
+ACCP-014 is now baseline behavior: mapped user-owned note types are pinned by live deck/model IDs, validated before writes, and updated through mapped-only fields.
 
 ### ACCP-018 — guided export-profile setup
 
@@ -104,16 +102,15 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-014 — existing note type mapping
-2. ACCP-018 — guided export-profile setup
-3. ACCP-021 — batch backfill review/import
-4. ACCP-012 — onboarding/user journey
-5. ACCP-004 — explicit merge/split
-6. ACCP-005 — learning-card policy v2
-7. ACCP-006 — morphology assistance
-8. ACCP-007 — learning-value decision
+1. ACCP-018 — guided export-profile setup
+2. ACCP-021 — batch backfill review/import
+3. ACCP-012 — onboarding/user journey
+4. ACCP-004 — explicit merge/split
+5. ACCP-005 — learning-card policy v2
+6. ACCP-006 — morphology assistance
+7. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-017, ACCP-011, and ACCP-003 are now baseline work. ACCP-014 is the next linear merge gate and requires real-Anki acceptance before closure.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, and ACCP-003 are now baseline work. ACCP-018 is the next linear merge gate and requires browser plus real-Anki acceptance before closure.
 
 ---
 

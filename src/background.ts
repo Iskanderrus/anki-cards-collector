@@ -3,7 +3,7 @@ declare const __COLLECTOR_E2E__: boolean;
 import { BatchCapturePipeline, type BatchCaptureEvidence, type BatchCaptureResult } from "./capture/batch";
 import { sanitizeSourceUrl } from "./capture/source-url";
 import type { CaptureDraft, SourceUrlMode } from "./core/types";
-import { loadSettings } from "./settings";
+import { captureLanguageForSettings, loadSettings } from "./settings";
 import { repository } from "./storage/repository";
 
 type CaptureResponse = { ok: true; draft: CaptureDraft | null } | { ok: false; error: string };
@@ -376,7 +376,7 @@ async function scanVisibleDuolingo(): Promise<{
 
   const response = await chrome.tabs.sendMessage(tabId, {
     type: "DUOLINGO_SCAN_VISIBLE",
-    language: settings.defaultLanguage,
+    language: captureLanguageForSettings(settings),
   }) as VisibleContentResponse;
 
   if (!response?.ok) throw new Error(response?.error ?? "Could not scan visible Duolingo material.");
@@ -411,7 +411,7 @@ async function startVisibleDuolingoSession(): Promise<{
 
   const response = await chrome.tabs.sendMessage(tabId, {
     type: "DUOLINGO_START_VISIBLE_SESSION",
-    language: settings.defaultLanguage,
+    language: captureLanguageForSettings(settings),
   }) as VisibleContentResponse;
 
   if (!response?.ok || !response.status?.active || !response.status.sessionId) {
@@ -561,7 +561,7 @@ async function captureFromContextMenu(tabId: number): Promise<{ ok: boolean; err
 
   try {
     const settings = await loadSettings();
-    await collectFromTab(tabId, settings.defaultLanguage, settings.sourceUrlMode);
+    await collectFromTab(tabId, captureLanguageForSettings(settings), settings.sourceUrlMode);
     return { ok: true };
   } catch (error) {
     const message = errorMessage(error);
@@ -615,7 +615,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const settings = await loadSettings();
         await collectFromTab(
           tabId,
-          message.language ?? settings.defaultLanguage,
+          message.language ?? captureLanguageForSettings(settings),
           settings.sourceUrlMode,
         );
         sendResponse({ ok: true });

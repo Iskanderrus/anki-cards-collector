@@ -2,6 +2,7 @@ export type ReviewStatus = "inbox" | "ready" | "archived";
 export type SourceKind = "web" | "duolingo";
 export type SourceUrlMode = "sanitized" | "query" | "none";
 export type ExportProfileMode = "collector-managed" | "mapped-user-model";
+export type ExportIdentityStrategy = "collector-id-field" | "collector-tag";
 
 export type CollectorSemanticField =
   | "Prompt"
@@ -64,12 +65,15 @@ export interface CollectedItem {
 export interface ExportProfile {
   id: string;
   name: string;
+  language?: string;
   deckName: string;
   deckId?: string;
   modelName: string;
   modelId?: string;
   mode: ExportProfileMode;
   fieldMapping?: ExportFieldMapping;
+  identityStrategy?: ExportIdentityStrategy;
+  lastValidatedAt?: string;
 }
 
 export interface LanguageRoute {
@@ -92,7 +96,9 @@ export interface ExportBinding {
 }
 
 export interface CollectorSettings {
+  /** Legacy/manual capture-language fallback. */
   defaultLanguage: string;
+  captureProfileId?: string;
   sourceUrlMode: SourceUrlMode;
   exportProfiles: ExportProfile[];
   languageRoutes: LanguageRoute[];

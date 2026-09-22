@@ -35,8 +35,18 @@ export const DEFAULT_SETTINGS: CollectorSettings = {
   fallbackProfileId: LEGACY_DEFAULT_PROFILE_ID,
 };
 
-function normalizeLanguage(language: string): string {
+export function normalizeLanguage(language: string): string {
   return language.trim().toLowerCase() || "und";
+}
+
+function normalizedOptionalLanguage(value: unknown): string | undefined {
+  const normalized = normalizeLanguage(String(value ?? ""));
+  return normalized === "und" ? undefined : normalized;
+}
+
+function normalizedValidationTime(value: unknown): string | undefined {
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return undefined;
+  return value;
 }
 
 export function managedProfileIdForDeck(deckName: string): string {
@@ -123,15 +133,25 @@ function normalizedProfiles(value: unknown): ExportProfile[] {
     const fieldMapping = profile.mode === "mapped-user-model"
       ? normalizeFieldMapping(profile.fieldMapping)
       : undefined;
+    const language = normalizedOptionalLanguage(profile.language);
+    const identityStrategy =
+      profile.identityStrategy === "collector-id-field"
+      || profile.identityStrategy === "collector-tag"
+        ? profile.identityStrategy
+        : undefined;
+    const lastValidatedAt = normalizedValidationTime(profile.lastValidatedAt);
     profiles.push({
       id,
       name,
+      ...(language ? { language } : {}),
       deckName,
       ...(profile.deckId ? { deckId: String(profile.deckId) } : {}),
       modelName,
       ...(profile.modelId ? { modelId: String(profile.modelId) } : {}),
       mode: profile.mode,
       ...(fieldMapping && Object.keys(fieldMapping).length > 0 ? { fieldMapping } : {}),
+      ...(identityStrategy ? { identityStrategy } : {}),
+      ...(lastValidatedAt ? { lastValidatedAt } : {}),
     });
   }
 
@@ -231,8 +251,13 @@ export function migrateSettings(value: unknown): CollectorSettings {
     ? String(raw.fallbackProfileId)
     : exportProfiles[0]!.id;
 
+  const captureProfileId = profileIds.has(String(raw.captureProfileId ?? ""))
+    ? String(raw.captureProfileId)
+    : undefined;
+
   const migrated: CollectorSettings = {
     defaultLanguage: normalizeLanguage(String(raw.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage)),
+    ...(captureProfileId ? { captureProfileId } : {}),
     sourceUrlMode: raw.sourceUrlMode === "query" || raw.sourceUrlMode === "none"
       ? raw.sourceUrlMode
       : "sanitized",
@@ -264,11 +289,13 @@ export interface SettingsMergeResult {
 function sameProfile(left: ExportProfile, right: ExportProfile): boolean {
   return left.id === right.id
     && left.name === right.name
+    && left.language === right.language
     && left.deckName === right.deckName
     && left.deckId === right.deckId
     && left.modelName === right.modelName
     && left.modelId === right.modelId
     && left.mode === right.mode
+    && left.identityStrategy === right.identityStrategy
     && JSON.stringify(left.fieldMapping ?? {}) === JSON.stringify(right.fieldMapping ?? {});
 }
 
@@ -328,4 +355,56 @@ export function mergeSettingsForRestore(
     }),
     conflicts,
   };
+}
+
+
+export function profileLanguage(
+  settings: CollectorSettings,
+  profileId: string,
+): string | undefined {
+  const profile = settings.exportProfiles.find((candidate) => candidate.id === profileId);
+  const direct = profile?.language ? normalizeLanguage(profile.language) : "und";
+  if (direct !== "und") return direct;
+
+  const routed = settings.languageRoutes.filter((route) => route.profileId === profileId);
+  return routed.length === 1 ? normalizeLanguage(routed[0]!.language) : undefined;
+}
+
+export function captureLanguageForSettings(settings: CollectorSettings): string {
+  if (settings.captureProfileId) {
+    const language = profileLanguage(settings, settings.captureProfileId);
+    if (language && language !== "und") return language;
+  }
+  return normalizeLanguage(settings.defaultLanguage);
+}
+
+export function assignLanguageRoute(
+  settings: CollectorSettings,
+  languageValue: string,
+  profileId: string,
+  previousLanguageValue?: string,
+): CollectorSettings {
+  const language = normalizeLanguage(languageValue);
+  if (language === "und") throw new Error("Choose a language before saving this export profile.");
+  if (!settings.exportProfiles.some((profile) => profile.id === profileId)) {
+    throw new Error("Cannot route a language to a missing export profile.");
+  }
+
+  const previousLanguage = previousLanguageValue
+    ? normalizeLanguage(previousLanguageValue)
+    : undefined;
+  const languageRoutes = settings.languageRoutes.filter((route) => {
+    if (route.language === language) return false;
+    if (
+      previousLanguage
+      && previousLanguage !== language
+      && route.language === previousLanguage
+      && route.profileId === profileId
+    ) return false;
+    return true;
+  });
+
+  languageRoutes.push({ language, profileId });
+  languageRoutes.sort((left, right) => left.language.localeCompare(right.language));
+  return { ...settings, languageRoutes };
 }

@@ -19,6 +19,7 @@ import type {
 import { repository } from "../storage/repository";
 import {
   DEFAULT_SETTINGS,
+  captureLanguageForSettings,
   ensureManagedProfileForDeck,
   loadSettings,
   mergeSettingsForRestore,
@@ -48,6 +49,7 @@ import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { ReviewQueue } from "./queue";
+import { GuidedProfileSetup } from "./profile-setup";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -548,7 +550,7 @@ function App(): React.ReactElement {
     try {
       const response = await chrome.runtime.sendMessage({
         type: "COLLECT_ACTIVE_SELECTION",
-        language: settings.defaultLanguage,
+        language: captureLanguageForSettings(settings),
       }) as { ok: boolean; error?: string };
 
       if (!response.ok) throw new Error(response.error ?? "Capture failed.");
@@ -1572,17 +1574,6 @@ function App(): React.ReactElement {
           <button className="ghost" type="button" onClick={showQueue}>Back to queue</button>
         </div>
         <div className="settings-grid">
-          <label>
-            Capture language
-            <input
-              value={settings.defaultLanguage}
-              placeholder="es, sr, he…"
-              onChange={(event) => {
-                const defaultLanguage = event.target.value || "und";
-                void persistSettings((current) => ({ ...current, defaultLanguage }));
-              }}
-            />
-          </label>
           <div className="anki-catalog">
             <div className="anki-catalog-head">
               <div>
@@ -1615,6 +1606,24 @@ function App(): React.ReactElement {
               )}
             </div>
           </div>
+
+          <GuidedProfileSetup
+            settings={settings}
+            bindings={Object.values(exportBindings)}
+            catalogKind={catalogState.kind}
+            catalogSnapshot={currentCatalogSnapshot()}
+            catalogError={
+              catalogState.kind === "stale" || catalogState.kind === "unavailable"
+                ? catalogState.error
+                : undefined
+            }
+            catalogService={catalogService}
+            deckAnalysisService={deckAnalysisService}
+            persistSettings={persistSettings}
+            renderRepresentativePreview={representativePreviewDocument}
+            onNotice={setNotice}
+            onError={setError}
+          />
 
           <div className="language-decks">
             <div className="anki-catalog-head">
@@ -1893,6 +1902,20 @@ function App(): React.ReactElement {
               )}
             </div>
           )}
+          <label>
+            Legacy capture language fallback
+            <input
+              value={settings.defaultLanguage}
+              placeholder="es, sr, he…"
+              onChange={(event) => {
+                const defaultLanguage = event.target.value || "und";
+                void persistSettings((current) => ({ ...current, defaultLanguage }));
+              }}
+            />
+            <span className="setting-help">
+              Preserved for older configuration. When an active export profile supplies a language, normal capture uses the profile language instead.
+            </span>
+          </label>
           <label>
             Source URL retention
             <select

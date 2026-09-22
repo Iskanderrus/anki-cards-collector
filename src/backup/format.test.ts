@@ -224,12 +224,14 @@ describe("backup format", () => {
 
   it("round-trips mapped user-owned field configuration in backup settings", () => {
     const mappedSettings: CollectorSettings = {
-      defaultLanguage: "he",
+      defaultLanguage: "sr",
+      captureProfileId: "he-existing",
       sourceUrlMode: "sanitized",
       exportProfiles: [
         {
           id: "he-existing",
           name: "Hebrew existing",
+          language: "he",
           deckName: "Hebrew RU",
           deckId: "2",
           modelName: "Hebrew Existing",
@@ -240,6 +242,8 @@ describe("backup format", () => {
             Answer: "Russian",
             Canonical: "Lemma",
           },
+          identityStrategy: "collector-tag",
+          lastValidatedAt: "2026-09-21T18:00:00Z",
         },
         {
           id: "fallback",
@@ -264,13 +268,18 @@ describe("backup format", () => {
     expect(parsed.settings?.exportProfiles.find(
       (profile) => profile.id === "he-existing",
     )).toMatchObject({
+      language: "he",
       mode: "mapped-user-model",
       fieldMapping: {
         Prompt: "Hebrew",
         Answer: "Russian",
         Canonical: "Lemma",
       },
+      identityStrategy: "collector-tag",
+      lastValidatedAt: "2026-09-21T18:00:00Z",
     });
+    expect(parsed.settings?.captureProfileId).toBe("he-existing");
+    expect(parsed.settings?.defaultLanguage).toBe("sr");
     expect(parsed.settings?.languageRoutes).toEqual([
       { language: "he", profileId: "he-existing" },
     ]);

@@ -28,6 +28,9 @@ assert.ok(
 
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
+let ankiAvailable = true;
+let delayNextDeckNamesAndIdsMs = 0;
+const ankiNotes = new Map();
 
 function collectorIdentityTagForE2e(id) {
   let encoded = "";
@@ -39,6 +42,19 @@ function collectorIdentityTagForE2e(id) {
 const ankiDecks = new Map([
   ["Hebrew RU", 2],
   ["Serbian RU", 3],
+]);
+const ankiModels = new Map([
+  ["Collector Basic", 10],
+  ["Hebrew Existing", 11],
+  ["Hebrew Verbs", 12],
+  ["Serbian Existing", 13],
+  ["Hebrew Rare", 14],
+]);
+const ankiModelFields = new Map([
+  ["Hebrew Existing", ["Hebrew", "Russian", "Example"]],
+  ["Hebrew Verbs", ["Hebrew", "Russian"]],
+  ["Serbian Existing", ["Serbian", "Russian", "Example"]],
+  ["Hebrew Rare", ["Hebrew", "Russian"]],
 ]);
 
 const collectorFields = [
@@ -68,43 +84,53 @@ const ankiServer = createServer(async (request, response) => {
 
   switch (action) {
     case "version":
-      result = 6;
+      if (ankiAvailable) result = 6;
+      else error = "Anki unavailable fixture";
       break;
     case "deckNamesAndIds":
+      if (delayNextDeckNamesAndIdsMs > 0) {
+        const delayMs = delayNextDeckNamesAndIdsMs;
+        delayNextDeckNamesAndIdsMs = 0;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      }
       result = Object.fromEntries(ankiDecks);
       break;
     case "modelNamesAndIds":
-      result = {
-        "Collector Basic": 10,
-        "Hebrew Existing": 11,
-        "Hebrew Verbs": 12,
-      };
+      result = Object.fromEntries(ankiModels);
       break;
     case "modelFieldNames":
       result = params.modelName === "Collector Basic"
         ? collectorFields
-        : ["Hebrew", "Russian"];
+        : ankiModelFields.get(params.modelName) ?? [];
       break;
-    case "modelFieldsOnTemplates":
-      result = params.modelName === "Collector Basic"
-        ? { Recognition: [["Prompt"], ["Prompt", "Answer", "Context", "Note"]] }
-        : { Recognition: [["Hebrew"], ["Hebrew", "Russian"]] };
+    case "modelFieldsOnTemplates": {
+      if (params.modelName === "Collector Basic") {
+        result = { Recognition: [["Prompt"], ["Prompt", "Answer", "Context", "Note"]] };
+      } else {
+        const fields = ankiModelFields.get(params.modelName) ?? [];
+        result = { Recognition: [[fields[0]].filter(Boolean), [fields[0], fields[1]].filter(Boolean)] };
+      }
       break;
-    case "modelTemplates":
-      result = params.modelName === "Collector Basic"
-        ? {
-            Recognition: {
-              Front: "{{Prompt}}",
-              Back: "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>",
-            },
-          }
-        : {
-            Recognition: {
-              Front: "{{Hebrew}}",
-              Back: "{{FrontSide}}<hr>{{Russian}}",
-            },
-          };
+    }
+    case "modelTemplates": {
+      if (params.modelName === "Collector Basic") {
+        result = {
+          Recognition: {
+            Front: "{{Prompt}}",
+            Back: "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div><div class=context>{{Context}}</div><div class=context>{{Note}}</div><div class=meta>{{CardKind}} · {{Why}}</div><div class=context>{{Source}}</div>",
+          },
+        };
+      } else {
+        const fields = ankiModelFields.get(params.modelName) ?? [];
+        result = {
+          Recognition: {
+            Front: "{{" + (fields[0] ?? "Front") + "}}",
+            Back: "{{FrontSide}}<hr>{{" + (fields[1] ?? "Back") + "}}",
+          },
+        };
+      }
       break;
+    }
     case "modelStyling":
       result = { css: ".card { font-size: 22px; }" };
       break;
@@ -112,10 +138,13 @@ const ankiServer = createServer(async (request, response) => {
       result = [...ankiDecks.keys()];
       break;
     case "modelNames":
-      result = ["Collector Basic", "Hebrew Existing", "Hebrew Verbs"];
+      result = [...ankiModels.keys()];
       break;
     case "notesInfo":
-      result = (params.notes ?? []).map((noteId) => ({ noteId }));
+      result = (params.notes ?? []).map((noteId) => {
+        const note = ankiNotes.get(noteId);
+        return note ? { noteId, modelName: note.modelName } : { noteId };
+      });
       break;
     case "findNotes":
       result = [];
@@ -125,6 +154,7 @@ const ankiServer = createServer(async (request, response) => {
       break;
     case "addNote":
       nextAnkiNoteId += 1;
+      ankiNotes.set(nextAnkiNoteId, structuredClone(params.note));
       result = nextAnkiNoteId;
       break;
     case "createDeck": {
@@ -136,7 +166,16 @@ const ankiServer = createServer(async (request, response) => {
       result = ankiDecks.get(deckName);
       break;
     }
-    case "updateNoteFields":
+    case "updateNoteFields": {
+      const note = ankiNotes.get(params.note?.id);
+      if (note) {
+        note.fields = { ...note.fields, ...params.note.fields };
+        ankiNotes.set(params.note.id, note);
+      }
+      result = null;
+      break;
+    }
+    case "addTags":
     case "modelFieldAdd":
     case "updateModelTemplates":
     case "updateModelStyling":
@@ -147,7 +186,7 @@ const ankiServer = createServer(async (request, response) => {
       if (params.query === 'deck:"Hebrew RU"') {
         result = [8006, 8001, 8005, 8002, 8004, 8003];
       } else if (params.query === 'deck:"Serbian RU"') {
-        result = [8101];
+        result = [8101, 8102];
       } else {
         result = [7001];
       }
@@ -222,6 +261,16 @@ const ankiServer = createServer(async (request, response) => {
           question: "<div>dobar dan</div>",
           answer: "<div>добрый день</div>",
           css: ".card { font-size: 20px; }",
+          fields: {},
+        },
+        8102: {
+          cardId: 8102,
+          deckName: "Serbian RU",
+          modelName: "Serbian Existing",
+          ord: 0,
+          question: "<div class=front>kuća</div>",
+          answer: "<div class=back>дом</div>",
+          css: ".front { font-size: 23px; } .back { font-size: 18px; }",
           fields: {},
         },
       };
@@ -314,6 +363,8 @@ const server = createServer((request, response) => {
           <p id="canonical-base">Quiero tener tiempo para estudiar.</p>
           <p id="canonical-observed">Tengo tiempo para estudiar hoy.</p>
           <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
+          <p id="mapped-context">Mapped context-menu phrase demonstrates profile-driven capture language.</p>
+          <p id="mapped-sr">Serbian mapped export phrase demonstrates a second existing Anki note type.</p>
         </main>
       </body>
     </html>`);
@@ -330,6 +381,17 @@ const fixtureUrl = `http://127.0.0.1:${address.port}/`;
 
 const userDataDir = await mkdtemp(join(tmpdir(), "collector-e2e-"));
 let context;
+let e2eStage = "launch";
+const e2eWatchdog = setTimeout(() => {
+  console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
+  process.exit(1);
+}, 180000);
+e2eWatchdog.unref();
+
+function markE2eStage(stage) {
+  e2eStage = stage;
+  console.log(`E2E_STAGE=${stage}`);
+}
 
 async function selectText(page, selector, phrase) {
   await page.evaluate(({ selector: targetSelector, phrase: targetPhrase }) => {
@@ -361,6 +423,44 @@ async function clickPanelButton(panel, name) {
   }, name);
 }
 
+async function sendPanelMessage(panel, message, label, timeoutMs = 10000) {
+  return panel.evaluate(
+    async ({ payload, stage, timeout }) => {
+      let timer;
+      try {
+        return await Promise.race([
+          chrome.runtime.sendMessage(payload),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error(`Timed out waiting for extension response: ${stage}`)),
+              timeout,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    { payload: message, stage: label, timeout: timeoutMs },
+  );
+}
+
+async function waitForPanelMessage(panel, message, label, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now());
+    const response = await sendPanelMessage(
+      panel,
+      message,
+      label,
+      Math.min(2000, remaining),
+    );
+    if (predicate(response)) return response;
+    await panel.waitForTimeout(100);
+  }
+  throw new Error(`Timed out waiting for extension state: ${label}`);
+}
+
 async function ensureQueue(panel) {
   if (await panel.locator(".queue").count() === 0) {
     await panel.getByRole("button", { name: "Queue", exact: true }).click();
@@ -375,6 +475,10 @@ async function openSettings(panel) {
 
 async function setCaptureLanguage(panel, language) {
   await openSettings(panel);
+  const advanced = panel.locator(".advanced-settings");
+  await advanced.evaluate((node) => {
+    if (node instanceof HTMLDetailsElement) node.open = true;
+  });
   const input = panel.getByPlaceholder("es, sr, he…");
   await input.fill(language);
   await panel.waitForFunction(async (expectedLanguage) => {
@@ -427,6 +531,7 @@ async function stopExtensionServiceWorker(context, page, extensionId) {
 }
 
 try {
+  markE2eStage("launch-extension");
   context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
     colorScheme: "light",
@@ -474,6 +579,7 @@ try {
     "Side panel should refresh after background capture.",
   );
 
+  markE2eStage("baseline-capture-and-keyboard");
   // Empty selection should fail usefully and must not write another item.
   await contentPage.evaluate(() => window.getSelection()?.removeAllRanges());
   await contentPage.bringToFront();
@@ -492,12 +598,10 @@ try {
   });
   assert.equal(typeof tabId, "number");
 
-  const contextMenuResult = await panel.evaluate(
-    async (activeTabId) => chrome.runtime.sendMessage({
-      type: "E2E_CONTEXT_MENU_CLICK",
-      tabId: activeTabId,
-    }),
-    tabId,
+  const contextMenuResult = await sendPanelMessage(
+    panel,
+    { type: "E2E_CONTEXT_MENU_CLICK", tabId },
+    "initial context-menu capture",
   );
   assert.equal(contextMenuResult?.ok, true, contextMenuResult?.error);
   await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
@@ -585,6 +689,7 @@ try {
   );
   await firstCard.getByRole("button", { name: "Cancel" }).click();
 
+  markE2eStage("duolingo-visible-backfill");
   // Duolingo visible backfill is explicitly activated and remains staged.
   await setCaptureLanguage(panel, "he");
 
@@ -600,8 +705,10 @@ try {
     3,
     "Staged Duolingo evidence should be inspectable without entering the corpus.",
   );
-  const initialStagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const initialStagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "initial staged-batch readback",
   );
   assert.equal(initialStagedBatch?.ok, true);
   assert.equal(
@@ -630,8 +737,10 @@ try {
   await stopExtensionServiceWorker(context, panel, extensionId);
   await panel.waitForTimeout(100);
 
-  const restoredAfterWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const restoredAfterWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "staged-batch readback after worker restart",
   );
   assert.equal(restoredAfterWorkerRestart?.ok, true);
   assert.equal(
@@ -655,8 +764,10 @@ try {
   await clickPanelButton(panel, "Start backfill session");
   await panel.locator(".backfill-status", { hasText: "Backfill active" }).waitFor();
 
-  const liveStatusBeforeWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const liveStatusBeforeWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status before worker restart",
   );
   assert.equal(liveStatusBeforeWorkerRestart?.ok, true);
   assert.equal(liveStatusBeforeWorkerRestart?.status?.active, true);
@@ -670,8 +781,10 @@ try {
   await panel.waitForTimeout(100);
   await contentPage.bringToFront();
 
-  const liveStatusAfterWorkerRestart = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const liveStatusAfterWorkerRestart = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after worker restart",
   );
   assert.equal(liveStatusAfterWorkerRestart?.ok, true);
   assert.equal(liveStatusAfterWorkerRestart?.status?.active, true);
@@ -716,16 +829,20 @@ try {
   // still address the Duolingo tab that owns the explicit session.
   await contentPage.bringToFront();
 
-  const injectPersistenceFailure = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE" }),
+  const injectPersistenceFailure = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE" },
+    "inject staged persistence failure",
   );
   assert.equal(injectPersistenceFailure?.ok, true);
 
   await clickPanelButton(panel, "Stop & stage session");
   await panel.locator(".notice.error", { hasText: "Injected staged-session persistence failure." }).waitFor();
 
-  const statusAfterFailedExplicitStop = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const statusAfterFailedExplicitStop = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after failed explicit stop",
   );
   assert.equal(statusAfterFailedExplicitStop?.ok, true);
   assert.equal(
@@ -754,8 +871,10 @@ try {
     "Stopping a Duolingo session must stage evidence without creating study items.",
   );
 
-  const stagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const stagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "staged-batch readback after explicit stop",
   );
   assert.equal(stagedBatch?.ok, true);
   assert.equal(stagedBatch?.batch?.candidates?.length, 6);
@@ -836,21 +955,27 @@ try {
   );
   await panel.locator(".notice", { hasText: "preserved" }).waitFor();
 
-  const awayStatus = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" }),
+  const awayStatus = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_GET_ACTIVE_SESSION_STATUS" },
+    "live-session status after SPA navigation",
   );
   assert.equal(awayStatus?.ok, true);
   assert.equal(awayStatus?.status?.active, false);
   assert.equal(awayStatus?.supported, false);
 
-  await panel.waitForFunction(async () => {
-    const response = await chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" });
-    return response?.batch?.candidates?.some(
+  await waitForPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "auto-staged batch after SPA navigation",
+    (response) => response?.batch?.candidates?.some(
       (candidate) => candidate.surfaceText === "ראיה אוטומטית חדשה",
-    ) === true;
-  });
-  const autoStagedBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+    ) === true,
+  );
+  const autoStagedBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "auto-staged batch readback",
   );
   assert.equal(autoStagedBatch?.ok, true);
   assert.equal(
@@ -868,6 +993,7 @@ try {
     "Automatic session termination should add only the new unique session evidence.",
   );
 
+  markE2eStage("duolingo-matching-pairs");
   // Matching-pairs challenges often put keyboard shortcut numbers in an outer
   // language-marked wrapper. Only the clean leaf target text should be staged.
   const pairsPage = await context.newPage();
@@ -878,8 +1004,10 @@ try {
       .find((candidate) => candidate.textContent?.trim() === "Scan visible Duolingo");
     return button instanceof HTMLButtonElement && !button.disabled;
   });
-  const pairScanResult = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "DUOLINGO_SCAN_ACTIVE" }),
+  const pairScanResult = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_SCAN_ACTIVE" },
+    "matching-pairs Duolingo scan",
   );
   assert.equal(pairScanResult?.ok, true, pairScanResult?.error);
   assert.equal(
@@ -888,8 +1016,10 @@ try {
     `Matching-pairs extractor should return five Hebrew leaves, got ${JSON.stringify(pairScanResult)}`,
   );
 
-  const pairsBatch = await panel.evaluate(
-    async () => chrome.runtime.sendMessage({ type: "GET_STAGED_BATCH" }),
+  const pairsBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "matching-pairs staged-batch readback",
   );
   assert.equal(pairsBatch?.ok, true);
   assert.equal(pairsBatch?.batch?.candidates?.length, 12);
@@ -915,6 +1045,7 @@ try {
     "Isolated matching-pair vocabulary should keep itself as clean context.",
   );
 
+  markE2eStage("accp013-routing");
   // ACCP-013 browser acceptance: the user-facing workflow is language -> deck.
   // Internal export profiles remain an implementation detail.
   await panel.bringToFront();
@@ -1105,68 +1236,260 @@ try {
     /Anki:\s*Serbian RU.*note\s+\d+/s,
   );
 
-  // ACCP-014: inject the low-level mapped profile that ACCP-018 will later
-  // configure through guided UI. A normal Ready-card send must now use the
-  // existing user-owned model without schema/template mutation.
-  await panel.evaluate(async () => {
+  markE2eStage("accp018-hebrew-guided-setup");
+  // ACCP-018: configure the mapped Hebrew profile through the guided UI.
+  await panel.bringToFront();
+  await openSettings(panel);
+  await clickPanelButton(panel, "Refresh from Anki");
+  await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
+
+  const guidedProfiles = panel.locator(".guided-profiles");
+  markE2eStage("accp018-hebrew-new-profile");
+  await guidedProfiles.getByRole("button", { name: "New profile" }).click();
+  const guidedForm = guidedProfiles.locator(".guided-profile-form");
+  await guidedForm.getByLabel("Profile language").selectOption("he");
+  await guidedForm.getByLabel("Live Anki deck").selectOption({ label: "Hebrew RU" });
+  markE2eStage("accp018-hebrew-deck-analysis");
+  await guidedForm.getByText(/Sample evidence only:/).waitFor();
+
+  const intendedModel = guidedForm.getByLabel("Intended note type");
+  assert.equal(await intendedModel.inputValue(), "", "Mixed-note-type evidence must not auto-select a target model.");
+  assert.equal(
+    await intendedModel.locator('option[value="Collector Basic"]').count(),
+    0,
+    "Collector-managed models must stay on the managed routing path, not be mislabeled as user-owned mappings.",
+  );
+  assert.match(
+    await guidedForm.innerText(),
+    /Hebrew Existing.*4\/6 sampled/s,
+    "The dominant sampled model is evidence only and remains an explicit choice.",
+  );
+  const rareModelOption = intendedModel.locator('option[value="Hebrew Rare"]');
+  assert.equal(
+    await rareModelOption.count(),
+    1,
+    "A live note type absent from the bounded deck sample must remain explicitly selectable.",
+  );
+  assert.match(
+    await rareModelOption.innerText(),
+    /not in bounded sample/,
+    "Sample absence must be presented as evidence, not as a selection gate.",
+  );
+  await intendedModel.selectOption("Hebrew Rare");
+  await guidedForm.getByLabel("Map Collector Prompt").waitFor();
+  await guidedForm.getByText("No representative sample is available for this selected note type.").waitFor();
+
+  markE2eStage("accp018-hebrew-model-inspection");
+  await intendedModel.selectOption("Hebrew Existing");
+  const guidedRepresentativeFront = guidedForm.locator('iframe[title="Hebrew Existing guided representative front"]');
+  await guidedRepresentativeFront.waitFor();
+  const guidedRepresentativeFrame = guidedRepresentativeFront.contentFrame();
+  assert.match(await guidedRepresentativeFrame.locator("body").innerText(), /שלום/);
+  assert.equal(await guidedRepresentativeFrame.locator("script").count(), 0);
+  assert.equal(await guidedRepresentativeFrame.locator("img[src]").count(), 0);
+  assert.equal(await guidedRepresentativeFrame.locator("a[href]").count(), 0);
+  await guidedForm.getByRole("button", { name: "Another representative" }).click();
+
+  markE2eStage("accp018-hebrew-field-mapping");
+  const saveGuided = guidedForm.getByRole("button", { name: "Save profile + language route" });
+  assert.equal(await saveGuided.isDisabled(), true, "Incomplete mapping must block Save.");
+  await guidedForm.getByLabel("Map Collector Prompt").selectOption("Hebrew");
+  assert.equal(await saveGuided.isDisabled(), true, "Missing Answer mapping must still block Save.");
+  await guidedForm.getByLabel("Map Collector Answer").selectOption("Russian");
+  assert.equal(await saveGuided.isDisabled(), false, "Valid ACCP-014 mapping should enable Save.");
+
+  const payloadPreview = guidedForm.getByLabel("Outgoing mapped payload preview");
+  assert.match(await payloadPreview.innerText(), /Hebrew\s+Prompt: Example prompt/);
+  assert.match(await payloadPreview.innerText(), /Russian\s+Answer: Example answer/);
+  assert.match(await payloadPreview.innerText(), /Example\s+Untouched \/ omitted/);
+
+  markE2eStage("accp018-hebrew-accessibility");
+  const guidedAccessibility = await new AxeBuilder({ page: panel })
+    .exclude(".anki-preview-frame")
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    guidedAccessibility.violations.length,
+    0,
+    "Guided profile accessibility violations:\n" + JSON.stringify(guidedAccessibility.violations, null, 2),
+  );
+
+  markE2eStage("accp018-hebrew-save");
+  delayNextDeckNamesAndIdsMs = 750;
+  await saveGuided.click();
+  assert.equal(await guidedForm.getByLabel("Profile language").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Export profile name").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Live Anki deck").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Intended note type").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Map Collector Prompt").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Map Collector Answer").isDisabled(), true);
+  await guidedForm.waitFor({ state: "detached" });
+
+  const hebrewGuidedProfile = guidedProfiles.locator(".saved-profile", { hasText: "Hebrew (he)" }).filter({
+    hasText: "Hebrew Existing",
+  });
+  await hebrewGuidedProfile.waitFor();
+  assert.match(await hebrewGuidedProfile.innerText(), /deck ID 2/);
+  assert.match(await hebrewGuidedProfile.innerText(), /model ID 11/);
+  assert.match(await hebrewGuidedProfile.innerText(), /capture/);
+
+  const storedHebrewGuided = await panel.evaluate(async () => {
     const stored = await chrome.storage.local.get("collectorSettings");
     const current = stored.collectorSettings;
-    if (!current) throw new Error("Collector settings are missing.");
-
-    const mappedProfile = {
-      id: "he-existing-e2e",
-      name: "Hebrew existing",
-      deckName: "Hebrew RU",
-      deckId: "2",
-      modelName: "Hebrew Existing",
-      modelId: "11",
-      mode: "mapped-user-model",
-      fieldMapping: {
-        Prompt: "Hebrew",
-        Answer: "Russian",
-      },
-    };
-
-    await chrome.storage.local.set({
-      collectorSettings: {
-        ...current,
-        exportProfiles: [
-          ...current.exportProfiles.filter((profile) => profile.id !== mappedProfile.id),
-          mappedProfile,
-        ],
-        languageRoutes: [
-          ...current.languageRoutes.filter((route) => route.language !== "he"),
-          { language: "he", profileId: mappedProfile.id },
-        ],
-      },
-    });
+    const profile = current.exportProfiles.find(
+      (candidate) => candidate.language === "he" && candidate.modelName === "Hebrew Existing",
+    );
+    return { current, profile };
   });
-  await panel.reload();
-  await panel.locator(".queue").waitFor();
-  await setCaptureLanguage(panel, "he");
+  assert.ok(storedHebrewGuided.profile);
+  assert.equal(storedHebrewGuided.profile.deckId, "2");
+  assert.equal(storedHebrewGuided.profile.modelId, "11");
+  assert.equal(storedHebrewGuided.profile.identityStrategy, "collector-tag");
+  assert.equal(
+    JSON.stringify(storedHebrewGuided.current).includes("שלום"),
+    false,
+    "Representative study content must not be persisted into settings.",
+  );
+  assert.equal(
+    JSON.stringify(storedHebrewGuided.current).includes("house"),
+    false,
+    "Alternate representative study content must not be persisted into settings.",
+  );
+  assert.equal(storedHebrewGuided.current.captureProfileId, storedHebrewGuided.profile.id);
+  assert.equal(
+    storedHebrewGuided.current.languageRoutes.find((route) => route.language === "he")?.profileId,
+    storedHebrewGuided.profile.id,
+  );
+
+  markE2eStage("accp018-reopen-offline-revalidation");
+  // Reopen/edit loads the saved identity and mapping through fresh live evidence.
+  await hebrewGuidedProfile.getByRole("button", { name: "Edit" }).click();
+  const reopenedGuided = guidedProfiles.locator(".guided-profile-form");
+  assert.equal(await reopenedGuided.getByLabel("Profile language").inputValue(), "he");
+  assert.equal(await reopenedGuided.getByLabel("Live Anki deck").inputValue(), "Hebrew RU");
+  await reopenedGuided.getByLabel("Intended note type").waitFor();
+  assert.equal(await reopenedGuided.getByLabel("Intended note type").inputValue(), "Hebrew Existing");
+  await reopenedGuided.getByLabel("Map Collector Prompt").waitFor();
+  assert.equal(await reopenedGuided.getByLabel("Map Collector Prompt").inputValue(), "Hebrew");
+  assert.equal(await reopenedGuided.getByLabel("Map Collector Answer").inputValue(), "Russian");
+  await reopenedGuided.getByRole("button", { name: "Cancel" }).click();
+
+  // Offline refresh must preserve every saved setting and keep profiles visible.
+  const beforeOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  ankiAvailable = false;
+  await clickPanelButton(panel, "Refresh from Anki");
+  await panel.locator(".anki-catalog-status", { hasText: /Showing the last loaded decks|Could not connect to Anki/ }).waitFor();
+  await hebrewGuidedProfile.waitFor();
+  assert.equal(
+    await guidedProfiles.getByRole("button", { name: "New profile" }).isDisabled(),
+    true,
+    "Live profile creation must be disabled while Anki is unavailable.",
+  );
+  const afterOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.deepEqual(afterOfflineSettings, beforeOfflineSettings, "Offline discovery must not rewrite saved profile configuration.");
+
+  ankiAvailable = true;
+  await clickPanelButton(panel, "Refresh from Anki");
+  await panel.locator(".anki-catalog-status", { hasText: "Connected" }).waitFor();
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  // Same-name deck replacement must fail closed and never rewrite the pinned ID.
+  ankiDecks.set("Hebrew RU", 22);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Same-name deck replacement rejected/).waitFor();
+  let revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.deckId,
+    "2",
+  );
+  ankiDecks.set("Hebrew RU", 2);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  // Missing live objects must be reported distinctly and must not alter saved identity.
+  ankiDecks.delete("Hebrew RU");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Saved deck is missing from live Anki/).waitFor();
+  revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.deckId,
+    "2",
+  );
+  ankiDecks.set("Hebrew RU", 2);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  // Same-name note-type replacement must also be rejected without identity rewriting.
+  ankiModels.set("Hebrew Existing", 99);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Same-name note-type replacement rejected/).waitFor();
+  revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.modelId,
+    "11",
+  );
+  ankiModels.set("Hebrew Existing", 11);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  ankiModels.delete("Hebrew Existing");
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Saved note type is missing from live Anki/).waitFor();
+  revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.equal(
+    revalidatedStored.exportProfiles.find((profile) => profile.language === "he" && profile.modelName === "Hebrew Existing")?.modelId,
+    "11",
+  );
+  ankiModels.set("Hebrew Existing", 11);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  // Changed mapped fields fail closed until the original model shape is restored.
+  ankiModelFields.set("Hebrew Existing", ["Hebrew", "Example"]);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText(/Mapped Anki field "Russian"/).waitFor();
+  ankiModelFields.set("Hebrew Existing", ["Hebrew", "Russian", "Example"]);
+  await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
+  await hebrewGuidedProfile.getByText("Live validation passed.").waitFor();
+
+  markE2eStage("accp018-hebrew-capture-export");
+  // Deliberately set the legacy global fallback to Serbian. Active-profile language
+  // must still make normal capture Hebrew without maintaining that global.
+  await setCaptureLanguage(panel, "sr");
+
+  await selectText(contentPage, "#mapped-context", "Mapped context-menu phrase");
+  await contentPage.bringToFront();
+  const guidedContextResult = await sendPanelMessage(
+    panel,
+    { type: "E2E_CONTEXT_MENU_CLICK", tabId },
+    "ACCP-018 guided context-menu capture",
+  );
+  assert.equal(guidedContextResult?.ok, true, guidedContextResult?.error);
+  const guidedContextCard = await cardForTerm(panel, "Mapped context-menu phrase");
+  assert.match(
+    await guidedContextCard.locator(".meta").first().innerText(),
+    /^he\s+·/,
+    "Context-menu capture must derive language from the active Hebrew profile, not the legacy sr fallback.",
+  );
 
   await selectText(contentPage, "#mapped", "Mapped export phrase");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect selection");
   const mappedCard = await cardForTerm(panel, "Mapped export phrase");
+  assert.match(await mappedCard.locator(".meta").first().innerText(), /^he\s+·/);
   const mappedReady = mappedCard.getByRole("button", { name: "Ready" });
   if (await mappedReady.count()) await mappedReady.click();
   await mappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
-  assert.match(
-    await mappedCard.locator(".export-destination").innerText(),
-    /Anki:\s*Hebrew RU/,
-  );
+  assert.match(await mappedCard.locator(".export-destination").innerText(), /Anki:\s*Hebrew RU/);
 
   ankiRequests.length = 0;
   await clickPanelButton(panel, "Send ready to Anki");
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
-
   const mappedAdds = ankiRequests.filter(
-    (request) =>
-      request.action === "addNote"
-      && request.params?.note?.modelName === "Hebrew Existing",
+    (request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing",
   );
-  assert.equal(mappedAdds.length, 1, "Configured mapped profile should export through the existing note type.");
+  assert.equal(mappedAdds.length, 1, "Guided mapped profile should export through the existing note type.");
   assert.deepEqual(
     Object.keys(mappedAdds[0].params.note.fields).sort(),
     ["Hebrew", "Russian"],
@@ -1174,43 +1497,207 @@ try {
   );
   assert.equal(mappedAdds[0].params.note.options.allowDuplicate, true);
   const mappedCardId = await mappedCard.getAttribute("data-card-id");
-  assert.ok(mappedCardId, "Mapped card should expose its Collector id.");
-  assert.ok(
-    mappedAdds[0].params.note.tags.includes(collectorIdentityTagForE2e(mappedCardId)),
-    "Mapped export must carry the stable reserved Collector identity tag.",
-  );
+  assert.ok(mappedCardId);
+  assert.ok(mappedAdds[0].params.note.tags.includes(collectorIdentityTagForE2e(mappedCardId)));
   assert.equal(
-    ankiRequests.some((request) => [
-      "createModel",
-      "modelFieldAdd",
-      "updateModelTemplates",
-      "updateModelStyling",
-    ].includes(request.action)),
+    ankiRequests.some((request) => ["createModel", "modelFieldAdd", "updateModelTemplates", "updateModelStyling"].includes(request.action)),
     false,
-    "Mapped export must never mutate the user-owned note type.",
+    "Guided setup/export must never mutate the user-owned note type.",
   );
 
-  const exportedMappedCard = await cardForTerm(panel, "Mapped export phrase");
-  assert.match(
-    await exportedMappedCard.locator(".export-destination").innerText(),
-    /Anki:\s*Hebrew RU.*note\s+\d+/s,
-  );
+  // Repeat send updates the same mapped note rather than creating a duplicate.
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
   assert.equal(
-    await exportedMappedCard.locator(".legacy-note-warning").count(),
+    ankiRequests.filter((request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing").length,
     0,
-    "Configured mapped notes must not be treated as legacy custom cards.",
+    "Repeat mapped export must remain idempotent.",
   );
-  assert.match(
-    await exportedMappedCard.locator(".mapped-note-destination").innerText(),
-    /Existing note type:\s*Hebrew Existing/,
-    "Mapped-note detail should identify the pinned existing user note type.",
+  const mappedUpdates = ankiRequests.filter(
+    (request) => request.action === "updateNoteFields" && Object.hasOwn(request.params?.note?.fields ?? {}, "Hebrew"),
   );
+  assert.equal(mappedUpdates.length, 1);
+  assert.deepEqual(Object.keys(mappedUpdates[0].params.note.fields).sort(), ["Hebrew", "Russian"]);
+
+  markE2eStage("accp018-used-profile-edit-safety");
+  // An already-used profile cannot change deck/model identity in place, while a
+  // field remap requires a consequence acknowledgement.
+  await openSettings(panel);
+  const usedHebrewProfile = guidedProfiles.locator(".saved-profile", { hasText: "Hebrew Existing" }).filter({ hasText: "Hebrew (he)" });
+  await usedHebrewProfile.getByRole("button", { name: "Edit" }).click();
+  const usedEdit = guidedProfiles.locator(".guided-profile-form");
+  await usedEdit.getByLabel("Intended note type").waitFor();
+  await usedEdit.getByLabel("Intended note type").selectOption("Hebrew Verbs");
+  await usedEdit.getByText(/Deck\/note-type identity changes are blocked/).waitFor();
+  assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), true);
+
+  await usedEdit.getByLabel("Intended note type").selectOption("Hebrew Existing");
+  await usedEdit.getByLabel("Map Collector Prompt").waitFor();
+
+  // ACCP-014 compatibility stays authoritative inside guided setup: mapping
+  // Prompt to a field that is absent from every question side remains blocked.
+  await usedEdit.getByLabel("Map Collector Prompt").selectOption("Russian");
+  await usedEdit.getByLabel("Map Collector Answer").selectOption("Hebrew");
+  await usedEdit.getByText(/not used on the question side/).waitFor();
   assert.equal(
-    await exportedMappedCard.getByText("Move to another deck…", { exact: true }).count(),
-    0,
-    "Mapped notes must not offer the managed-model deck move control.",
+    await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(),
+    true,
+    "Acknowledgement must never override an incompatible mapping.",
   );
 
+  // A compatible remap of an optional semantic field still carries consequences
+  // for future updates to already-bound notes, so it requires acknowledgement.
+  await usedEdit.getByLabel("Map Collector Prompt").selectOption("Hebrew");
+  await usedEdit.getByLabel("Map Collector Answer").selectOption("Russian");
+  await usedEdit.getByLabel("Map Collector Context").selectOption("Example");
+  await usedEdit.getByText(/future updates write/).waitFor();
+  const remapConfirm = usedEdit.getByLabel(/I understand this remap affects future updates/);
+  assert.equal(await remapConfirm.isChecked(), false);
+  assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), true);
+  await remapConfirm.check();
+  assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), false);
+
+  // The acknowledgement belongs to the exact mapping under review. Changing the
+  // mapping again must invalidate the prior acknowledgement rather than carrying
+  // a free-floating boolean into a new consequence-bearing remap.
+  await usedEdit.getByLabel("Map Collector Context").selectOption("");
+  await usedEdit.getByLabel("Map Collector Canonical").selectOption("Example");
+  await usedEdit.getByText(/future updates write/).waitFor();
+  assert.equal(await remapConfirm.isChecked(), false);
+  assert.equal(
+    await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(),
+    true,
+    "A second compatible remap must require a fresh acknowledgement.",
+  );
+  await usedEdit.getByRole("button", { name: "Cancel" }).click();
+
+  markE2eStage("accp018-serbian-keyboard-setup");
+  // Create a Serbian mapped profile using keyboard interaction only.
+  await guidedProfiles.getByRole("button", { name: "New profile" }).focus();
+  await panel.keyboard.press("Enter");
+  const serbianForm = guidedProfiles.locator(".guided-profile-form");
+  const serbianLanguage = serbianForm.getByLabel("Profile language");
+  await serbianLanguage.focus();
+  await panel.keyboard.press("Home");
+  await panel.keyboard.press("ArrowDown");
+  await panel.keyboard.press("ArrowDown");
+  await panel.keyboard.press("Enter");
+  assert.equal(await serbianLanguage.inputValue(), "sr");
+
+  const serbianDeck = serbianForm.getByLabel("Live Anki deck");
+  await serbianDeck.focus();
+  await panel.keyboard.press("S");
+  await panel.keyboard.press("Enter");
+  assert.equal(await serbianDeck.inputValue(), "Serbian RU");
+  await serbianForm.getByLabel("Intended note type").waitFor();
+
+  const serbianModel = serbianForm.getByLabel("Intended note type");
+  await serbianModel.focus();
+  await panel.keyboard.press("S");
+  await panel.keyboard.press("Enter");
+  assert.equal(await serbianModel.inputValue(), "Serbian Existing");
+  await serbianForm.getByLabel("Map Collector Prompt").waitFor();
+
+  await serbianForm.getByLabel("Map Collector Prompt").focus();
+  await panel.keyboard.press("S");
+  await panel.keyboard.press("Enter");
+  await serbianForm.getByLabel("Map Collector Answer").focus();
+  await panel.keyboard.press("R");
+  await panel.keyboard.press("Enter");
+  const serbianSave = serbianForm.getByRole("button", { name: "Save profile + language route" });
+  assert.equal(await serbianSave.isDisabled(), false);
+  await serbianSave.focus();
+  await panel.keyboard.press("Enter");
+  await serbianForm.waitFor({ state: "detached" });
+
+  const serbianGuidedProfile = guidedProfiles.locator(".saved-profile", { hasText: "Serbian Existing" }).filter({
+    hasText: "Serbian (sr)",
+  });
+  await serbianGuidedProfile.waitFor();
+  assert.match(await serbianGuidedProfile.innerText(), /deck ID 3/);
+  assert.match(await serbianGuidedProfile.innerText(), /model ID 13/);
+
+  // The Serbian profile is now active; a conflicting legacy fallback must not relabel capture.
+  await setCaptureLanguage(panel, "he");
+  await selectText(contentPage, "#mapped-sr", "Serbian mapped export phrase");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect selection");
+  const serbianMappedCard = await cardForTerm(panel, "Serbian mapped export phrase");
+  assert.match(await serbianMappedCard.locator(".meta").first().innerText(), /^sr\s+·/);
+  const serbianReady = serbianMappedCard.getByRole("button", { name: "Ready" });
+  if (await serbianReady.count()) await serbianReady.click();
+  await serbianMappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.match(
+    await serbianMappedCard.locator(".export-destination").innerText(),
+    /Anki:\s*Serbian RU/,
+    "The Serbian guided card should resolve to the saved Serbian route before export.",
+  );
+  ankiRequests.length = 0;
+  await clickPanelButton(panel, "Send ready to Anki");
+  await panel.locator(".notice", { hasText: "exported" }).waitFor();
+  const serbianAdds = ankiRequests.filter(
+    (request) => request.action === "addNote" && request.params?.note?.modelName === "Serbian Existing",
+  );
+  assert.equal(serbianAdds.length, 1);
+  assert.deepEqual(Object.keys(serbianAdds[0].params.note.fields).sort(), ["Russian", "Serbian"]);
+  assert.equal(
+    ankiRequests.some((request) => ["createModel", "modelFieldAdd", "updateModelTemplates", "updateModelStyling"].includes(request.action)),
+    false,
+  );
+
+  markE2eStage("accp018-serbian-capture-and-duolingo");
+  // Duolingo visible scanning must use the same active Serbian profile language.
+  // Replace the earlier Hebrew matching-pairs evidence with explicit Serbian DOM:
+  // already-staged Hebrew evidence must keep its original language, while newly
+  // observed Serbian evidence is captured through the active sr profile.
+  await pairsPage.bringToFront();
+  await pairsPage.evaluate(() => {
+    const challenge = document.querySelector("[data-test='challenge-match']");
+    if (!challenge) throw new Error("Matching-pairs fixture is missing.");
+    challenge.innerHTML = `
+      <p data-test="challenge-sentence" lang="sr">Dobar dan</p>
+      <div data-test="word-bank">
+        <button data-test="challenge-tap-token" lang="sr">prozor</button>
+      </div>
+    `;
+  });
+  const profileDrivenScan = await sendPanelMessage(
+    panel,
+    { type: "DUOLINGO_SCAN_ACTIVE" },
+    "ACCP-018 profile-driven Duolingo scan",
+  );
+  assert.equal(profileDrivenScan?.ok, true, profileDrivenScan?.error);
+  assert.equal(profileDrivenScan?.foundCount, 2);
+  const profileDrivenBatch = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-018 staged batch readback",
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "Dobar dan" && candidate.language === "sr",
+    ),
+    true,
+    "New Serbian Duolingo sentence evidence must derive language from the active Serbian profile.",
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "prozor" && candidate.language === "sr",
+    ),
+    true,
+    "New Serbian Duolingo token evidence must derive language from the active Serbian profile.",
+  );
+  assert.equal(
+    profileDrivenBatch.batch.candidates.some(
+      (candidate) => candidate.surfaceText === "מרק" && candidate.language === "he",
+    ),
+    true,
+    "Previously staged Hebrew evidence must not be reinterpreted when the active capture profile changes.",
+  );
+  await contentPage.bringToFront();
+
+  markE2eStage("post-accp018-regression-suite");
   // ACCP-003: a canonical edit that would merge independently exported units is
   // blocked before any corpus mutation. Re-open the Serbian card because the
   // mapped-export acceptance above intentionally focused a different detail.
@@ -1355,9 +1842,18 @@ try {
     "Successful canonical consolidation should reduce two compatible units to one.",
   );
 
+  markE2eStage("complete");
   console.log("Browser extension capture, compact queue/detail, canonicalization, keyboard, accessibility, and permission checks passed.");
 } finally {
-  await context?.close();
+  clearTimeout(e2eWatchdog);
+  await context?.close().catch(() => undefined);
+
+  // Failed browser assertions must still terminate the fixture deterministically.
+  // Explicitly close active HTTP connections before awaiting server shutdown so
+  // GitHub Actions exposes the real test failure instead of hanging until its
+  // outer job timeout.
+  server.closeAllConnections?.();
+  ankiServer.closeAllConnections?.();
   await Promise.all([
     new Promise((resolveClose) => server.close(resolveClose)),
     new Promise((resolveClose) => ankiServer.close(resolveClose)),

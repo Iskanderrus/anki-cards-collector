@@ -129,6 +129,11 @@ export function collectorIdentityQuery(lexicalUnitId: string): string {
   return "tag:re:^" + collectorIdentityTag(lexicalUnitId) + "$";
 }
 
+export interface MappedTemplateHtml {
+  Front: string;
+  Back: string;
+}
+
 export function validateMappedQuestionFields(
   profile: ExportProfile,
   fieldsOnTemplates: Record<string, [string[], string[]]>,
@@ -161,6 +166,20 @@ export function validateMappedQuestionFields(
   }
 }
 
+export function validateMappedTemplates(
+  profile: ExportProfile,
+  templates: Record<string, MappedTemplateHtml>,
+): void {
+  const usesCloze = Object.values(templates).some(
+    (template) => /\{\{\s*cloze\s*:/i.test(`${template.Front}\n${template.Back}`),
+  );
+  if (usesCloze) {
+    throw new Error(
+      `Anki note type "${profile.modelName}" uses cloze templates. Mapped cloze export is not supported yet; choose a non-cloze note type.`,
+    );
+  }
+}
+
 export function mappedSemanticValues(
   item: CollectedItem,
 ): Record<CollectorSemanticField, string> {
@@ -189,7 +208,7 @@ export function mappedAnkiFields(
 ): Record<string, string> {
   const mapping = validateMappedProfile(profile);
   const values = mappedSemanticValues(item);
-  const fields: Record<string, string> = {};
+  const fields = Object.create(null) as Record<string, string>;
 
   for (const semantic of COLLECTOR_SEMANTIC_FIELDS) {
     const target = mapping[semantic];
