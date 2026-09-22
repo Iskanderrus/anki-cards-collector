@@ -437,6 +437,30 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list())[0]?.lexicalUnit.status).toBe("inbox");
   });
 
+  it("returns an archived existing unit to Inbox when batch import adds new evidence", async () => {
+    const existing = await repository.capture({
+      text: "חלון",
+      context: "חלון",
+      language: "he",
+      capturedAt: "2026-09-19T10:05:00.000Z",
+      source: evidence("חלון", "חלון").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "archived");
+
+    const staged = await pipeline.stageBatch("archived-evidence", [
+      evidence("חלון", "אני פותח חלון."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.summary.evidenceAdded).toBe(1);
+    expect(result.committed[0]?.item.lexicalUnit.status).toBe("inbox");
+    expect((await repository.list())[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
   it("retains the entire staged batch when the transactional commit fails so retry is safe", async () => {
     const staged = await pipeline.stageBatch("retry", [
       evidence("לחם", "יש לחם על השולחן."),
