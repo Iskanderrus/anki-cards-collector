@@ -413,6 +413,29 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list()).every((item) => item.lexicalUnit.status === "inbox")).toBe(true);
   });
 
+  it("counts one new lexical unit plus added evidence when multiple new contexts share one form", async () => {
+    const staged = await pipeline.stageBatch("new-shared-form", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual(["new", "new"]);
+
+    const result = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+
+    expect(result.summary).toEqual({
+      newUnits: 1,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(2);
+    expect(corpus[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
   it("returns an existing Ready unit to Inbox when batch import adds new evidence", async () => {
     const existing = await repository.capture({
       text: "מרק",
