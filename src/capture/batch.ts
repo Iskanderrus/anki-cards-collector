@@ -292,9 +292,6 @@ export class BatchCapturePipeline {
     const unchangedCandidateIds: string[] = [];
     const entries: CaptureBatchEntry[] = [];
     const mutationCandidateIds: string[] = [];
-    const dispositionByCandidateId = new Map(
-      selected.map((candidate) => [candidate.id, candidate.disposition] as const),
-    );
 
     for (const candidate of selected) {
       if (candidate.disposition === "already-represented") {
@@ -329,6 +326,9 @@ export class BatchCapturePipeline {
       mutationCandidateIds.push(candidate.id);
     }
 
+    const preCommitLexicalUnitIds = new Set(
+      (await this.repository.list()).map((item) => item.lexicalUnit.id),
+    );
     const items = entries.length > 0
       ? await this.repository.captureBatch(entries)
       : [];
@@ -337,6 +337,11 @@ export class BatchCapturePipeline {
       candidateId,
       item: items[index]!,
     }));
+    const newlyCreatedLexicalUnitIds = new Set(
+      committed
+        .map(({ item }) => item.lexicalUnit.id)
+        .filter((lexicalUnitId) => !preCommitLexicalUnitIds.has(lexicalUnitId)),
+    );
 
     const selectedIds = new Set(requestedIds);
     const remaining = this.activeBatch.candidates.filter(
@@ -357,12 +362,8 @@ export class BatchCapturePipeline {
       unchangedCandidateIds,
       remainingCandidateIds: this.activeBatch?.candidates.map((candidate) => candidate.id) ?? [],
       summary: {
-        newUnits: committed.filter(
-          ({ candidateId }) => dispositionByCandidateId.get(candidateId) === "new",
-        ).length,
-        evidenceAdded: committed.filter(
-          ({ candidateId }) => dispositionByCandidateId.get(candidateId) !== "new",
-        ).length,
+        newUnits: newlyCreatedLexicalUnitIds.size,
+        evidenceAdded: committed.length - newlyCreatedLexicalUnitIds.size,
         unchanged: unchangedCandidateIds.length,
         needsReview: this.activeBatch?.candidates.filter(
           (candidate) => candidate.disposition === "needs-review",
