@@ -300,7 +300,13 @@ export class BatchCapturePipeline {
     try {
       outcomes = await this.repository.captureBatch(entries);
     } catch (error) {
-      await this.refreshActiveBatch();
+      try {
+        await this.refreshActiveBatch();
+      } catch {
+        // Preserve the repository failure as the authoritative commit result.
+        // Background recovery may retry reclassification before returning control
+        // to the staged review UI.
+      }
       throw error;
     }
     const committed: BatchCommitResult["committed"] = [];
