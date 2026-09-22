@@ -107,10 +107,13 @@ export function StagedReview({
   );
 
   useEffect(() => {
-    const knownIds = new Set(candidates.map((candidate) => candidate.id));
+    const knownCandidates = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    const knownIds = new Set(knownCandidates.keys());
     setSelectedIds((current) => new Set([...current].filter((id) => knownIds.has(id))));
     setResolutions((current) => Object.fromEntries(
-      Object.entries(current).filter(([id]) => knownIds.has(id)),
+      Object.entries(current).filter(([id, ownerId]) =>
+        knownCandidates.get(id)?.matchingLexicalUnitIds.includes(ownerId) === true
+      ),
     ));
     setActiveId((current) => {
       if (current && knownIds.has(current)) return current;
