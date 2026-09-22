@@ -293,6 +293,68 @@ describe("BatchCapturePipeline", () => {
     expect(pipeline.getActiveBatch()?.candidates[0]?.disposition).toBe("repeated-evidence");
   });
 
+  it("keeps repository success committed when remaining staged reclassification fails", async () => {
+    const existing = await repository.capture({
+      text: "מרק",
+      context: "מרק",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("מרק", "מרק").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+
+    const staged = await pipeline.stageBatch("post-commit-refresh", [
+      evidence("מרק", "אני אוכל מרק."),
+      evidence("בית", "זה בית חדש."),
+    ]);
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual([
+      "repeated-evidence",
+      "new",
+    ]);
+
+    const listSpy = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.committed.map((entry) => entry.candidateId)).toEqual([
+      "post-commit-refresh:0001",
+    ]);
+    expect(result.warning).toContain("Corpus import completed");
+    expect(result.warning).toContain("Injected post-commit staged refresh failure.");
+    expect(result.remainingCandidateIds).toEqual(["post-commit-refresh:0002"]);
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "post-commit-refresh:0002",
+    ]);
+
+    listSpy.mockRestore();
+
+    const afterCommit = await repository.list();
+    const soup = afterCommit.find(
+      (item) => item.lexicalUnit.id === existing.lexicalUnit.id,
+    );
+    expect(soup?.occurrences).toHaveLength(2);
+    expect(soup?.lexicalUnit.status).toBe("inbox");
+    expect(afterCommit.some((item) => item.lexicalUnit.canonicalText === "בית")).toBe(false);
+
+    const refreshed = await pipeline.refreshActiveBatch();
+    expect(refreshed?.candidates[0]?.id).toBe("post-commit-refresh:0002");
+    expect(refreshed?.candidates[0]?.disposition).toBe("new");
+
+    const retry = await pipeline.commit({
+      candidateIds: [refreshed!.candidates[0]!.id],
+    });
+    expect(retry.summary.newUnits).toBe(1);
+
+    const finalCorpus = await repository.list();
+    expect(finalCorpus).toHaveLength(2);
+    expect(
+      finalCorpus.find((item) => item.lexicalUnit.id === existing.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(2);
+  });
+
   it("revalidates a staged candidate against corpus changes before commit", async () => {
     const staged = await pipeline.stageBatch("stale", [
       evidence("מים", "אני שותה מים."),
