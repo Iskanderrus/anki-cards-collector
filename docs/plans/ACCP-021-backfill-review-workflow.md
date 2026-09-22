@@ -11,15 +11,15 @@ Implemented by PR #70 through the existing ACCP-019/020 boundaries.
 - `src/sidepanel/staged-review.tsx` provides a dedicated compact Staged view with text/disposition filtering, visible-scope New / More-evidence bulk selection, individual selection, keyboard navigation, evidence inspection, and explicit destructive discard confirmation;
 - staged evidence editing changes only observed text, language, or context, preserves candidate/source identity, and reclassifies against the current corpus before commit;
 - `src/background.ts` serializes staged edit/discard/commit operations with the existing MV3 staged-batch lock and mirrors successful transient mutations back to `chrome.storage.session`;
-- selected import calls only `BatchCapturePipeline.commit()`; `CaptureRepository.captureBatch()` performs the final exact-evidence/owner classification, ambiguity check, and resolution validation inside the same Dexie transaction as the corpus mutation;
+- selected import calls only `BatchCapturePipeline.commit()`; `CaptureRepository.captureBatch()` performs the final exact-evidence/owner classification, normalized-language ownership check, ambiguity decision, resolution validation, mutation, and result hydration inside the same Dexie transaction;
 - exact already-represented evidence is consumed as a no-op, while actual evidence mutations create/add occurrences and force any affected Ready or Archived lexical unit back to Inbox;
 - commit summaries are based on per-entry outcomes produced by that transaction (`new-unit`, `evidence-added`, or `unchanged`), so concurrent corpus changes cannot make a stale pre-transaction snapshot misreport the result;
-- if the corpus transaction fails, staged evidence remains available for retry; if the corpus transaction succeeds but the transient staged snapshot cannot be updated, the corpus is not rolled back and a stale reconstructed snapshot fails safe by reclassifying committed evidence as already represented;
+- if the corpus transaction fails, staged evidence remains available and is reclassified before the error returns so late ambiguity/stale resolutions expose current owners for recovery; if the corpus transaction succeeds but the transient staged snapshot cannot be updated, the corpus is not rolled back and a stale reconstructed snapshot fails safe by reclassifying committed evidence as already represented;
 - Staged review exposes no direct Anki export action.
 
-Automated browser acceptance covers 50+ mixed-disposition candidates, long Hebrew/Serbian/Spanish content, filtering/bulk scope, evidence edits, no-op import, ambiguous-owner resolution, injected commit failure/retry, discard, keyboard flow, accessibility, and the Duolingo -> Staged -> Inbox -> ordinary review -> ACCP-018 mapped fake-Anki path.
+Automated browser acceptance covers 50+ mixed-disposition candidates, long Hebrew/Serbian/Spanish content, filtering/bulk scope, evidence edits, no-op import, pre-existing and late-arriving ambiguous-owner resolution, injected commit failure/retry, discard, keyboard flow, accessibility, and the Duolingo -> Staged -> Inbox -> ordinary review -> ACCP-018 mapped fake-Anki path.
 
-Real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md` completed **PASS** at head `01d945cb241839c75e3d1326847b1e0ab88d5bc2` with a clean worktree. The manual document remains the reproducible acceptance procedure.
+Real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md` completed **PASS** at the original accepted head and again after the first transaction-boundary remediation at `991ebb6d2c1de76d44a4b8da21b5105976ff4027`, both with a clean worktree. The manual document remains the reproducible procedure and must be rerun after any later runtime remediation before independent review.
 
 
 ## Dependencies
