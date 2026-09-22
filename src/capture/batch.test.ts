@@ -316,6 +316,162 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list())[0]?.occurrences).toHaveLength(1);
   });
 
+  it("fails closed when a new owner appears immediately before the repository transaction", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב מכתב.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+    });
+    await repository.update(first.lexicalUnit.id, {
+      canonicalText: "לכתוב",
+      language: "he",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+    });
+
+    const second = await repository.capture({
+      text: "כתיבה",
+      context: "כתיבה היא מיומנות.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתיבה", "כתיבה היא מיומנות.").source,
+    });
+
+    const staged = await pipeline.stageBatch("late-ambiguity", [
+      evidence("כתב", "כתב נוסף."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+    expect(staged.candidates[0]?.matchingLexicalUnitIds).toEqual([first.lexicalUnit.id]);
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.update(second.lexicalUnit.id, {
+          canonicalText: "כתיבה",
+          language: "he",
+          note: "",
+          occurrenceId: second.occurrences[0]!.id,
+          surfaceText: "כתב",
+          context: "זה כתב ברור.",
+        });
+        return captureBatch(entries);
+      });
+
+    await expect(
+      pipeline.commit({ candidateIds: [staged.candidates[0]!.id] }),
+    ).rejects.toThrow("needs an explicit matching lexical-unit resolution");
+
+    captureBatchSpy.mockRestore();
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "late-ambiguity:0001",
+    ]);
+    expect((await repository.list()).flatMap((item) => item.occurrences)).toHaveLength(2);
+  });
+
+  it("rejects a resolution that stops being a current matching owner before mutation", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב מכתב.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+    });
+    const firstUpdated = await repository.update(first.lexicalUnit.id, {
+      canonicalText: "לכתוב",
+      language: "he",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+    });
+
+    const second = await repository.capture({
+      text: "כתיבה",
+      context: "כתיבה היא מיומנות.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתיבה", "כתיבה היא מיומנות.").source,
+    });
+    await repository.update(second.lexicalUnit.id, {
+      canonicalText: "כתיבה",
+      language: "he",
+      note: "",
+      occurrenceId: second.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "זה כתב ברור.",
+    });
+
+    const staged = await pipeline.stageBatch("stale-resolution", [
+      evidence("כתב", "כתב נוסף."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("needs-review");
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.update(firstUpdated.lexicalUnit.id, {
+          canonicalText: "לכתוב",
+          language: "he",
+          note: "",
+          occurrenceId: firstUpdated.occurrences[0]!.id,
+          surfaceText: "כותב",
+          context: "הוא כותב עכשיו.",
+        });
+        return captureBatch(entries);
+      });
+
+    await expect(
+      pipeline.commit({
+        candidateIds: [staged.candidates[0]!.id],
+        resolutions: {
+          [staged.candidates[0]!.id]: first.lexicalUnit.id,
+        },
+      }),
+    ).rejects.toThrow("no longer a current matching owner");
+
+    captureBatchSpy.mockRestore();
+    expect(pipeline.getActiveBatch()?.candidates[0]?.id).toBe("stale-resolution:0001");
+  });
+
+  it("derives new-versus-evidence summary from transaction-time ownership", async () => {
+    const staged = await pipeline.stageBatch("late-existing", [
+      evidence("מים", "אני שותה מים."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("new");
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.capture({
+          text: "מים",
+          context: "המים קרים.",
+          language: "he",
+          capturedAt: "2026-09-19T12:00:30.000Z",
+          source: evidence("מים", "המים קרים.").source,
+        });
+        return captureBatch(entries);
+      });
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    captureBatchSpy.mockRestore();
+    expect(result.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(2);
+  });
+
   it("edits staged evidence in place and reclassifies it against the corpus", async () => {
     await repository.capture({
       text: "שלום",
@@ -532,10 +688,10 @@ describe("BatchCapturePipeline", () => {
             capturedAt: "2026-09-19T13:01:00.000Z",
             source: evidence("מים", "המים קרים.").source,
           },
-          targetLexicalUnitId: "missing-unit",
+          resolutionLexicalUnitId: "missing-unit",
         },
       ]),
-    ).rejects.toThrow("Target lexical unit no longer exists");
+    ).rejects.toThrow("Resolved lexical unit is no longer a current matching owner.");
 
     expect(await repository.list()).toEqual([]);
   });
