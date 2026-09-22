@@ -21,7 +21,14 @@ export interface EditLexicalUnitInput {
 
 export interface CaptureBatchEntry {
   draft: CaptureDraft;
-  targetLexicalUnitId?: string;
+  resolutionLexicalUnitId?: string;
+}
+
+export type CaptureBatchOutcomeKind = "new-unit" | "evidence-added" | "unchanged";
+
+export interface CaptureBatchOutcome {
+  kind: CaptureBatchOutcomeKind;
+  item: CollectedItem;
 }
 
 export interface ObservedFormGroup {
@@ -606,10 +613,111 @@ export class CaptureRepository {
     return this.collectedItem(lexicalUnit.id);
   }
 
-  async captureBatch(entries: readonly CaptureBatchEntry[]): Promise<CollectedItem[]> {
+  private async captureBatchEntryWithinTransaction(
+    entry: CaptureBatchEntry,
+  ): Promise<{ kind: CaptureBatchOutcomeKind; lexicalUnitId: string }> {
+    const surfaceText = normalizeText(entry.draft.text);
+    if (!surfaceText) throw new Error("Nothing selected.");
+
+    const normalizedSurfaceText = normalizeIdentityText(surfaceText);
+    const language = entry.draft.language.trim().toLowerCase() || "und";
+    const context = normalizeText(entry.draft.context).slice(0, 800);
+    const directContentKey = makeContentKey(surfaceText, language);
+    const source = entry.draft.source;
+
+    const surfaceOccurrences = await this.database.occurrences
+      .where("normalizedSurfaceText")
+      .equals(normalizedSurfaceText)
+      .toArray();
+    const observedOwnerIds = [...new Set(
+      surfaceOccurrences.map((occurrence) => occurrence.lexicalUnitId),
+    )];
+    const observedUnits = (await this.database.lexicalUnits.bulkGet(observedOwnerIds))
+      .filter((unit): unit is LexicalUnit => unit !== undefined)
+      .filter((unit) => unit.language === language);
+    const matchingOwners = new Map(observedUnits.map((unit) => [unit.id, unit]));
+
+    const directOwner = await this.database.lexicalUnits
+      .where("contentKey")
+      .equals(directContentKey)
+      .first();
+    if (directOwner) matchingOwners.set(directOwner.id, directOwner);
+
+    const exactOwnerIds = new Set<string>();
+    for (const occurrence of surfaceOccurrences) {
+      const owner = matchingOwners.get(occurrence.lexicalUnitId);
+      if (!owner) continue;
+      if (normalizeText(occurrence.context) !== context) continue;
+      if (
+        occurrence.source.kind !== source.kind
+        || occurrence.source.adapter !== source.adapter
+        || occurrence.source.url !== source.url
+        || occurrence.source.title !== source.title
+      ) {
+        continue;
+      }
+      exactOwnerIds.add(owner.id);
+    }
+
+    const resolutionLexicalUnitId = entry.resolutionLexicalUnitId?.trim() || undefined;
+    if (resolutionLexicalUnitId && !matchingOwners.has(resolutionLexicalUnitId)) {
+      throw new Error(
+        "Resolved lexical unit is no longer a current matching owner.",
+      );
+    }
+
+    if (exactOwnerIds.size === 1) {
+      return {
+        kind: "unchanged",
+        lexicalUnitId: [...exactOwnerIds][0]!,
+      };
+    }
+
+    let targetLexicalUnitId: string | undefined;
+    if (exactOwnerIds.size > 1 || matchingOwners.size > 1) {
+      if (!resolutionLexicalUnitId) {
+        throw new Error(
+          "Batch candidate needs an explicit matching lexical-unit resolution.",
+        );
+      }
+      targetLexicalUnitId = resolutionLexicalUnitId;
+      if (exactOwnerIds.has(targetLexicalUnitId)) {
+        return {
+          kind: "unchanged",
+          lexicalUnitId: targetLexicalUnitId,
+        };
+      }
+    } else if (matchingOwners.size === 1) {
+      targetLexicalUnitId = [...matchingOwners.keys()][0]!;
+    }
+
+    let lexicalUnit = await this.captureWithinTransaction(
+      entry.draft,
+      targetLexicalUnitId,
+    );
+    const kind: CaptureBatchOutcomeKind = targetLexicalUnitId
+      ? "evidence-added"
+      : "new-unit";
+
+    if (lexicalUnit.status !== "inbox") {
+      lexicalUnit = {
+        ...lexicalUnit,
+        status: "inbox",
+        updatedAt: entry.draft.capturedAt || new Date().toISOString(),
+      };
+      await this.database.lexicalUnits.put(lexicalUnit);
+    }
+
+    return { kind, lexicalUnitId: lexicalUnit.id };
+  }
+
+  async captureBatch(entries: readonly CaptureBatchEntry[]): Promise<CaptureBatchOutcome[]> {
     if (entries.length === 0) return [];
 
-    const lexicalUnitIds: string[] = [];
+    const outcomes: Array<{
+      kind: CaptureBatchOutcomeKind;
+      lexicalUnitId: string;
+    }> = [];
 
     await this.database.transaction(
       "rw",
@@ -617,24 +725,15 @@ export class CaptureRepository {
       this.database.occurrences,
       async () => {
         for (const entry of entries) {
-          let lexicalUnit = await this.captureWithinTransaction(
-            entry.draft,
-            entry.targetLexicalUnitId,
-          );
-          if (lexicalUnit.status !== "inbox") {
-            lexicalUnit = {
-              ...lexicalUnit,
-              status: "inbox",
-              updatedAt: entry.draft.capturedAt || new Date().toISOString(),
-            };
-            await this.database.lexicalUnits.put(lexicalUnit);
-          }
-          lexicalUnitIds.push(lexicalUnit.id);
+          outcomes.push(await this.captureBatchEntryWithinTransaction(entry));
         }
       },
     );
 
-    return Promise.all(lexicalUnitIds.map((id) => this.collectedItem(id)));
+    return Promise.all(outcomes.map(async ({ kind, lexicalUnitId }) => ({
+      kind,
+      item: await this.collectedItem(lexicalUnitId),
+    })));
   }
 
   async list(status?: ReviewStatus): Promise<CollectedItem[]> {
