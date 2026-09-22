@@ -736,11 +736,17 @@ function App(): React.ReactElement {
       }
 
       applyStagedMutationResponse(response.batch, response.staged);
+      let warning = response.warning;
+      try {
+        await load();
+      } catch (refreshError) {
+        const refreshWarning = `Import completed, but the normal Queue could not be refreshed: ${refreshError instanceof Error ? refreshError.message : "queue refresh failed."} Reload Queue to see the committed corpus state.`;
+        warning = warning ? `${warning} ${refreshWarning}` : refreshWarning;
+      }
       setStagedImportResult({
         summary: response.result.summary,
-        warning: response.warning,
+        warning,
       });
-      await load();
       setNotice(
         `Imported selected staged evidence into the normal Inbox: ${response.result.summary.newUnits} new, ${response.result.summary.evidenceAdded} evidence additions, ${response.result.summary.unchanged} already represented. No item was marked Ready automatically.`,
       );
