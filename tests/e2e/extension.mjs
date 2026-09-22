@@ -29,6 +29,7 @@ assert.ok(
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
 let ankiAvailable = true;
+let delayNextDeckNamesAndIdsMs = 0;
 const ankiNotes = new Map();
 
 function collectorIdentityTagForE2e(id) {
@@ -47,11 +48,13 @@ const ankiModels = new Map([
   ["Hebrew Existing", 11],
   ["Hebrew Verbs", 12],
   ["Serbian Existing", 13],
+  ["Hebrew Rare", 14],
 ]);
 const ankiModelFields = new Map([
   ["Hebrew Existing", ["Hebrew", "Russian", "Example"]],
   ["Hebrew Verbs", ["Hebrew", "Russian"]],
   ["Serbian Existing", ["Serbian", "Russian", "Example"]],
+  ["Hebrew Rare", ["Hebrew", "Russian"]],
 ]);
 
 const collectorFields = [
@@ -85,6 +88,11 @@ const ankiServer = createServer(async (request, response) => {
       else error = "Anki unavailable fixture";
       break;
     case "deckNamesAndIds":
+      if (delayNextDeckNamesAndIdsMs > 0) {
+        const delayMs = delayNextDeckNamesAndIdsMs;
+        delayNextDeckNamesAndIdsMs = 0;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      }
       result = Object.fromEntries(ankiDecks);
       break;
     case "modelNamesAndIds":
@@ -1256,6 +1264,20 @@ try {
     /Hebrew Existing.*4\/6 sampled/s,
     "The dominant sampled model is evidence only and remains an explicit choice.",
   );
+  const rareModelOption = intendedModel.locator('option[value="Hebrew Rare"]');
+  assert.equal(
+    await rareModelOption.count(),
+    1,
+    "A live note type absent from the bounded deck sample must remain explicitly selectable.",
+  );
+  assert.match(
+    await rareModelOption.innerText(),
+    /not in bounded sample/,
+    "Sample absence must be presented as evidence, not as a selection gate.",
+  );
+  await intendedModel.selectOption("Hebrew Rare");
+  await guidedForm.getByLabel("Map Collector Prompt").waitFor();
+  await guidedForm.getByText("No representative sample is available for this selected note type.").waitFor();
 
   markE2eStage("accp018-hebrew-model-inspection");
   await intendedModel.selectOption("Hebrew Existing");
@@ -1293,7 +1315,14 @@ try {
   );
 
   markE2eStage("accp018-hebrew-save");
+  delayNextDeckNamesAndIdsMs = 750;
   await saveGuided.click();
+  assert.equal(await guidedForm.getByLabel("Profile language").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Export profile name").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Live Anki deck").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Intended note type").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Map Collector Prompt").isDisabled(), true);
+  assert.equal(await guidedForm.getByLabel("Map Collector Answer").isDisabled(), true);
   await guidedForm.waitFor({ state: "detached" });
 
   const hebrewGuidedProfile = guidedProfiles.locator(".saved-profile", { hasText: "Hebrew (he)" }).filter({
@@ -1528,6 +1557,19 @@ try {
   assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), true);
   await remapConfirm.check();
   assert.equal(await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(), false);
+
+  // The acknowledgement belongs to the exact mapping under review. Changing the
+  // mapping again must invalidate the prior acknowledgement rather than carrying
+  // a free-floating boolean into a new consequence-bearing remap.
+  await usedEdit.getByLabel("Map Collector Context").selectOption("");
+  await usedEdit.getByLabel("Map Collector Canonical").selectOption("Example");
+  await usedEdit.getByText(/future updates write/).waitFor();
+  assert.equal(await remapConfirm.isChecked(), false);
+  assert.equal(
+    await usedEdit.getByRole("button", { name: "Save profile + language route" }).isDisabled(),
+    true,
+    "A second compatible remap must require a fresh acknowledgement.",
+  );
   await usedEdit.getByRole("button", { name: "Cancel" }).click();
 
   markE2eStage("accp018-serbian-keyboard-setup");
@@ -1552,8 +1594,7 @@ try {
 
   const serbianModel = serbianForm.getByLabel("Intended note type");
   await serbianModel.focus();
-  await panel.keyboard.press("Home");
-  await panel.keyboard.press("ArrowDown");
+  await panel.keyboard.press("S");
   await panel.keyboard.press("Enter");
   assert.equal(await serbianModel.inputValue(), "Serbian Existing");
   await serbianForm.getByLabel("Map Collector Prompt").waitFor();
