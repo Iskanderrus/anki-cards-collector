@@ -589,6 +589,7 @@ export function GuidedProfileSetup({
               <select
                 aria-label="Profile language"
                 value={draft.customLanguage ? "__other__" : draft.language}
+                disabled={saving}
                 onChange={(event) => {
                   const value = event.target.value;
                   if (value === "__other__") {
@@ -612,6 +613,7 @@ export function GuidedProfileSetup({
                   aria-label="Other profile language code"
                   value={draft.language}
                   placeholder="e.g. nl"
+                  disabled={saving}
                   onChange={(event) => setDraft({ ...draft, language: event.target.value.trim().toLowerCase() })}
                 />
               </label>
@@ -622,6 +624,7 @@ export function GuidedProfileSetup({
                 aria-label="Export profile name"
                 value={draft.name}
                 placeholder="Optional; a descriptive name is generated if blank"
+                disabled={saving}
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
               />
             </label>
@@ -635,7 +638,7 @@ export function GuidedProfileSetup({
                 aria-label="Live Anki deck"
                 value={draft.deckName}
                 onChange={(event) => void chooseDeck(event.target.value)}
-                disabled={catalogKind !== "live"}
+                disabled={saving || catalogKind !== "live"}
               >
                 <option value="">Choose deck…</option>
                 {catalogSnapshot?.decks.map((deck) => (
@@ -647,34 +650,49 @@ export function GuidedProfileSetup({
           </div>
 
           <div className="guided-step">
-            <strong>3. Note types found in the selected deck</strong>
+            <strong>3. Explicit note type</strong>
             {analysisState.kind === "idle" && <div className="setting-help">Choose a deck to inspect its bounded sample.</div>}
             {analysisState.kind === "loading" && <div role="status">Analyzing {analysisState.deckName}…</div>}
-            {analysisState.kind === "error" && <div className="proposal-warning" role="alert">{analysisState.error}</div>}
+            {analysisState.kind === "error" && (
+              <div className="proposal-warning" role="alert">
+                {analysisState.error} The live note-type catalog remains available for explicit selection.
+              </div>
+            )}
             {analysisState.kind === "live" && (
-              <>
-                <div className="setting-help">
-                  Sample evidence only: {analysisState.analysis.inspectedCardCount}/{analysisState.analysis.sampledCardCount} sampled cards inspected.
-                  Collector never chooses the target note type from popularity.
-                </div>
-                <label>
-                  Intended note type
-                  <select
-                    aria-label="Intended note type"
-                    value={draft.modelName}
-                    onChange={(event) => void chooseModel(event.target.value)}
-                  >
-                    <option value="">Choose explicitly…</option>
-                    {analysisState.analysis.models
-                      .filter((model) => model.modelName !== COLLECTOR_MANAGED_MODEL_NAME)
-                      .map((model) => (
-                        <option key={model.modelName} value={model.modelName}>
-                          {model.modelName} — {model.sampledCount}/{analysisState.analysis.inspectedCardCount} sampled
+              <div className="setting-help">
+                Sample evidence only: {analysisState.analysis.inspectedCardCount}/{analysisState.analysis.sampledCardCount} sampled cards inspected.
+                Sample absence never removes a live note type from the explicit choice.
+              </div>
+            )}
+            {(analysisState.kind === "live" || analysisState.kind === "error") && catalogSnapshot && (
+              <label>
+                Intended note type
+                <select
+                  aria-label="Intended note type"
+                  value={draft.modelName}
+                  onChange={(event) => void chooseModel(event.target.value)}
+                  disabled={saving}
+                >
+                  <option value="">Choose explicitly…</option>
+                  {catalogSnapshot.models
+                    .filter((model) => model.name !== COLLECTOR_MANAGED_MODEL_NAME)
+                    .map((model) => {
+                      const sample = analysisState.kind === "live"
+                        ? analysisState.analysis.models.find((entry) => entry.modelName === model.name)
+                        : null;
+                      const evidence = analysisState.kind === "live"
+                        ? sample
+                          ? ` — ${sample.sampledCount}/${analysisState.analysis.inspectedCardCount} sampled`
+                          : " — not in bounded sample"
+                        : "";
+                      return (
+                        <option key={String(model.id)} value={model.name}>
+                          {model.name}{evidence}
                         </option>
-                      ))}
-                  </select>
-                </label>
-              </>
+                      );
+                    })}
+                </select>
+              </label>
             )}
           </div>
 
@@ -716,6 +734,7 @@ export function GuidedProfileSetup({
                     <button
                       className="ghost"
                       type="button"
+                      disabled={saving}
                       onClick={() => setRepresentativeIndex(
                         (representativeIndex + 1) % selectedModelSample!.representatives.length
                       )}
@@ -744,13 +763,17 @@ export function GuidedProfileSetup({
                       <select
                         aria-label={"Map Collector " + semantic}
                         value={draft.fieldMapping[semantic] ?? ""}
-                        onChange={(event) => setDraft({
-                          ...draft,
-                          fieldMapping: {
-                            ...draft.fieldMapping,
-                            [semantic]: event.target.value || undefined,
-                          },
-                        })}
+                        disabled={saving}
+                        onChange={(event) => {
+                          setRemapAcknowledged(false);
+                          setDraft({
+                            ...draft,
+                            fieldMapping: {
+                              ...draft.fieldMapping,
+                              [semantic]: event.target.value || undefined,
+                            },
+                          });
+                        }}
                       >
                         <option value="">Leave unmapped</option>
                         {liveModelDetail.fields.map((field) => (
@@ -796,6 +819,7 @@ export function GuidedProfileSetup({
                   <input
                     type="checkbox"
                     checked={remapAcknowledged}
+                    disabled={saving}
                     onChange={(event) => setRemapAcknowledged(event.target.checked)}
                   />
                   I understand this remap affects future updates to already-bound notes.
