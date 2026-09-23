@@ -41,6 +41,7 @@ export interface BatchCaptureResult {
   receivedCount: number;
   ignoredEmptyCount: number;
   duplicatesCollapsed: number;
+  nextCandidateNumber?: number;
   candidates: BatchCaptureCandidate[];
 }
 
@@ -143,6 +144,7 @@ export class BatchCapturePipeline {
     }
 
     const seenIds = new Set<string>();
+    let observedNextCandidateNumber = 1;
     const candidates = snapshot.candidates.map((candidate) => {
       const id = candidate.id.trim();
       if (!id || seenIds.has(id)) {
@@ -151,6 +153,11 @@ export class BatchCapturePipeline {
       if (candidate.batchId !== batchId || !id.startsWith(`${batchId}:`)) {
         throw new Error(`Stored staged candidate ${id || "(missing)"} does not belong to batch ${batchId}.`);
       }
+      const numericId = Number(id.slice(batchId.length + 1));
+      if (!Number.isInteger(numericId) || numericId < 1) {
+        throw new Error(`Stored staged candidate ${id} has an invalid sequence number.`);
+      }
+      observedNextCandidateNumber = Math.max(observedNextCandidateNumber, numericId + 1);
       if (!Number.isInteger(candidate.duplicateCount) || candidate.duplicateCount < 1) {
         throw new Error(`Stored staged candidate ${id} has an invalid duplicate count.`);
       }
@@ -178,11 +185,17 @@ export class BatchCapturePipeline {
       };
     });
 
+    const nextCandidateNumber = snapshot.nextCandidateNumber ?? observedNextCandidateNumber;
+    if (!Number.isInteger(nextCandidateNumber) || nextCandidateNumber < observedNextCandidateNumber) {
+      throw new Error("Stored staged candidate sequence high-water mark is invalid.");
+    }
+
     this.activeBatch = {
       batchId,
       receivedCount: snapshot.receivedCount,
       ignoredEmptyCount: snapshot.ignoredEmptyCount,
       duplicatesCollapsed: snapshot.duplicatesCollapsed,
+      nextCandidateNumber,
       candidates,
     };
     return cloneResult(this.activeBatch);
@@ -211,12 +224,15 @@ export class BatchCapturePipeline {
       previousCandidates.map((candidate) => [duplicateFingerprint(candidate), candidate.id]),
     );
     const usedIds = new Set(previousCandidates.map((candidate) => candidate.id));
-    let nextCandidateNumber = previousCandidates.reduce((next, candidate) => {
+    const observedNextCandidateNumber = previousCandidates.reduce((next, candidate) => {
       const prefix = `${normalizedBatchId}:`;
       if (!candidate.id.startsWith(prefix)) return next;
       const numeric = Number(candidate.id.slice(prefix.length));
       return Number.isInteger(numeric) && numeric >= next ? numeric + 1 : next;
     }, 1);
+    let nextCandidateNumber = this.activeBatch?.batchId === normalizedBatchId
+      ? Math.max(this.activeBatch.nextCandidateNumber ?? 1, observedNextCandidateNumber)
+      : 1;
     const allocateCandidateId = (): string => {
       let candidateId: string;
       do {
@@ -271,6 +287,7 @@ export class BatchCapturePipeline {
       receivedCount: evidence.length,
       ignoredEmptyCount,
       duplicatesCollapsed: evidence.length - ignoredEmptyCount - candidates.length,
+      nextCandidateNumber,
       candidates,
     };
 
