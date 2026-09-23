@@ -581,7 +581,9 @@ try {
     "First-run onboarding accessibility violations:\n"
       + JSON.stringify(onboardingAccessibility.violations, null, 2),
   );
-  await onboarding.getByRole("button", { name: "Skip introduction" }).click();
+  const skipIntroduction = onboarding.getByRole("button", { name: "Skip introduction" });
+  await skipIntroduction.focus();
+  await panel.keyboard.press("Enter");
   await onboarding.waitFor({ state: "detached" });
 
   await panel.reload();
@@ -673,7 +675,9 @@ try {
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
 
   markE2eStage("accp012-sequential-inbox-review");
-  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  const reviewInboxButton = panel.getByRole("button", { name: /^Review Inbox/ }).first();
+  await reviewInboxButton.focus();
+  await panel.keyboard.press("Enter");
   await panel.locator(".detail-heading", { hasText: "Inbox review 1 of 2" }).waitFor();
   const firstReviewedTerm = await panel.locator(".detail-card .term").innerText();
   await panel.keyboard.press("r");
@@ -1302,11 +1306,26 @@ try {
   );
 
   ankiRequests.length = 0;
-  const mixedDestinationPreview = await openExportPreview(panel);
+  const exportReadyButton = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  await exportReadyButton.focus();
+  await panel.keyboard.press("Enter");
+  const mixedDestinationPreview = panel.getByRole("dialog", { name: "Export Ready items" });
+  await mixedDestinationPreview.waitFor();
   assert.match(await mixedDestinationPreview.innerText(), /Hebrew RU/);
   assert.match(await mixedDestinationPreview.innerText(), /Serbian RU/);
   assert.match(await mixedDestinationPreview.innerText(), /2 Ready/);
-  await mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ }).click();
+  const exportPreviewAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    exportPreviewAccessibility.violations.length,
+    0,
+    "Export-preview accessibility violations:\n"
+      + JSON.stringify(exportPreviewAccessibility.violations, null, 2),
+  );
+  const executeMixedExport = mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ });
+  await executeMixedExport.focus();
+  await panel.keyboard.press("Enter");
   await mixedDestinationPreview.waitFor({ state: "detached" });
   await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
 
