@@ -355,6 +355,87 @@ describe("BatchCapturePipeline", () => {
     ).toHaveLength(2);
   });
 
+  it("repairs a stale same-surface disposition on explicit refresh after committed success", async () => {
+    const staged = await pipeline.stageBatch("refresh-recovery", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual(["new", "new"]);
+
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch");
+    const postCommitListFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.warning).toContain("Corpus import completed");
+    expect(result.warning).toContain("Use Refresh staged");
+    expect(result.remainingCandidateIds).toEqual(["refresh-recovery:0002"]);
+    expect(pipeline.getActiveBatch()?.candidates).toEqual([
+      expect.objectContaining({
+        id: "refresh-recovery:0002",
+        context: "הבית קרוב.",
+        disposition: "new",
+      }),
+    ]);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    postCommitListFailure.mockRestore();
+
+    const corpusAfterCommit = await repository.list();
+    expect(corpusAfterCommit).toHaveLength(1);
+    expect(corpusAfterCommit[0]?.occurrences).toHaveLength(1);
+    expect(corpusAfterCommit[0]?.lexicalUnit.status).toBe("inbox");
+
+    const retainedBeforeFailedRefresh = pipeline.getActiveBatch();
+    const explicitRefreshFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected explicit staged refresh failure."));
+
+    await expect(pipeline.refreshActiveBatch()).rejects.toThrow(
+      "Injected explicit staged refresh failure.",
+    );
+    expect(pipeline.getActiveBatch()).toEqual(retainedBeforeFailedRefresh);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    explicitRefreshFailure.mockRestore();
+
+    const refreshed = await pipeline.refreshActiveBatch();
+    expect(refreshed?.candidates).toEqual([
+      expect.objectContaining({
+        id: "refresh-recovery:0002",
+        context: "הבית קרוב.",
+        disposition: "repeated-evidence",
+        matchingLexicalUnitIds: [corpusAfterCommit[0]!.lexicalUnit.id],
+      }),
+    ]);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    const corpusAfterRefresh = await repository.list();
+    expect(corpusAfterRefresh).toHaveLength(1);
+    expect(corpusAfterRefresh[0]?.occurrences).toHaveLength(1);
+
+    const retry = await pipeline.commit({
+      candidateIds: [refreshed!.candidates[0]!.id],
+    });
+    expect(retry.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    expect(captureBatchSpy).toHaveBeenCalledTimes(2);
+
+    const finalCorpus = await repository.list();
+    expect(finalCorpus).toHaveLength(1);
+    expect(finalCorpus[0]?.occurrences).toHaveLength(2);
+    expect(finalCorpus[0]?.lexicalUnit.status).toBe("inbox");
+
+    captureBatchSpy.mockRestore();
+  });
+
   it("revalidates a staged candidate against corpus changes before commit", async () => {
     const staged = await pipeline.stageBatch("stale", [
       evidence("מים", "אני שותה מים."),
