@@ -2368,6 +2368,120 @@ try {
     "Explicit refresh and the subsequent normal Inbox import must not call Anki.",
   );
 
+  markE2eStage("accp022-double-persistence-reconstruction");
+  const journalSurface = "double-persistence-recovery-shared-he";
+  const journalBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp022-double-persistence",
+      evidence: [
+        {
+          surfaceText: journalSurface,
+          context: "committed while both staged snapshot writes fail",
+          language: "he",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-22T15:50:00.000Z",
+        },
+        {
+          surfaceText: journalSurface,
+          context: "unselected evidence must survive reconstruction",
+          language: "he",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-22T15:51:00.000Z",
+        },
+      ],
+    },
+    "ACCP-022 double staged-persistence failure fixture",
+  );
+  assert.equal(journalBatch?.ok, true, journalBatch?.error);
+  const journalCommittedId = journalBatch.batch.candidates[0].id;
+  const journalRemainingId = journalBatch.batch.candidates[1].id;
+  assert.deepEqual(
+    journalBatch.batch.candidates.map((candidate) => candidate.disposition),
+    ["new", "new"],
+  );
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const journalCommittedRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "committed while both staged snapshot writes fail",
+  });
+  const journalRemainingRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "unselected evidence must survive reconstruction",
+  });
+  await journalCommittedRow.getByRole("checkbox").check();
+
+  const failBothSnapshotWrites = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE", count: 2 },
+    "ACCP-022 double post-commit staged snapshot failure",
+  );
+  assert.equal(failBothSnapshotWrites?.ok, true);
+
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "committed-consumption journal was retained",
+  }).waitFor();
+  await journalCommittedRow.waitFor({ state: "detached" });
+  await journalRemainingRow.getByText("More evidence", { exact: true }).waitFor();
+
+  const dropJournalBatchMemory = await sendPanelMessage(
+    panel,
+    { type: "E2E_DROP_IN_MEMORY_STAGED_BATCH" },
+    "ACCP-022 double-failure worker reconstruction",
+  );
+  assert.equal(dropJournalBatchMemory?.ok, true, dropJournalBatchMemory?.error);
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await journalRemainingRow.getByText("More evidence", { exact: true }).waitFor();
+  assert.equal(
+    await journalRemainingRow.getAttribute("data-staged-id"),
+    journalRemainingId,
+    "Consumption-journal reconstruction must preserve the unselected candidate ID.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${journalCommittedId}"]`).count(),
+    0,
+    "A candidate committed before two failed snapshot writes must not reappear after reconstruction.",
+  );
+
+  const journalReadback = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-022 journal-protected reconstructed staged readback",
+  );
+  assert.equal(journalReadback?.ok, true, journalReadback?.error);
+  assert.equal(journalReadback.batch.candidates.length, 1);
+  assert.equal(journalReadback.batch.candidates[0].id, journalRemainingId);
+  assert.equal(journalReadback.batch.candidates[0].disposition, "repeated-evidence");
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const journalCorpusRowBeforeSecondImport = await queueRowForTerm(panel, journalSurface);
+  await journalCorpusRowBeforeSecondImport.getByText(/1 occurrence/).waitFor();
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: journalSurface }).count(),
+    1,
+    "The double-persistence recovery path must mutate the corpus exactly once before B is imported.",
+  );
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  await journalRemainingRow.getByRole("checkbox").check();
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await journalRemainingRow.waitFor({ state: "detached" });
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const journalCorpusRowAfterSecondImport = await queueRowForTerm(panel, journalSurface);
+  await journalCorpusRowAfterSecondImport.getByText(/2 occurrences/).waitFor();
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: journalSurface }).count(),
+    1,
+    "The protected restart path must retain one lexical unit while adding B once.",
+  );
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Committed-consumption journaling and reconstruction must not invoke Anki.",
+  );
 
   markE2eStage("post-accp018-regression-suite");
   // ACCP-003: a canonical edit that would merge independently exported units is
