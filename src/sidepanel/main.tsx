@@ -1985,7 +1985,10 @@ function App(): React.ReactElement {
                 <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"}</>
               )}
               {catalogState.kind === "stale" && (
-                <>Showing the last loaded decks. Refresh failed: {catalogState.error}</>
+                <>
+                  Showing the last loaded decks. Anki isn't available right now; saved profiles are unchanged.
+                  Open Anki Desktop, make sure AnkiConnect is running, then Retry.
+                </>
               )}
               {catalogState.kind === "unavailable" && (
                 <>
@@ -2579,7 +2582,7 @@ function App(): React.ReactElement {
                         {currentDeckName || "choose a deck in Settings"}
                       </span>
                       {binding?.ankiNoteId !== undefined && (
-                        <span className="setting-help">Existing linked note</span>
+                        <span className="setting-help">Existing linked note · note {binding.ankiNoteId}</span>
                       )}
                     </div>
 
