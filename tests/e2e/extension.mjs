@@ -2297,6 +2297,41 @@ try {
     "Explicit refresh must never restore the committed candidate.",
   );
 
+  const dropInMemoryBatch = await sendPanelMessage(
+    panel,
+    { type: "E2E_DROP_IN_MEMORY_STAGED_BATCH" },
+    "ACCP-022 worker reconstruction fixture",
+  );
+  assert.equal(dropInMemoryBatch?.ok, true, dropInMemoryBatch?.error);
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await remainingAfterRefreshRow.getByText("More evidence", { exact: true }).waitFor();
+  assert.equal(
+    await remainingAfterRefreshRow.getAttribute("data-staged-id"),
+    remainingCandidateId,
+    "MV3 worker reconstruction must preserve the surviving staged candidate ID.",
+  );
+  assert.equal(
+    await remainingAfterRefreshRow.getByRole("checkbox").isChecked(),
+    true,
+    "MV3 worker reconstruction must preserve selection keyed by the staged candidate ID.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${committedCandidateId}"]`).count(),
+    0,
+    "Worker reconstruction must not reuse the committed candidate ID.",
+  );
+
+  const reconstructedReadback = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-022 reconstructed staged readback",
+  );
+  assert.equal(reconstructedReadback?.ok, true, reconstructedReadback?.error);
+  assert.equal(reconstructedReadback.batch.candidates.length, 1);
+  assert.equal(reconstructedReadback.batch.candidates[0].id, remainingCandidateId);
+  assert.equal(reconstructedReadback.batch.candidates[0].disposition, "repeated-evidence");
+
   const stagedAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
