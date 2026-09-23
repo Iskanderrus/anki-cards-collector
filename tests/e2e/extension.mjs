@@ -600,7 +600,7 @@ try {
   for (let step = 0; step < 3; step += 1) {
     await onboarding.getByRole("button", { name: "Next" }).click();
   }
-  await onboarding.getByText(/Staged material has not entered your normal corpus yet/).waitFor();
+  await onboarding.getByText(/Staged material has not entered your normal collection yet/).waitFor();
   await onboarding.getByRole("button", { name: "Finish" }).click();
   await onboarding.waitFor({ state: "detached" });
   await ensureQueue(panel);
