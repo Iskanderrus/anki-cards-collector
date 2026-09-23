@@ -52,6 +52,7 @@ const STEPS: Step[] = [
 export function Onboarding({ onDismiss }: OnboardingProps): React.ReactElement {
   const [stepIndex, setStepIndex] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const step = STEPS[stepIndex]!;
 
   useEffect(() => {
@@ -62,6 +63,7 @@ export function Onboarding({ onDismiss }: OnboardingProps): React.ReactElement {
     <div className="dialog-backdrop" role="presentation">
       <section
         className="product-dialog onboarding-dialog"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
@@ -70,6 +72,22 @@ export function Onboarding({ onDismiss }: OnboardingProps): React.ReactElement {
           if (event.key === "Escape") {
             event.preventDefault();
             onDismiss("skip");
+            return;
+          }
+          if (event.key === "Tab" && dialogRef.current) {
+            const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            )];
+            if (focusable.length === 0) return;
+            const first = focusable[0]!;
+            const last = focusable[focusable.length - 1]!;
+            if (event.shiftKey && document.activeElement === first) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+              event.preventDefault();
+              first.focus();
+            }
           }
         }}
       >
