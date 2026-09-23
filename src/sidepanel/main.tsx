@@ -604,7 +604,7 @@ function App(): React.ReactElement {
   function showQueue(): void {
     cancelEdit();
     setReviewSessionIds([]);
-    setExportPreviewOpen(false);
+    closeExportPreview();
     setView("queue");
     requestAnimationFrame(() => {
       const currentActiveId = activeIdRef.current;
@@ -619,7 +619,7 @@ function App(): React.ReactElement {
   function showStaged(): void {
     cancelEdit();
     setReviewSessionIds([]);
-    setExportPreviewOpen(false);
+    closeExportPreview();
     setView("staged");
     void refreshStagedCandidates();
     requestAnimationFrame(() => {
@@ -632,17 +632,30 @@ function App(): React.ReactElement {
   function showSettings(): void {
     cancelEdit();
     setReviewSessionIds([]);
-    setExportPreviewOpen(false);
+    closeExportPreview();
     closeDeckAnalysis();
     setView("settings");
   }
 
   async function dismissIntroduction(): Promise<void> {
+    const returnSelector = view === "settings"
+      ? "[data-reopen-onboarding]"
+      : "[data-primary-collect]";
     try {
       await dismissOnboarding();
     } finally {
       setOnboardingOpen(false);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(returnSelector)?.focus({ preventScroll: true });
+      });
     }
+  }
+
+  function closeExportPreview(): void {
+    setExportPreviewOpen(false);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-export-ready]")?.focus({ preventScroll: true });
+    });
   }
 
   function startInboxReview(): void {
@@ -1151,7 +1164,7 @@ function App(): React.ReactElement {
       return;
     }
 
-    setExportPreviewOpen(false);
+    closeExportPreview();
     setBusy(true);
     setError("");
     setNotice("");
@@ -1703,20 +1716,21 @@ function App(): React.ReactElement {
         <ExportPreviewDialog
           preview={exportPreview}
           busy={busy}
-          onClose={() => setExportPreviewOpen(false)}
+          onClose={closeExportPreview}
           onExport={() => void exportToAnki()}
         />
       )}
 
       {view !== "staged" && (
         <div className="toolbar primary-workflow">
-          <button className="primary" disabled={busy} onClick={() => void capture()}>
+          <button data-primary-collect className="primary" disabled={busy} onClick={() => void capture()}>
             Collect
           </button>
           <button disabled={busy || counts.inbox === 0} onClick={startInboxReview}>
             Review Inbox{counts.inbox > 0 ? " (" + counts.inbox + ")" : ""}
           </button>
           <button
+            data-export-ready
             disabled={busy || counts.ready === 0}
             onClick={() => setExportPreviewOpen(true)}
           >
@@ -1954,7 +1968,7 @@ function App(): React.ReactElement {
             <div className="setting-help">Languages, Anki profiles, privacy, backup, and advanced controls.</div>
           </div>
           <div className="settings-head-actions">
-            <button className="ghost" type="button" onClick={() => setOnboardingOpen(true)}>View introduction</button>
+            <button data-reopen-onboarding className="ghost" type="button" onClick={() => setOnboardingOpen(true)}>View introduction</button>
             <button className="ghost" type="button" onClick={showQueue}>Back to Inbox</button>
           </div>
         </div>
