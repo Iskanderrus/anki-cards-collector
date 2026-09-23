@@ -512,6 +512,21 @@ function App(): React.ReactElement {
     [items, reviewSessionIds],
   );
 
+  const exportProgressDestination = useMemo(() => {
+    if (!exportProgress?.currentId) return null;
+    const item = items.find((candidate) => candidate.lexicalUnit.id === exportProgress.currentId);
+    if (!item) return null;
+    try {
+      return resolveExportRoute(
+        item,
+        settings,
+        exportBindings[item.lexicalUnit.id] ?? null,
+      ).profile;
+    } catch {
+      return null;
+    }
+  }, [exportBindings, exportProgress?.currentId, items, settings]);
+
   useEffect(() => {
     if (view !== "detail" || !activeId) {
       setObservedFormsState({ kind: "idle" });
@@ -1677,16 +1692,35 @@ function App(): React.ReactElement {
     <main className="app">
       <header className="header">
         <h1>Anki Cards Collector</h1>
-        <p>Keep the language worth remembering. Leave the rest on the page.</p>
+        <p>Collect now. Review later. Export confidently.</p>
       </header>
 
+      {onboardingOpen && (
+        <Onboarding onDismiss={() => void dismissIntroduction()} />
+      )}
+
+      {exportPreviewOpen && (
+        <ExportPreviewDialog
+          preview={exportPreview}
+          busy={busy}
+          onClose={() => setExportPreviewOpen(false)}
+          onExport={() => void exportToAnki()}
+        />
+      )}
+
       {view !== "staged" && (
-        <div className="toolbar">
+        <div className="toolbar primary-workflow">
           <button className="primary" disabled={busy} onClick={() => void capture()}>
-            Collect selection
+            Collect
           </button>
-          <button disabled={busy || counts.ready === 0} onClick={() => void exportToAnki()}>
-            Send ready to Anki
+          <button disabled={busy || counts.inbox === 0} onClick={startInboxReview}>
+            Review Inbox{counts.inbox > 0 ? " (" + counts.inbox + ")" : ""}
+          </button>
+          <button
+            disabled={busy || counts.ready === 0}
+            onClick={() => setExportPreviewOpen(true)}
+          >
+            Export Ready{counts.ready > 0 ? " (" + counts.ready + ")" : ""}
           </button>
         </div>
       )}
@@ -1697,14 +1731,14 @@ function App(): React.ReactElement {
           aria-current={view === "queue" ? "page" : undefined}
           onClick={showQueue}
         >
-          Queue
+          Inbox
         </button>
         <button
           type="button"
           aria-current={view === "staged" ? "page" : undefined}
           onClick={showStaged}
         >
-          Staged{stagedCandidates.length > 0 ? ` (${stagedCandidates.length})` : ""}
+          Staged{stagedCandidates.length > 0 ? " (" + stagedCandidates.length + ")" : ""}
         </button>
         <button
           type="button"
@@ -1808,6 +1842,12 @@ function App(): React.ReactElement {
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
+      {exportTechnicalError && (
+        <details className="technical-detail">
+          <summary>Technical detail</summary>
+          <code>{exportTechnicalError}</code>
+        </details>
+      )}
 
       {view === "staged" && (
         <StagedReview
@@ -1832,7 +1872,10 @@ function App(): React.ReactElement {
         <div className="export-progress" role="status" aria-live="polite">
           <div>
             Exporting {exportProgress.completed}/{exportProgress.total}
-            {exportProgress.currentText ? ` · ${exportProgress.currentText}` : ""}
+            {exportProgress.currentText ? " · " + exportProgress.currentText : ""}
+            {exportProgressDestination
+              ? " · " + exportProgressDestination.name + " → " + exportProgressDestination.deckName
+              : ""}
           </div>
           <progress
             value={exportProgress.completed}
@@ -1856,6 +1899,30 @@ function App(): React.ReactElement {
       )}
 
       {view === "queue" && (
+        <>
+          <div className="inbox-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || counts.inbox === 0}
+              onClick={startInboxReview}
+            >
+              Review Inbox
+            </button>
+            <span className="setting-help">
+              Ready is explicit approval for export. Viewing an item never changes its state.
+            </span>
+          </div>
+          {counts.inbox === 0 && (
+            <div className="empty compact-empty">
+              Inbox is clear. Collect useful language while reading, or review Staged material.
+            </div>
+          )}
+          {counts.ready === 0 && items.length > 0 && (
+            <div className="empty compact-empty">
+              Nothing is Ready for export yet. Review Inbox items and mark the ones you want to study as Ready.
+            </div>
+          )}
         <ReviewQueue
           entries={items.map((item) => {
             const proposal = proposeLearningCard(item);
@@ -1876,6 +1943,7 @@ function App(): React.ReactElement {
           onActivate={selectActiveId}
           onOpen={openDetail}
         />
+        </>
       )}
 
       {view === "settings" && (
