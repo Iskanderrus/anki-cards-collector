@@ -35,6 +35,7 @@ interface StagedReviewProps {
   onEdit(candidateId: string, changes: BatchCandidateEdit): Promise<void>;
   onCommit(candidateIds: string[], resolutions: Record<string, string>): Promise<void>;
   onDiscard(candidateIds: string[]): Promise<void>;
+  onRefresh(): Promise<void>;
   onBack(): void;
 }
 
@@ -67,6 +68,7 @@ export function StagedReview({
   onEdit,
   onCommit,
   onDiscard,
+  onRefresh,
   onBack,
 }: StagedReviewProps): React.ReactElement {
   const [filter, setFilter] = useState<DispositionFilter>("all");
@@ -271,7 +273,17 @@ export function StagedReview({
             corpus and completes ordinary review.
           </p>
         </div>
-        <button className="ghost" type="button" onClick={onBack}>Back to queue</button>
+        <div className="staged-review-head-actions">
+          <button
+            className="ghost"
+            type="button"
+            disabled={busy}
+            onClick={() => void onRefresh()}
+          >
+            Refresh staged
+          </button>
+          <button className="ghost" type="button" disabled={busy} onClick={onBack}>Back to queue</button>
+        </div>
       </div>
 
       <div className="staged-filter-grid">
