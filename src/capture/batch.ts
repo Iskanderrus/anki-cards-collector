@@ -1,4 +1,4 @@
-import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
+import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
 import type { CaptureSource, CollectedItem } from "../core/types";
 import type { CaptureBatchEntry, CaptureRepository } from "../storage/repository";
 
@@ -47,6 +47,19 @@ export interface BatchCommitRequest {
   resolutions?: Record<string, string>;
 }
 
+export interface BatchCandidateEdit {
+  surfaceText?: string;
+  language?: string;
+  context?: string;
+}
+
+export interface BatchCommitSummary {
+  newUnits: number;
+  evidenceAdded: number;
+  unchanged: number;
+  needsReview: number;
+}
+
 export interface BatchCommitResult {
   committed: Array<{
     candidateId: string;
@@ -54,10 +67,8 @@ export interface BatchCommitResult {
   }>;
   unchangedCandidateIds: string[];
   remainingCandidateIds: string[];
-}
-
-function normalizedLanguage(language: string): string {
-  return language.trim().toLowerCase() || "und";
+  summary: BatchCommitSummary;
+  warning?: string;
 }
 
 function sourceFingerprint(source: CaptureSource): string {
@@ -69,7 +80,7 @@ function duplicateFingerprint(candidate: BatchCaptureEvidence): string {
   // Occurrences cannot store it, so metadata-only differences must not survive
   // staging as separate candidates that would become identical persisted rows.
   return [
-    normalizedLanguage(candidate.language),
+    normalizeLanguage(candidate.language),
     normalizeIdentityText(candidate.surfaceText),
     normalizeText(candidate.context),
     sourceFingerprint(candidate.source),
@@ -83,7 +94,7 @@ function occurrenceEvidenceFingerprint(
   source: CaptureSource,
 ): string {
   return [
-    normalizedLanguage(language),
+    normalizeLanguage(language),
     normalizeIdentityText(surfaceText),
     normalizeText(context),
     sourceFingerprint(source),
@@ -141,7 +152,7 @@ export class BatchCapturePipeline {
       const normalized: BatchCaptureEvidence = {
         surfaceText,
         context: normalizeText(value.context).slice(0, 800),
-        language: normalizedLanguage(value.language),
+        language: normalizeLanguage(value.language),
         source: { ...value.source },
         capturedAt: value.capturedAt || new Date().toISOString(),
         adapterMetadata: value.adapterMetadata ? { ...value.adapterMetadata } : undefined,
@@ -184,6 +195,84 @@ export class BatchCapturePipeline {
     this.activeBatch = null;
   }
 
+  async editCandidate(
+    candidateId: string,
+    changes: BatchCandidateEdit,
+  ): Promise<BatchCaptureResult> {
+    if (!this.activeBatch) throw new Error("No staged batch is active.");
+
+    const index = this.activeBatch.candidates.findIndex(
+      (candidate) => candidate.id === candidateId,
+    );
+    if (index < 0) throw new Error(`Unknown staged candidate: ${candidateId}`);
+
+    const current = this.activeBatch.candidates[index]!;
+    const surfaceText = changes.surfaceText === undefined
+      ? current.surfaceText
+      : normalizeText(changes.surfaceText);
+    if (!surfaceText) throw new Error("Observed text cannot be empty.");
+
+    const context = changes.context === undefined
+      ? current.context
+      : normalizeText(changes.context).slice(0, 800);
+    const language = changes.language === undefined
+      ? current.language
+      : normalizeLanguage(changes.language);
+
+    const edited: BatchCaptureCandidate = {
+      ...current,
+      surfaceText,
+      context,
+      language,
+      normalizedSurfaceText: normalizeIdentityText(surfaceText),
+      normalizedContext: normalizeText(context),
+    };
+
+    const duplicate = this.activeBatch.candidates.find(
+      (candidate) => candidate.id !== candidateId
+        && duplicateFingerprint(candidate) === duplicateFingerprint(edited),
+    );
+    if (duplicate) {
+      throw new Error(
+        "This edit would duplicate another staged candidate. Keep one candidate and discard the other instead.",
+      );
+    }
+
+    const nextCandidates = [...this.activeBatch.candidates];
+    nextCandidates[index] = edited;
+    this.activeBatch = {
+      ...this.activeBatch,
+      candidates: await this.classify(nextCandidates),
+    };
+    return cloneResult(this.activeBatch);
+  }
+
+  async discardCandidates(candidateIds: readonly string[]): Promise<BatchCaptureResult | null> {
+    if (!this.activeBatch) throw new Error("No staged batch is active.");
+
+    const requestedIds = new Set(candidateIds);
+    const knownIds = new Set(this.activeBatch.candidates.map((candidate) => candidate.id));
+    for (const candidateId of requestedIds) {
+      if (!knownIds.has(candidateId)) throw new Error(`Unknown staged candidate: ${candidateId}`);
+    }
+
+    if (requestedIds.size === 0) return cloneResult(this.activeBatch);
+
+    const remaining = this.activeBatch.candidates.filter(
+      (candidate) => !requestedIds.has(candidate.id),
+    );
+    if (remaining.length === 0) {
+      this.activeBatch = null;
+      return null;
+    }
+
+    this.activeBatch = {
+      ...this.activeBatch,
+      candidates: remaining,
+    };
+    return cloneResult(this.activeBatch);
+  }
+
   async commit(request: BatchCommitRequest): Promise<BatchCommitResult> {
     if (!this.activeBatch) throw new Error("No staged batch is active.");
 
@@ -191,77 +280,108 @@ export class BatchCapturePipeline {
     const candidatesById = new Map(
       this.activeBatch.candidates.map((candidate) => [candidate.id, candidate]),
     );
-    const selected = await this.classify(requestedIds.map((candidateId) => {
+    const selected = requestedIds.map((candidateId) => {
       const candidate = candidatesById.get(candidateId);
       if (!candidate) throw new Error(`Unknown staged candidate: ${candidateId}`);
       return candidate;
+    });
+
+    const entries: CaptureBatchEntry[] = selected.map((candidate) => ({
+      draft: {
+        text: candidate.surfaceText,
+        context: candidate.context,
+        language: candidate.language,
+        source: candidate.source,
+        capturedAt: candidate.capturedAt,
+      },
+      resolutionLexicalUnitId: request.resolutions?.[candidate.id],
     }));
 
-    const unchangedCandidateIds: string[] = [];
-    const entries: CaptureBatchEntry[] = [];
-    const mutationCandidateIds: string[] = [];
-
-    for (const candidate of selected) {
-      if (candidate.disposition === "already-represented") {
-        unchangedCandidateIds.push(candidate.id);
-        continue;
+    let outcomes;
+    try {
+      outcomes = await this.repository.captureBatch(entries);
+    } catch (error) {
+      try {
+        await this.refreshActiveBatch();
+      } catch {
+        // Preserve the repository failure as the authoritative commit result.
+        // Background recovery may retry reclassification before returning control
+        // to the staged review UI.
       }
-
-      let targetLexicalUnitId: string | undefined;
-
-      if (candidate.disposition === "repeated-evidence") {
-        targetLexicalUnitId = candidate.matchingLexicalUnitIds[0];
-      } else if (candidate.disposition === "needs-review") {
-        const resolution = request.resolutions?.[candidate.id];
-        if (!resolution || !candidate.matchingLexicalUnitIds.includes(resolution)) {
-          throw new Error(
-            `Candidate ${candidate.id} needs an explicit matching lexical-unit resolution.`,
-          );
-        }
-        targetLexicalUnitId = resolution;
-      }
-
-      entries.push({
-        draft: {
-          text: candidate.surfaceText,
-          context: candidate.context,
-          language: candidate.language,
-          source: candidate.source,
-          capturedAt: candidate.capturedAt,
-        },
-        targetLexicalUnitId,
-      });
-      mutationCandidateIds.push(candidate.id);
+      throw error;
     }
+    const committed: BatchCommitResult["committed"] = [];
+    const unchangedCandidateIds: string[] = [];
+    let newUnits = 0;
+    let evidenceAdded = 0;
 
-    const items = entries.length > 0
-      ? await this.repository.captureBatch(entries)
-      : [];
+    outcomes.forEach((outcome, index) => {
+      const candidateId = selected[index]!.id;
+      if (outcome.kind === "unchanged") {
+        unchangedCandidateIds.push(candidateId);
+        return;
+      }
 
-    const committed = mutationCandidateIds.map((candidateId, index) => ({
-      candidateId,
-      item: items[index]!,
-    }));
+      committed.push({ candidateId, item: outcome.item });
+      if (outcome.kind === "new-unit") {
+        newUnits += 1;
+      } else {
+        evidenceAdded += 1;
+      }
+    });
 
     const selectedIds = new Set(requestedIds);
     const remaining = this.activeBatch.candidates.filter(
       (candidate) => !selectedIds.has(candidate.id),
     );
 
+    let warning: string | undefined;
     if (remaining.length === 0) {
       this.activeBatch = null;
     } else {
+      // captureBatch() resolving is the irreversible corpus-commit boundary.
+      // Consume selected staged candidates before any best-effort refresh so a
+      // transient post-commit read failure can never masquerade as an uncommitted
+      // import or re-offer already committed evidence as pending work.
       this.activeBatch = {
         ...this.activeBatch,
-        candidates: await this.classify(remaining),
+        candidates: remaining,
       };
+
+      try {
+        this.activeBatch = {
+          ...this.activeBatch,
+          candidates: await this.classify(remaining),
+        };
+      } catch (error) {
+        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Reload Staged review before relying on the remaining disposition labels.`;
+      }
     }
 
     return {
       committed,
       unchangedCandidateIds,
       remainingCandidateIds: this.activeBatch?.candidates.map((candidate) => candidate.id) ?? [],
+      summary: {
+        newUnits,
+        evidenceAdded,
+        unchanged: unchangedCandidateIds.length,
+        needsReview: this.activeBatch?.candidates.filter(
+          (candidate) => candidate.disposition === "needs-review",
+        ).length ?? 0,
+      },
+      warning,
     };
+  }
+
+  async refreshActiveBatch(): Promise<BatchCaptureResult | null> {
+    if (!this.activeBatch) return null;
+
+    this.activeBatch = {
+      ...this.activeBatch,
+      candidates: await this.classify(this.activeBatch.candidates),
+    };
+    return cloneResult(this.activeBatch);
   }
 
   private async classify(
@@ -277,7 +397,7 @@ export class BatchCapturePipeline {
       canonicalOwners.set(unit.contentKey, unit.id);
 
       for (const occurrence of item.occurrences) {
-        const observedKey = `${normalizedLanguage(unit.language)}::${occurrence.normalizedSurfaceText}`;
+        const observedKey = `${normalizeLanguage(unit.language)}::${occurrence.normalizedSurfaceText}`;
         const observed = observedOwners.get(observedKey) ?? new Set<string>();
         observed.add(unit.id);
         observedOwners.set(observedKey, observed);

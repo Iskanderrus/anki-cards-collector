@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BatchCaptureEvidence, BatchSourceAdapter } from "./batch";
+import type { CollectedItem } from "../core/types";
 import { BatchCapturePipeline } from "./batch";
 import { CollectorDatabase } from "../storage/database";
 import { CaptureRepository } from "../storage/repository";
@@ -292,6 +293,68 @@ describe("BatchCapturePipeline", () => {
     expect(pipeline.getActiveBatch()?.candidates[0]?.disposition).toBe("repeated-evidence");
   });
 
+  it("keeps repository success committed when remaining staged reclassification fails", async () => {
+    const existing = await repository.capture({
+      text: "מרק",
+      context: "מרק",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("מרק", "מרק").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+
+    const staged = await pipeline.stageBatch("post-commit-refresh", [
+      evidence("מרק", "אני אוכל מרק."),
+      evidence("בית", "זה בית חדש."),
+    ]);
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual([
+      "repeated-evidence",
+      "new",
+    ]);
+
+    const listSpy = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.committed.map((entry) => entry.candidateId)).toEqual([
+      "post-commit-refresh:0001",
+    ]);
+    expect(result.warning).toContain("Corpus import completed");
+    expect(result.warning).toContain("Injected post-commit staged refresh failure.");
+    expect(result.remainingCandidateIds).toEqual(["post-commit-refresh:0002"]);
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "post-commit-refresh:0002",
+    ]);
+
+    listSpy.mockRestore();
+
+    const afterCommit = await repository.list();
+    const soup = afterCommit.find(
+      (item) => item.lexicalUnit.id === existing.lexicalUnit.id,
+    );
+    expect(soup?.occurrences).toHaveLength(2);
+    expect(soup?.lexicalUnit.status).toBe("inbox");
+    expect(afterCommit.some((item) => item.lexicalUnit.canonicalText === "בית")).toBe(false);
+
+    const refreshed = await pipeline.refreshActiveBatch();
+    expect(refreshed?.candidates[0]?.id).toBe("post-commit-refresh:0002");
+    expect(refreshed?.candidates[0]?.disposition).toBe("new");
+
+    const retry = await pipeline.commit({
+      candidateIds: [refreshed!.candidates[0]!.id],
+    });
+    expect(retry.summary.newUnits).toBe(1);
+
+    const finalCorpus = await repository.list();
+    expect(finalCorpus).toHaveLength(2);
+    expect(
+      finalCorpus.find((item) => item.lexicalUnit.id === existing.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(2);
+  });
+
   it("revalidates a staged candidate against corpus changes before commit", async () => {
     const staged = await pipeline.stageBatch("stale", [
       evidence("מים", "אני שותה מים."),
@@ -316,6 +379,473 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list())[0]?.occurrences).toHaveLength(1);
   });
 
+  it("fails closed when a new owner appears immediately before the repository transaction", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב מכתב.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+    });
+    await repository.update(first.lexicalUnit.id, {
+      canonicalText: "לכתוב",
+      language: "he",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+    });
+
+    const second = await repository.capture({
+      text: "כתיבה",
+      context: "כתיבה היא מיומנות.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתיבה", "כתיבה היא מיומנות.").source,
+    });
+
+    const staged = await pipeline.stageBatch("late-ambiguity", [
+      evidence("כתב", "כתב נוסף."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+    expect(staged.candidates[0]?.matchingLexicalUnitIds).toEqual([first.lexicalUnit.id]);
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.update(second.lexicalUnit.id, {
+          canonicalText: "כתיבה",
+          language: "he",
+          note: "",
+          occurrenceId: second.occurrences[0]!.id,
+          surfaceText: "כתב",
+          context: "זה כתב ברור.",
+        });
+        return captureBatch(entries);
+      });
+
+    await expect(
+      pipeline.commit({ candidateIds: [staged.candidates[0]!.id] }),
+    ).rejects.toThrow("needs an explicit matching lexical-unit resolution");
+
+    captureBatchSpy.mockRestore();
+    const refreshed = pipeline.getActiveBatch()?.candidates[0];
+    expect(refreshed?.id).toBe("late-ambiguity:0001");
+    expect(refreshed?.disposition).toBe("needs-review");
+    expect(refreshed?.matchingLexicalUnitIds).toEqual(
+      [first.lexicalUnit.id, second.lexicalUnit.id].sort(),
+    );
+
+    const retried = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+      resolutions: {
+        [staged.candidates[0]!.id]: first.lexicalUnit.id,
+      },
+    });
+    expect(retried.summary.evidenceAdded).toBe(1);
+    expect(pipeline.getActiveBatch()).toBeNull();
+
+    const corpus = await repository.list();
+    expect(corpus.flatMap((item) => item.occurrences)).toHaveLength(3);
+    expect(
+      corpus.find((item) => item.lexicalUnit.id === first.lexicalUnit.id)?.occurrences,
+    ).toHaveLength(2);
+  });
+
+  it("rejects a resolution that stops being a current matching owner before mutation", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב מכתב.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+    });
+    const firstUpdated = await repository.update(first.lexicalUnit.id, {
+      canonicalText: "לכתוב",
+      language: "he",
+      note: "",
+      occurrenceId: first.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+    });
+
+    const second = await repository.capture({
+      text: "כתיבה",
+      context: "כתיבה היא מיומנות.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתיבה", "כתיבה היא מיומנות.").source,
+    });
+    await repository.update(second.lexicalUnit.id, {
+      canonicalText: "כתיבה",
+      language: "he",
+      note: "",
+      occurrenceId: second.occurrences[0]!.id,
+      surfaceText: "כתב",
+      context: "זה כתב ברור.",
+    });
+
+    const staged = await pipeline.stageBatch("stale-resolution", [
+      evidence("כתב", "כתב נוסף."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("needs-review");
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.update(firstUpdated.lexicalUnit.id, {
+          canonicalText: "לכתוב",
+          language: "he",
+          note: "",
+          occurrenceId: firstUpdated.occurrences[0]!.id,
+          surfaceText: "כותב",
+          context: "הוא כותב עכשיו.",
+        });
+        return captureBatch(entries);
+      });
+
+    await expect(
+      pipeline.commit({
+        candidateIds: [staged.candidates[0]!.id],
+        resolutions: {
+          [staged.candidates[0]!.id]: first.lexicalUnit.id,
+        },
+      }),
+    ).rejects.toThrow("no longer a current matching owner");
+
+    captureBatchSpy.mockRestore();
+    const refreshed = pipeline.getActiveBatch()?.candidates[0];
+    expect(refreshed?.id).toBe("stale-resolution:0001");
+    expect(refreshed?.disposition).toBe("repeated-evidence");
+    expect(refreshed?.matchingLexicalUnitIds).toEqual([second.lexicalUnit.id]);
+
+    const retried = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+    expect(retried.summary.evidenceAdded).toBe(1);
+    expect(retried.committed[0]?.item.lexicalUnit.id).toBe(second.lexicalUnit.id);
+  });
+
+  it("derives new-versus-evidence summary from transaction-time ownership", async () => {
+    const staged = await pipeline.stageBatch("late-existing", [
+      evidence("מים", "אני שותה מים."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("new");
+
+    const captureBatch = repository.captureBatch.bind(repository);
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch")
+      .mockImplementationOnce(async (entries) => {
+        await repository.capture({
+          text: "מים",
+          context: "המים קרים.",
+          language: "he",
+          capturedAt: "2026-09-19T12:00:30.000Z",
+          source: evidence("מים", "המים קרים.").source,
+        });
+        return captureBatch(entries);
+      });
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    captureBatchSpy.mockRestore();
+    expect(result.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(2);
+  });
+
+  it("uses normalized language semantics for restored mixed-case observed owners", async () => {
+    const ownerId = "mixed-case-language-owner";
+    await database.lexicalUnits.add({
+      id: ownerId,
+      contentKey: "he::לכתוב",
+      canonicalText: "לכתוב",
+      normalizedCanonicalText: "לכתוב",
+      language: "HE",
+      note: "",
+      status: "inbox",
+      createdAt: "2026-09-19T08:00:00.000Z",
+      updatedAt: "2026-09-19T08:00:00.000Z",
+    });
+    await database.occurrences.add({
+      id: "mixed-case-language-occurrence",
+      lexicalUnitId: ownerId,
+      surfaceText: "כתב",
+      normalizedSurfaceText: "כתב",
+      context: "הוא כתב מכתב.",
+      source: evidence("כתב", "הוא כתב מכתב.").source,
+      capturedAt: "2026-09-19T08:00:00.000Z",
+    });
+
+    const exact = await pipeline.stageBatch("mixed-case-exact", [
+      evidence("כתב", "הוא כתב מכתב."),
+    ]);
+    expect(exact.candidates[0]?.disposition).toBe("already-represented");
+
+    const exactResult = await pipeline.commit({
+      candidateIds: [exact.candidates[0]!.id],
+    });
+    expect(exactResult.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 0,
+      unchanged: 1,
+      needsReview: 0,
+    });
+
+    const additional = await pipeline.stageBatch("mixed-case-additional", [
+      evidence("כתב", "הוא כתב שוב."),
+    ]);
+    expect(additional.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const additionalResult = await pipeline.commit({
+      candidateIds: [additional.candidates[0]!.id],
+    });
+    expect(additionalResult.summary.evidenceAdded).toBe(1);
+    expect(additionalResult.committed[0]?.item.lexicalUnit.id).toBe(ownerId);
+
+    const normalCapture = await repository.capture({
+      text: "כתב",
+      context: "הוא כתב בפעם השלישית.",
+      language: "he",
+      capturedAt: "2026-09-19T12:05:00.000Z",
+      source: evidence("כתב", "הוא כתב בפעם השלישית.").source,
+    });
+    expect(normalCapture.lexicalUnit.id).toBe(ownerId);
+
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(3);
+  });
+
+  it("edits staged evidence in place and reclassifies it against the corpus", async () => {
+    await repository.capture({
+      text: "שלום",
+      context: "שלום, דנה.",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("שלום", "שלום, דנה.").source,
+    });
+
+    const staged = await pipeline.stageBatch("edit", [
+      evidence("שלם", "שלם כאן."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("new");
+
+    const edited = await pipeline.editCandidate(staged.candidates[0]!.id, {
+      surfaceText: " שלום ",
+      context: "שלום, דנה.",
+      language: "HE",
+    });
+
+    expect(edited.candidates[0]?.id).toBe("edit:0001");
+    expect(edited.candidates[0]?.surfaceText).toBe("שלום");
+    expect(edited.candidates[0]?.language).toBe("he");
+    expect(edited.candidates[0]?.disposition).toBe("already-represented");
+    expect(edited.candidates[0]?.source).toEqual(staged.candidates[0]?.source);
+    expect(edited.candidates[0]?.capturedAt).toBe(staged.candidates[0]?.capturedAt);
+  });
+
+  it("rejects an edit that would collapse two stable staged identities", async () => {
+    const staged = await pipeline.stageBatch("edit-duplicate", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+
+    await expect(
+      pipeline.editCandidate(staged.candidates[1]!.id, {
+        surfaceText: "אחד",
+        context: "אחד כאן.",
+      }),
+    ).rejects.toThrow("duplicate another staged candidate");
+
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "edit-duplicate:0001",
+      "edit-duplicate:0002",
+    ]);
+  });
+
+  it("discards only the requested candidates from the current staged batch", async () => {
+    const staged = await pipeline.stageBatch("discard-selected", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    const remaining = await pipeline.discardCandidates([
+      staged.candidates[0]!.id,
+      staged.candidates[2]!.id,
+    ]);
+
+    expect(remaining?.candidates.map((candidate) => candidate.id)).toEqual([
+      "discard-selected:0002",
+    ]);
+    expect(await repository.list()).toEqual([]);
+
+    const empty = await pipeline.discardCandidates(["discard-selected:0002"]);
+    expect(empty).toBeNull();
+    expect(pipeline.getActiveBatch()).toBeNull();
+  });
+
+  it("returns commit-time domain outcome counts and keeps imported material in Inbox", async () => {
+    await repository.capture({
+      text: "שלום",
+      context: "שלום, דנה.",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("שלום", "שלום, דנה.").source,
+    });
+
+    const staged = await pipeline.stageBatch("summary", [
+      evidence("שלום", "שלום, דנה."),
+      evidence("שלום", "שלום, יואב."),
+      evidence("בית", "זה בית גדול."),
+    ]);
+
+    const result = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+
+    expect(result.summary).toEqual({
+      newUnits: 1,
+      evidenceAdded: 1,
+      unchanged: 1,
+      needsReview: 0,
+    });
+    expect((await repository.list()).every((item) => item.lexicalUnit.status === "inbox")).toBe(true);
+  });
+
+  it("counts one new lexical unit plus added evidence when multiple new contexts share one form", async () => {
+    const staged = await pipeline.stageBatch("new-shared-form", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual(["new", "new"]);
+
+    const result = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+
+    expect(result.summary).toEqual({
+      newUnits: 1,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    expect(result.committed.map(({ item }) => item.occurrences.length)).toEqual([2, 2]);
+    const corpus = await repository.list();
+    expect(corpus).toHaveLength(1);
+    expect(corpus[0]?.occurrences).toHaveLength(2);
+    expect(corpus[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
+  it("returns an existing Ready unit to Inbox when batch import adds new evidence", async () => {
+    const existing = await repository.capture({
+      text: "מרק",
+      context: "מרק",
+      language: "he",
+      capturedAt: "2026-09-19T10:00:00.000Z",
+      source: evidence("מרק", "מרק").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+
+    const staged = await pipeline.stageBatch("ready-evidence", [
+      evidence("מרק", "אני אוכל מרק."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.summary.evidenceAdded).toBe(1);
+    expect(result.committed[0]?.item.lexicalUnit.status).toBe("inbox");
+    expect((await repository.list())[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
+  it("returns an archived existing unit to Inbox when batch import adds new evidence", async () => {
+    const existing = await repository.capture({
+      text: "חלון",
+      context: "חלון",
+      language: "he",
+      capturedAt: "2026-09-19T10:05:00.000Z",
+      source: evidence("חלון", "חלון").source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "archived");
+
+    const staged = await pipeline.stageBatch("archived-evidence", [
+      evidence("חלון", "אני פותח חלון."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.summary.evidenceAdded).toBe(1);
+    expect(result.committed[0]?.item.lexicalUnit.status).toBe("inbox");
+    expect((await repository.list())[0]?.lexicalUnit.status).toBe("inbox");
+  });
+
+  it("retains the entire staged batch when the transactional commit fails so retry is safe", async () => {
+    const staged = await pipeline.stageBatch("retry", [
+      evidence("לחם", "יש לחם על השולחן."),
+      evidence("מים", "המים קרים."),
+    ]);
+    const captureBatch = vi.spyOn(repository, "captureBatch")
+      .mockRejectedValueOnce(new Error("Injected repository failure."));
+
+    await expect(
+      pipeline.commit({
+        candidateIds: staged.candidates.map((candidate) => candidate.id),
+      }),
+    ).rejects.toThrow("Injected repository failure.");
+
+    expect(pipeline.getActiveBatch()?.candidates.map((candidate) => candidate.id)).toEqual([
+      "retry:0001",
+      "retry:0002",
+    ]);
+    expect(await repository.list()).toEqual([]);
+
+    captureBatch.mockRestore();
+    const retried = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+    expect(retried.summary.newUnits).toBe(2);
+    expect(await repository.list()).toHaveLength(2);
+  });
+
+  it("rolls back if transactional outcome hydration fails", async () => {
+    const internals = repository as unknown as {
+      collectedItem(id: string): Promise<CollectedItem>;
+    };
+    const collectedItem = vi.spyOn(internals, "collectedItem")
+      .mockRejectedValueOnce(new Error("Injected outcome hydration failure."));
+
+    await expect(
+      repository.captureBatch([
+        {
+          draft: {
+            text: "לחם",
+            context: "יש לחם על השולחן.",
+            language: "he",
+            capturedAt: "2026-09-19T13:00:00.000Z",
+            source: evidence("לחם", "יש לחם על השולחן.").source,
+          },
+        },
+      ]),
+    ).rejects.toThrow("Injected outcome hydration failure.");
+
+    collectedItem.mockRestore();
+    expect(await repository.list()).toEqual([]);
+  });
+
   it("rolls back the whole repository batch on a commit failure", async () => {
     await expect(
       repository.captureBatch([
@@ -336,10 +866,10 @@ describe("BatchCapturePipeline", () => {
             capturedAt: "2026-09-19T13:01:00.000Z",
             source: evidence("מים", "המים קרים.").source,
           },
-          targetLexicalUnitId: "missing-unit",
+          resolutionLexicalUnitId: "missing-unit",
         },
       ]),
-    ).rejects.toThrow("Target lexical unit no longer exists");
+    ).rejects.toThrow("Resolved lexical unit is no longer a current matching owner.");
 
     expect(await repository.list()).toEqual([]);
   });

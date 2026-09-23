@@ -4,6 +4,24 @@
 
 Make staged backfill usable with tens of candidates and complete the visible-material-to-normal-corpus workflow.
 
+## Implementation status
+
+Implemented by PR #70 through the existing ACCP-019/020 boundaries.
+
+- `src/sidepanel/staged-review.tsx` provides a dedicated compact Staged view with text/disposition filtering, visible-scope New / More-evidence bulk selection, individual selection, keyboard navigation, evidence inspection, and explicit destructive discard confirmation;
+- staged evidence editing changes only observed text, language, or context, preserves candidate/source identity, and reclassifies against the current corpus before commit;
+- `src/background.ts` serializes staged edit/discard/commit operations with the existing MV3 staged-batch lock and mirrors successful transient mutations back to `chrome.storage.session`;
+- selected import calls only `BatchCapturePipeline.commit()`; `CaptureRepository.captureBatch()` performs the final exact-evidence/owner classification, normalized-language ownership check, ambiguity decision, resolution validation, mutation, and result hydration inside the same Dexie transaction;
+- exact already-represented evidence is consumed as a no-op, while actual evidence mutations create/add occurrences and force any affected Ready or Archived lexical unit back to Inbox;
+- commit summaries are based on per-entry outcomes produced by that transaction (`new-unit`, `evidence-added`, or `unchanged`), so concurrent corpus changes cannot make a stale pre-transaction snapshot misreport the result;
+- if the repository transaction fails, selected staged evidence remains unconsumed and is reclassified before the error returns so late ambiguity/stale resolutions expose current owners for recovery; once the repository transaction succeeds, selected staged IDs are consumed immediately and any later remaining-candidate reclassification or transient-session persistence failure is reported only as a committed-success warning, never as an uncommitted import failure;
+- Staged review exposes no direct Anki export action.
+
+Automated browser acceptance covers 50+ mixed-disposition candidates, long Hebrew/Serbian/Spanish content, filtering/bulk scope, evidence edits, no-op import, pre-existing and late-arriving ambiguous-owner resolution, injected pre-commit failure/retry, committed-success handling when post-commit staged reclassification fails, discard, keyboard flow, accessibility, and the Duolingo -> Staged -> Inbox -> ordinary review -> ACCP-018 mapped fake-Anki path.
+
+Real-account acceptance in `docs/manual-accp021-real-workflow-acceptance.md` has passed at multiple immutable runtime checkpoints, including the first transaction-boundary remediation at `991ebb6d2c1de76d44a4b8da21b5105976ff4027` and the F3/F4/F5 remediation at `ae0e1ccc18b70e04b335ec24a0d6861e6f290562`, with clean worktrees. The manual document remains the reproducible procedure. **Current immutable-head acceptance is recorded in PR #70 acceptance evidence rather than by editing this file after the run**, because such an edit would itself create a new untested head. Every later runtime remediation must pass the same canonical procedure before the PR returns to independent review.
+
+
 ## Dependencies
 
 - ACCP-019;

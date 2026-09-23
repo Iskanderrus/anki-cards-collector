@@ -54,6 +54,23 @@ Only an explicit commit crosses the persistence boundary. Selected candidates ar
 
 Manual single-selection capture remains independent from this staging path.
 
+### Staged review and import
+
+ACCP-021 keeps review orchestration above the ACCP-019 domain boundary rather than teaching React or source adapters how to mutate the corpus.
+
+The side panel receives the current transient `BatchCaptureResult` from the extension service worker. Search, disposition filters, visible-scope selection, and candidate inspection are UI state only. Evidence corrections are sent back through the service worker, where the existing staged-batch lock serializes edit/discard/commit operations and persists the updated reconstruction payload to `chrome.storage.session`.
+
+A selected import never calls Anki. It asks `BatchCapturePipeline.commit()` to pass the selected evidence plus any explicit ambiguity resolution into the transactional `CaptureRepository.captureBatch()` boundary. The repository performs the final exact-evidence check, current-owner discovery, ambiguity decision, and resolution validation inside the same Dexie read/write transaction as the corpus mutation. Stored and incoming language codes are compared through the same normalized language identity, so restored values such as `HE` and newly captured `he` cannot disagree between staged classification and transaction-time ownership. Any lexical unit that actually receives accepted batch evidence is returned to `inbox` when necessary, including units that were previously `ready` or `archived`; exact already-represented no-ops do not mutate the corpus or status.
+
+Commit summaries are derived from per-entry outcomes produced by that transaction rather than from pre-transaction disposition labels or an external corpus snapshot. Each returned `CollectedItem` snapshot is also hydrated while the transaction is still active, so `captureBatch()` cannot report a post-commit read failure as though the corpus mutation itself had failed. This matters both when two staged `new` contexts collapse onto the same newly created lexical unit and when another extension context changes ownership immediately before the transaction begins.
+
+The corpus transaction and transient staged snapshot have different durability. If the repository transaction fails, the selected staged evidence remains unconsumed. The pipeline then reclassifies the retained batch against current corpus state, and the service worker returns that refreshed batch to the side panel and persists its reconstruction payload so late ambiguity or stale resolutions become recoverable user choices instead of stale retry loops.
+
+Once `CaptureRepository.captureBatch()` returns successfully, corpus success is irreversible at the orchestration layer: selected staged IDs are consumed before any best-effort reclassification of the unselected remainder. If that post-commit classification read fails, the import is still reported as committed success with a warning and only the unselected candidates remain staged, temporarily retaining their prior disposition labels until a later reconstruction/refresh recomputes them. Likewise, if updating `chrome.storage.session` or refreshing the normal Queue view fails after corpus success, Collector never attempts to undo or report the successful corpus transaction as failed. Those are committed-success warnings only. A stale transient snapshot can be reconstructed safely because committed exact evidence reclassifies as already represented before any subsequent corpus commit.
+
+The dedicated Staged view intentionally has no direct Anki export action. Accepted evidence must first enter the normal corpus and complete ordinary review/card policy before it can become Ready and follow the normal routed export path.
+
+
 ### Persistence
 
 IndexedDB contains three persistent entities. Learning content remains separate from operational Anki destination state.
