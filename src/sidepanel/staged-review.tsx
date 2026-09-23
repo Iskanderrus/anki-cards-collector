@@ -277,7 +277,7 @@ export function StagedReview({
           <button
             className="ghost"
             type="button"
-            disabled={busy}
+            disabled={busy || candidates.length === 0}
             onClick={() => void onRefresh()}
           >
             Refresh staged
