@@ -436,6 +436,62 @@ describe("BatchCapturePipeline", () => {
     captureBatchSpy.mockRestore();
   });
 
+  it("preserves remaining candidate IDs when a staged snapshot is restored after worker reconstruction", async () => {
+    const staged = await pipeline.stageBatch("worker-restore", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+    const committedId = staged.candidates[0]!.id;
+    const remainingId = staged.candidates[1]!.id;
+
+    const listFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+    await pipeline.commit({ candidateIds: [committedId] });
+    listFailure.mockRestore();
+
+    const persistedSnapshot = pipeline.getActiveBatch();
+    expect(persistedSnapshot?.candidates).toEqual([
+      expect.objectContaining({ id: remainingId, disposition: "new" }),
+    ]);
+
+    const reconstructed = new BatchCapturePipeline(repository);
+    reconstructed.restoreActiveBatch(persistedSnapshot!);
+    const refreshed = await reconstructed.refreshActiveBatch();
+
+    expect(refreshed?.candidates).toEqual([
+      expect.objectContaining({
+        id: remainingId,
+        context: "הבית קרוב.",
+        disposition: "repeated-evidence",
+      }),
+    ]);
+    expect(refreshed?.candidates[0]?.id).not.toBe(committedId);
+  });
+
+  it("preserves existing IDs when more evidence is staged into the same active batch", async () => {
+    const staged = await pipeline.stageBatch("stable-restage", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+    const secondId = staged.candidates[1]!.id;
+    const thirdId = staged.candidates[2]!.id;
+
+    await pipeline.discardCandidates([staged.candidates[0]!.id]);
+
+    const restaged = await pipeline.stageBatch("stable-restage", [
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+      evidence("ארבע", "ארבע כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      secondId,
+      thirdId,
+      "stable-restage:0004",
+    ]);
+  });
+
   it("revalidates a staged candidate against corpus changes before commit", async () => {
     const staged = await pipeline.stageBatch("stale", [
       evidence("מים", "אני שותה מים."),
