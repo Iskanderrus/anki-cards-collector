@@ -354,7 +354,7 @@ export class BatchCapturePipeline {
           candidates: await this.classify(remaining),
         };
       } catch (error) {
-        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Reload Staged review before relying on the remaining disposition labels.`;
+        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Use Refresh staged before relying on the remaining disposition labels.`;
       }
     }
 
