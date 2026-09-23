@@ -8,6 +8,13 @@ export type CandidateDisposition =
   | "repeated-evidence"
   | "needs-review";
 
+const CANDIDATE_DISPOSITIONS = new Set<CandidateDisposition>([
+  "new",
+  "already-represented",
+  "repeated-evidence",
+  "needs-review",
+]);
+
 export type BatchAdapterMetadata = Record<string, string | number | boolean | null>;
 
 export interface BatchCaptureEvidence {
@@ -34,6 +41,7 @@ export interface BatchCaptureResult {
   receivedCount: number;
   ignoredEmptyCount: number;
   duplicatesCollapsed: number;
+  nextCandidateNumber?: number;
   candidates: BatchCaptureCandidate[];
 }
 
@@ -124,6 +132,75 @@ export class BatchCapturePipeline {
     return this.activeBatch ? cloneResult(this.activeBatch) : null;
   }
 
+  restoreActiveBatch(snapshot: BatchCaptureResult): BatchCaptureResult {
+    const batchId = snapshot.batchId.trim();
+    if (!batchId) throw new Error("Stored staged batch ID is missing.");
+    if (
+      !Number.isInteger(snapshot.receivedCount) || snapshot.receivedCount < 0
+      || !Number.isInteger(snapshot.ignoredEmptyCount) || snapshot.ignoredEmptyCount < 0
+      || !Number.isInteger(snapshot.duplicatesCollapsed) || snapshot.duplicatesCollapsed < 0
+    ) {
+      throw new Error("Stored staged batch counters are invalid.");
+    }
+
+    const seenIds = new Set<string>();
+    let observedNextCandidateNumber = 1;
+    const candidates = snapshot.candidates.map((candidate) => {
+      const id = candidate.id.trim();
+      if (!id || seenIds.has(id)) {
+        throw new Error("Stored staged candidate IDs must be non-empty and unique.");
+      }
+      if (candidate.batchId !== batchId || !id.startsWith(`${batchId}:`)) {
+        throw new Error(`Stored staged candidate ${id || "(missing)"} does not belong to batch ${batchId}.`);
+      }
+      const numericId = Number(id.slice(batchId.length + 1));
+      if (!Number.isInteger(numericId) || numericId < 1) {
+        throw new Error(`Stored staged candidate ${id} has an invalid sequence number.`);
+      }
+      observedNextCandidateNumber = Math.max(observedNextCandidateNumber, numericId + 1);
+      if (!Number.isInteger(candidate.duplicateCount) || candidate.duplicateCount < 1) {
+        throw new Error(`Stored staged candidate ${id} has an invalid duplicate count.`);
+      }
+      if (!CANDIDATE_DISPOSITIONS.has(candidate.disposition)) {
+        throw new Error(`Stored staged candidate ${id} has an invalid disposition.`);
+      }
+
+      const surfaceText = normalizeText(candidate.surfaceText);
+      if (!surfaceText) throw new Error(`Stored staged candidate ${id} has empty observed text.`);
+      seenIds.add(id);
+
+      return {
+        ...candidate,
+        id,
+        batchId,
+        surfaceText,
+        context: normalizeText(candidate.context).slice(0, 800),
+        language: normalizeLanguage(candidate.language),
+        source: { ...candidate.source },
+        capturedAt: candidate.capturedAt,
+        adapterMetadata: candidate.adapterMetadata ? { ...candidate.adapterMetadata } : undefined,
+        normalizedSurfaceText: normalizeIdentityText(surfaceText),
+        normalizedContext: normalizeText(candidate.context).slice(0, 800),
+        matchingLexicalUnitIds: [...candidate.matchingLexicalUnitIds],
+      };
+    });
+
+    const nextCandidateNumber = snapshot.nextCandidateNumber ?? observedNextCandidateNumber;
+    if (!Number.isInteger(nextCandidateNumber) || nextCandidateNumber < observedNextCandidateNumber) {
+      throw new Error("Stored staged candidate sequence high-water mark is invalid.");
+    }
+
+    this.activeBatch = {
+      batchId,
+      receivedCount: snapshot.receivedCount,
+      ignoredEmptyCount: snapshot.ignoredEmptyCount,
+      duplicatesCollapsed: snapshot.duplicatesCollapsed,
+      nextCandidateNumber,
+      candidates,
+    };
+    return cloneResult(this.activeBatch);
+  }
+
   async stageFromAdapter(
     batchId: string,
     adapter: BatchSourceAdapter,
@@ -140,6 +217,31 @@ export class BatchCapturePipeline {
 
     const uniqueCandidates: BatchCaptureCandidate[] = [];
     const byFingerprint = new Map<string, BatchCaptureCandidate>();
+    const previousCandidates = this.activeBatch?.batchId === normalizedBatchId
+      ? this.activeBatch.candidates
+      : [];
+    const previousIdsByFingerprint = new Map(
+      previousCandidates.map((candidate) => [duplicateFingerprint(candidate), candidate.id]),
+    );
+    const usedIds = new Set(previousCandidates.map((candidate) => candidate.id));
+    const observedNextCandidateNumber = previousCandidates.reduce((next, candidate) => {
+      const prefix = `${normalizedBatchId}:`;
+      if (!candidate.id.startsWith(prefix)) return next;
+      const numeric = Number(candidate.id.slice(prefix.length));
+      return Number.isInteger(numeric) && numeric >= next ? numeric + 1 : next;
+    }, 1);
+    let nextCandidateNumber = this.activeBatch?.batchId === normalizedBatchId
+      ? Math.max(this.activeBatch.nextCandidateNumber ?? 1, observedNextCandidateNumber)
+      : 1;
+    const allocateCandidateId = (): string => {
+      let candidateId: string;
+      do {
+        candidateId = `${normalizedBatchId}:${String(nextCandidateNumber).padStart(4, "0")}`;
+        nextCandidateNumber += 1;
+      } while (usedIds.has(candidateId));
+      usedIds.add(candidateId);
+      return candidateId;
+    };
     let ignoredEmptyCount = 0;
 
     for (const value of evidence) {
@@ -167,7 +269,7 @@ export class BatchCapturePipeline {
 
       const candidate: BatchCaptureCandidate = {
         ...normalized,
-        id: `${normalizedBatchId}:${String(uniqueCandidates.length + 1).padStart(4, "0")}`,
+        id: previousIdsByFingerprint.get(fingerprint) ?? allocateCandidateId(),
         batchId: normalizedBatchId,
         normalizedSurfaceText: normalizeIdentityText(surfaceText),
         normalizedContext: normalizeText(normalized.context),
@@ -185,6 +287,7 @@ export class BatchCapturePipeline {
       receivedCount: evidence.length,
       ignoredEmptyCount,
       duplicatesCollapsed: evidence.length - ignoredEmptyCount - candidates.length,
+      nextCandidateNumber,
       candidates,
     };
 
@@ -354,7 +457,7 @@ export class BatchCapturePipeline {
           candidates: await this.classify(remaining),
         };
       } catch (error) {
-        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Reload Staged review before relying on the remaining disposition labels.`;
+        warning = `Corpus import completed, but remaining staged evidence could not be reclassified: ${error instanceof Error ? error.message : "staged refresh failed."} Use Refresh staged before relying on the remaining disposition labels.`;
       }
     }
 

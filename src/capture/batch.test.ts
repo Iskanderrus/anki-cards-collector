@@ -355,6 +355,193 @@ describe("BatchCapturePipeline", () => {
     ).toHaveLength(2);
   });
 
+  it("repairs a stale same-surface disposition on explicit refresh after committed success", async () => {
+    const staged = await pipeline.stageBatch("refresh-recovery", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+
+    expect(staged.candidates.map((candidate) => candidate.disposition)).toEqual(["new", "new"]);
+
+    const captureBatchSpy = vi.spyOn(repository, "captureBatch");
+    const postCommitListFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+
+    expect(result.warning).toContain("Corpus import completed");
+    expect(result.warning).toContain("Use Refresh staged");
+    expect(result.remainingCandidateIds).toEqual(["refresh-recovery:0002"]);
+    expect(pipeline.getActiveBatch()?.candidates).toEqual([
+      expect.objectContaining({
+        id: "refresh-recovery:0002",
+        context: "הבית קרוב.",
+        disposition: "new",
+      }),
+    ]);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    postCommitListFailure.mockRestore();
+
+    const corpusAfterCommit = await repository.list();
+    expect(corpusAfterCommit).toHaveLength(1);
+    expect(corpusAfterCommit[0]?.occurrences).toHaveLength(1);
+    expect(corpusAfterCommit[0]?.lexicalUnit.status).toBe("inbox");
+
+    const retainedBeforeFailedRefresh = pipeline.getActiveBatch();
+    const explicitRefreshFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected explicit staged refresh failure."));
+
+    await expect(pipeline.refreshActiveBatch()).rejects.toThrow(
+      "Injected explicit staged refresh failure.",
+    );
+    expect(pipeline.getActiveBatch()).toEqual(retainedBeforeFailedRefresh);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    explicitRefreshFailure.mockRestore();
+
+    const refreshed = await pipeline.refreshActiveBatch();
+    expect(refreshed?.candidates).toEqual([
+      expect.objectContaining({
+        id: "refresh-recovery:0002",
+        context: "הבית קרוב.",
+        disposition: "repeated-evidence",
+        matchingLexicalUnitIds: [corpusAfterCommit[0]!.lexicalUnit.id],
+      }),
+    ]);
+    expect(captureBatchSpy).toHaveBeenCalledTimes(1);
+
+    const corpusAfterRefresh = await repository.list();
+    expect(corpusAfterRefresh).toHaveLength(1);
+    expect(corpusAfterRefresh[0]?.occurrences).toHaveLength(1);
+
+    const retry = await pipeline.commit({
+      candidateIds: [refreshed!.candidates[0]!.id],
+    });
+    expect(retry.summary).toEqual({
+      newUnits: 0,
+      evidenceAdded: 1,
+      unchanged: 0,
+      needsReview: 0,
+    });
+    expect(captureBatchSpy).toHaveBeenCalledTimes(2);
+
+    const finalCorpus = await repository.list();
+    expect(finalCorpus).toHaveLength(1);
+    expect(finalCorpus[0]?.occurrences).toHaveLength(2);
+    expect(finalCorpus[0]?.lexicalUnit.status).toBe("inbox");
+
+    captureBatchSpy.mockRestore();
+  });
+
+  it("preserves remaining candidate IDs when a staged snapshot is restored after worker reconstruction", async () => {
+    const staged = await pipeline.stageBatch("worker-restore", [
+      evidence("בית", "זה בית גדול."),
+      evidence("בית", "הבית קרוב."),
+    ]);
+    const committedId = staged.candidates[0]!.id;
+    const remainingId = staged.candidates[1]!.id;
+
+    const listFailure = vi.spyOn(repository, "list")
+      .mockRejectedValueOnce(new Error("Injected post-commit staged refresh failure."));
+    await pipeline.commit({ candidateIds: [committedId] });
+    listFailure.mockRestore();
+
+    const persistedSnapshot = pipeline.getActiveBatch();
+    expect(persistedSnapshot?.candidates).toEqual([
+      expect.objectContaining({ id: remainingId, disposition: "new" }),
+    ]);
+
+    const reconstructed = new BatchCapturePipeline(repository);
+    reconstructed.restoreActiveBatch(persistedSnapshot!);
+    const refreshed = await reconstructed.refreshActiveBatch();
+
+    expect(refreshed?.candidates).toEqual([
+      expect.objectContaining({
+        id: remainingId,
+        context: "הבית קרוב.",
+        disposition: "repeated-evidence",
+      }),
+    ]);
+    expect(refreshed?.candidates[0]?.id).not.toBe(committedId);
+  });
+
+  it("does not reuse the highest committed candidate ID when more evidence is staged", async () => {
+    const staged = await pipeline.stageBatch("commit-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+    const firstId = staged.candidates[0]!.id;
+    const committedHighestId = staged.candidates[1]!.id;
+    expect(committedHighestId).toBe("commit-high-water:0002");
+
+    await pipeline.commit({ candidateIds: [committedHighestId] });
+
+    const restaged = await pipeline.stageBatch("commit-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      firstId,
+      "commit-high-water:0003",
+    ]);
+    expect(restaged.candidates[1]!.id).not.toBe(committedHighestId);
+  });
+
+  it("does not reuse the highest discarded candidate ID after snapshot reconstruction", async () => {
+    const staged = await pipeline.stageBatch("discard-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+    const firstId = staged.candidates[0]!.id;
+    const discardedHighestId = staged.candidates[1]!.id;
+    expect(discardedHighestId).toBe("discard-high-water:0002");
+
+    await pipeline.discardCandidates([discardedHighestId]);
+    const persistedSnapshot = pipeline.getActiveBatch();
+    expect(persistedSnapshot?.nextCandidateNumber).toBe(3);
+
+    const reconstructed = new BatchCapturePipeline(repository);
+    reconstructed.restoreActiveBatch(persistedSnapshot!);
+    const restaged = await reconstructed.stageBatch("discard-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      firstId,
+      "discard-high-water:0003",
+    ]);
+    expect(restaged.candidates[1]!.id).not.toBe(discardedHighestId);
+  });
+
+  it("preserves existing IDs when more evidence is staged into the same active batch", async () => {
+    const staged = await pipeline.stageBatch("stable-restage", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+    const secondId = staged.candidates[1]!.id;
+    const thirdId = staged.candidates[2]!.id;
+
+    await pipeline.discardCandidates([staged.candidates[0]!.id]);
+
+    const restaged = await pipeline.stageBatch("stable-restage", [
+      evidence("שתיים", "שתיים כאן."),
+      evidence("שלוש", "שלוש כאן."),
+      evidence("ארבע", "ארבע כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      secondId,
+      thirdId,
+      "stable-restage:0004",
+    ]);
+  });
+
   it("revalidates a staged candidate against corpus changes before commit", async () => {
     const staged = await pipeline.stageBatch("stale", [
       evidence("מים", "אני שותה מים."),

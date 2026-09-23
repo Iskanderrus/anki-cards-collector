@@ -55,7 +55,11 @@ import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { ReviewQueue } from "./queue";
 import { GuidedProfileSetup } from "./profile-setup";
-import { StagedReview, type StagedImportResult } from "./staged-review";
+import {
+  StagedReview,
+  clearStagedRefreshWarning,
+  type StagedImportResult,
+} from "./staged-review";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -620,8 +624,44 @@ function App(): React.ReactElement {
         staged: stagedSummaryForCandidates(nextBatchId, candidates),
       }));
     } catch {
-      // Staging is ephemeral; an unavailable service-worker snapshot simply has no preview.
-      setStagedCandidates([]);
+      // Staging is ephemeral; keep any already-rendered snapshot if the worker is unavailable.
+    }
+  }
+
+  async function refreshStagedDispositions(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "REFRESH_STAGED_BATCH",
+      }) as {
+        ok: boolean;
+        error?: string;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
+        staged?: StagedBatchSummary;
+      };
+
+      if (response.batch !== undefined || response.staged !== undefined) {
+        applyStagedMutationResponse(response.batch, response.staged);
+      }
+      if (!response.ok) {
+        throw new Error(response.error ?? "Could not refresh staged dispositions.");
+      }
+
+      setStagedImportResult(clearStagedRefreshWarning);
+      setNotice(
+        "Staged dispositions refreshed against the current corpus. No corpus or Anki write was performed.",
+      );
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Could not refresh staged dispositions.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -736,16 +776,16 @@ function App(): React.ReactElement {
       }
 
       applyStagedMutationResponse(response.batch, response.staged);
-      let warning = response.warning;
+      let queueWarning: string | undefined;
       try {
         await load();
       } catch (refreshError) {
-        const refreshWarning = `Import completed, but the normal Queue could not be refreshed: ${refreshError instanceof Error ? refreshError.message : "queue refresh failed."} Reload Queue to see the committed corpus state.`;
-        warning = warning ? `${warning} ${refreshWarning}` : refreshWarning;
+        queueWarning = `Import completed, but the normal Queue could not be refreshed: ${refreshError instanceof Error ? refreshError.message : "queue refresh failed."} Reload Queue to see the committed corpus state.`;
       }
       setStagedImportResult({
         summary: response.result.summary,
-        warning,
+        stagedWarning: response.warning,
+        queueWarning,
       });
       setNotice(
         `Imported selected staged evidence into the normal Inbox: ${response.result.summary.newUnits} new, ${response.result.summary.evidenceAdded} evidence additions, ${response.result.summary.unchanged} already represented. No item was marked Ready automatically.`,
@@ -1710,6 +1750,7 @@ function App(): React.ReactElement {
           onEdit={editStagedCandidate}
           onCommit={commitStagedCandidates}
           onDiscard={discardStagedCandidates}
+          onRefresh={refreshStagedDispositions}
           onBack={showQueue}
         />
       )}

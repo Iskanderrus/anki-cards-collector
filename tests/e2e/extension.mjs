@@ -385,7 +385,7 @@ let e2eStage = "launch";
 const e2eWatchdog = setTimeout(() => {
   console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
   process.exit(1);
-}, 180000);
+}, 240000);
 e2eWatchdog.unref();
 
 function markE2eStage(stage) {
@@ -2172,17 +2172,18 @@ try {
   }).waitFor();
   await lateRow.waitFor({ state: "detached" });
 
-  markE2eStage("accp021-post-commit-refresh-warning");
+  markE2eStage("accp022-staged-refresh-reclassification");
+  const postCommitSurface = "post-commit-refresh-shared-he";
   const postCommitEvidence = [
     {
-      surfaceText: "post-commit-refresh-a-he",
+      surfaceText: postCommitSurface,
       context: "first staged item committed before refresh failure",
       language: "he",
       source: e2eBatchSource,
       capturedAt: "2026-09-22T15:40:00.000Z",
     },
     {
-      surfaceText: "post-commit-refresh-b-he",
+      surfaceText: postCommitSurface,
       context: "second staged item must remain staged",
       language: "he",
       source: e2eBatchSource,
@@ -2193,10 +2194,10 @@ try {
     panel,
     {
       type: "E2E_REPLACE_STAGED_BATCH",
-      batchId: "accp021-post-commit-refresh",
+      batchId: "accp022-post-commit-refresh",
       evidence: postCommitEvidence,
     },
-    "ACCP-021 post-commit refresh failure fixture",
+    "ACCP-022 post-commit refresh recovery fixture",
   );
   assert.equal(postCommitBatch?.ok, true, postCommitBatch?.error);
   assert.deepEqual(
@@ -2204,26 +2205,31 @@ try {
     ["new", "new"],
   );
 
+  const committedCandidateId = postCommitBatch.batch.candidates[0].id;
+  const remainingCandidateId = postCommitBatch.batch.candidates[1].id;
+
   await panel.getByRole("button", { name: "Queue", exact: true }).click();
   await panel.getByRole("button", { name: /^Staged/ }).click();
   const committedBeforeRefreshRow = stagedReview.locator(".staged-review-row").filter({
-    hasText: "post-commit-refresh-a-he",
+    hasText: "first staged item committed before refresh failure",
   });
   const remainingAfterRefreshRow = stagedReview.locator(".staged-review-row").filter({
-    hasText: "post-commit-refresh-b-he",
+    hasText: "second staged item must remain staged",
   });
+  await committedBeforeRefreshRow.getByText("New", { exact: true }).waitFor();
+  await remainingAfterRefreshRow.getByText("New", { exact: true }).waitFor();
   await committedBeforeRefreshRow.getByRole("checkbox").check();
 
   const failPostCommitRefresh = await sendPanelMessage(
     panel,
     { type: "E2E_FAIL_NEXT_POST_COMMIT_STAGED_REFRESH" },
-    "ACCP-021 post-commit staged refresh failure",
+    "ACCP-022 post-commit staged refresh failure",
   );
   assert.equal(failPostCommitRefresh?.ok, true);
 
   await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
   await stagedReview.locator(".staged-import-result", {
-    hasText: "Corpus import completed, but remaining staged evidence could not be reclassified",
+    hasText: "Use Refresh staged before relying on the remaining disposition labels",
   }).waitFor();
   assert.equal(
     await panel.locator(".notice.error").count(),
@@ -2232,28 +2238,99 @@ try {
   );
   await committedBeforeRefreshRow.waitFor({ state: "detached" });
   await remainingAfterRefreshRow.waitFor();
+  await remainingAfterRefreshRow.getByText("New", { exact: true }).waitFor();
   await stagedReview.getByText("1 visible of 1 staged").waitFor();
 
   const postCommitReadback = await sendPanelMessage(
     panel,
     { type: "GET_STAGED_BATCH" },
-    "ACCP-021 post-commit staged readback",
+    "ACCP-022 stale staged readback before explicit refresh",
   );
   assert.equal(postCommitReadback?.ok, true, postCommitReadback?.error);
-  assert.deepEqual(
-    postCommitReadback.batch.candidates.map((candidate) => candidate.surfaceText),
-    ["post-commit-refresh-b-he"],
-    "Only the unselected candidate may remain staged after durable corpus success.",
+  assert.equal(postCommitReadback.batch.candidates.length, 1);
+  assert.equal(postCommitReadback.batch.candidates[0].id, remainingCandidateId);
+  assert.equal(postCommitReadback.batch.candidates[0].disposition, "new");
+  assert.notEqual(
+    postCommitReadback.batch.candidates[0].id,
+    committedCandidateId,
+    "The committed candidate must never reappear in Staged.",
   );
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
-  await queueRowForTerm(panel, "post-commit-refresh-a-he");
-  assert.equal(
-    await panel.locator(".queue-row").filter({ hasText: "post-commit-refresh-b-he" }).count(),
-    0,
-    "The unselected candidate must not be committed when remaining staged refresh fails.",
+  await remainingAfterRefreshRow.getByRole("checkbox").check();
+
+  const failExplicitRefresh = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_EXPLICIT_STAGED_REFRESH" },
+    "ACCP-022 explicit staged refresh failure",
   );
-  await panel.getByRole("button", { name: /^Staged/ }).click();
+  assert.equal(failExplicitRefresh?.ok, true);
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await panel.locator(".notice.error", {
+    hasText: "Could not refresh staged dispositions",
+  }).waitFor();
+  await remainingAfterRefreshRow.getByText("New", { exact: true }).waitFor();
+  assert.equal(
+    await remainingAfterRefreshRow.getByRole("checkbox").isChecked(),
+    true,
+    "A failed explicit refresh must retain the staged candidate and its selection.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${committedCandidateId}"]`).count(),
+    0,
+    "A failed explicit refresh must not restore the committed candidate.",
+  );
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await remainingAfterRefreshRow.getByText("More evidence", { exact: true }).waitFor();
+  await panel.locator(".notice", {
+    hasText: "Staged dispositions refreshed against the current corpus",
+  }).waitFor();
+  assert.equal(
+    await remainingAfterRefreshRow.getByRole("checkbox").isChecked(),
+    true,
+    "A successful explicit refresh must preserve selection for the same staged candidate ID.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${committedCandidateId}"]`).count(),
+    0,
+    "Explicit refresh must never restore the committed candidate.",
+  );
+
+  const dropInMemoryBatch = await sendPanelMessage(
+    panel,
+    { type: "E2E_DROP_IN_MEMORY_STAGED_BATCH" },
+    "ACCP-022 worker reconstruction fixture",
+  );
+  assert.equal(dropInMemoryBatch?.ok, true, dropInMemoryBatch?.error);
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await remainingAfterRefreshRow.getByText("More evidence", { exact: true }).waitFor();
+  assert.equal(
+    await remainingAfterRefreshRow.getAttribute("data-staged-id"),
+    remainingCandidateId,
+    "MV3 worker reconstruction must preserve the surviving staged candidate ID.",
+  );
+  assert.equal(
+    await remainingAfterRefreshRow.getByRole("checkbox").isChecked(),
+    true,
+    "MV3 worker reconstruction must preserve selection keyed by the staged candidate ID.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${committedCandidateId}"]`).count(),
+    0,
+    "Worker reconstruction must not reuse the committed candidate ID.",
+  );
+
+  const reconstructedReadback = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-022 reconstructed staged readback",
+  );
+  assert.equal(reconstructedReadback?.ok, true, reconstructedReadback?.error);
+  assert.equal(reconstructedReadback.batch.candidates.length, 1);
+  assert.equal(reconstructedReadback.batch.candidates[0].id, remainingCandidateId);
+  assert.equal(reconstructedReadback.batch.candidates[0].disposition, "repeated-evidence");
 
   const stagedAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -2267,10 +2344,144 @@ try {
   assert.equal(
     ankiRequests.length,
     0,
-    "Filtering, editing, importing-to-Inbox, resolving, and discarding staged evidence must never call Anki.",
+    "Filtering, editing, importing-to-Inbox, resolving, refreshing, and discarding staged evidence must never call Anki.",
   );
 
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "1 occurrence added to existing units",
+  }).waitFor();
+  await remainingAfterRefreshRow.waitFor({ state: "detached" });
+
   await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const refreshedCorpusRow = await queueRowForTerm(panel, postCommitSurface);
+  await refreshedCorpusRow.getByText("inbox", { exact: true }).waitFor();
+  await refreshedCorpusRow.getByText(/2 occurrences/).waitFor();
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: postCommitSurface }).count(),
+    1,
+    "The same-surface recovery path must keep one lexical unit and add only the later occurrence.",
+  );
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Explicit refresh and the subsequent normal Inbox import must not call Anki.",
+  );
+
+  markE2eStage("accp022-double-persistence-reconstruction");
+  const journalSurface = "double-persistence-recovery-shared-he";
+  const journalBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp022-double-persistence",
+      evidence: [
+        {
+          surfaceText: journalSurface,
+          context: "committed while both staged snapshot writes fail",
+          language: "he",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-22T15:50:00.000Z",
+        },
+        {
+          surfaceText: journalSurface,
+          context: "unselected evidence must survive reconstruction",
+          language: "he",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-22T15:51:00.000Z",
+        },
+      ],
+    },
+    "ACCP-022 double staged-persistence failure fixture",
+  );
+  assert.equal(journalBatch?.ok, true, journalBatch?.error);
+  const journalCommittedId = journalBatch.batch.candidates[0].id;
+  const journalRemainingId = journalBatch.batch.candidates[1].id;
+  assert.deepEqual(
+    journalBatch.batch.candidates.map((candidate) => candidate.disposition),
+    ["new", "new"],
+  );
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const journalCommittedRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "committed while both staged snapshot writes fail",
+  });
+  const journalRemainingRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "unselected evidence must survive reconstruction",
+  });
+  await journalCommittedRow.getByRole("checkbox").check();
+
+  const failBothSnapshotWrites = await sendPanelMessage(
+    panel,
+    { type: "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE", count: 2 },
+    "ACCP-022 double post-commit staged snapshot failure",
+  );
+  assert.equal(failBothSnapshotWrites?.ok, true);
+
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "committed-consumption journal was retained",
+  }).waitFor();
+  await journalCommittedRow.waitFor({ state: "detached" });
+  await journalRemainingRow.getByText("More evidence", { exact: true }).waitFor();
+
+  const dropJournalBatchMemory = await sendPanelMessage(
+    panel,
+    { type: "E2E_DROP_IN_MEMORY_STAGED_BATCH" },
+    "ACCP-022 double-failure worker reconstruction",
+  );
+  assert.equal(dropJournalBatchMemory?.ok, true, dropJournalBatchMemory?.error);
+
+  await stagedReview.getByRole("button", { name: "Refresh staged", exact: true }).click();
+  await journalRemainingRow.getByText("More evidence", { exact: true }).waitFor();
+  assert.equal(
+    await journalRemainingRow.getAttribute("data-staged-id"),
+    journalRemainingId,
+    "Consumption-journal reconstruction must preserve the unselected candidate ID.",
+  );
+  assert.equal(
+    await stagedReview.locator(`[data-staged-id="${journalCommittedId}"]`).count(),
+    0,
+    "A candidate committed before two failed snapshot writes must not reappear after reconstruction.",
+  );
+
+  const journalReadback = await sendPanelMessage(
+    panel,
+    { type: "GET_STAGED_BATCH" },
+    "ACCP-022 journal-protected reconstructed staged readback",
+  );
+  assert.equal(journalReadback?.ok, true, journalReadback?.error);
+  assert.equal(journalReadback.batch.candidates.length, 1);
+  assert.equal(journalReadback.batch.candidates[0].id, journalRemainingId);
+  assert.equal(journalReadback.batch.candidates[0].disposition, "repeated-evidence");
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const journalCorpusRowBeforeSecondImport = await queueRowForTerm(panel, journalSurface);
+  await journalCorpusRowBeforeSecondImport.getByText(/1 occurrence/).waitFor();
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: journalSurface }).count(),
+    1,
+    "The double-persistence recovery path must mutate the corpus exactly once before B is imported.",
+  );
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  await journalRemainingRow.getByRole("checkbox").check();
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await journalRemainingRow.waitFor({ state: "detached" });
+
+  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  const journalCorpusRowAfterSecondImport = await queueRowForTerm(panel, journalSurface);
+  await journalCorpusRowAfterSecondImport.getByText(/2 occurrences/).waitFor();
+  assert.equal(
+    await panel.locator(".queue-row").filter({ hasText: journalSurface }).count(),
+    1,
+    "The protected restart path must retain one lexical unit while adding B once.",
+  );
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Committed-consumption journaling and reconstruction must not invoke Anki.",
+  );
 
   markE2eStage("post-accp018-regression-suite");
   // ACCP-003: a canonical edit that would merge independently exported units is

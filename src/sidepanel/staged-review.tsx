@@ -24,7 +24,14 @@ type DispositionFilter = "all" | CandidateDisposition;
 
 export interface StagedImportResult {
   summary: BatchCommitSummary;
-  warning?: string;
+  stagedWarning?: string;
+  queueWarning?: string;
+}
+
+export function clearStagedRefreshWarning(
+  result: StagedImportResult | null,
+): StagedImportResult | null {
+  return result ? { ...result, stagedWarning: undefined } : result;
 }
 
 interface StagedReviewProps {
@@ -35,6 +42,7 @@ interface StagedReviewProps {
   onEdit(candidateId: string, changes: BatchCandidateEdit): Promise<void>;
   onCommit(candidateIds: string[], resolutions: Record<string, string>): Promise<void>;
   onDiscard(candidateIds: string[]): Promise<void>;
+  onRefresh(): Promise<void>;
   onBack(): void;
 }
 
@@ -67,6 +75,7 @@ export function StagedReview({
   onEdit,
   onCommit,
   onDiscard,
+  onRefresh,
   onBack,
 }: StagedReviewProps): React.ReactElement {
   const [filter, setFilter] = useState<DispositionFilter>("all");
@@ -271,7 +280,17 @@ export function StagedReview({
             corpus and completes ordinary review.
           </p>
         </div>
-        <button className="ghost" type="button" onClick={onBack}>Back to queue</button>
+        <div className="staged-review-head-actions">
+          <button
+            className="ghost"
+            type="button"
+            disabled={busy || candidates.length === 0}
+            onClick={() => void onRefresh()}
+          >
+            Refresh staged
+          </button>
+          <button className="ghost" type="button" disabled={busy} onClick={onBack}>Back to queue</button>
+        </div>
       </div>
 
       <div className="staged-filter-grid">
@@ -551,7 +570,8 @@ export function StagedReview({
           <span>{importResult.summary.evidenceAdded} occurrence{importResult.summary.evidenceAdded === 1 ? "" : "s"} added to existing units</span>
           <span>{importResult.summary.unchanged} already represented / no-op</span>
           <span>{importResult.summary.needsReview} still require manual review</span>
-          {importResult.warning && <span>{importResult.warning}</span>}
+          {importResult.stagedWarning && <span>{importResult.stagedWarning}</span>}
+          {importResult.queueWarning && <span>{importResult.queueWarning}</span>}
         </div>
       )}
 

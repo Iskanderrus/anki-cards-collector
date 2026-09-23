@@ -33,12 +33,26 @@ type VisibleContentResponse =
 
 const batchPipeline = new BatchCapturePipeline(repository);
 const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
+const STAGED_CONSUMPTION_SESSION_KEY = "collectorStagedConsumptionV1";
 const VISIBLE_SESSION_OWNER_KEY = "collectorVisibleSessionOwnerV1";
 
-interface StoredStagedBatch {
+interface StoredStagedBatchV1 {
   version: 1;
   batchId: string;
   evidence: BatchCaptureEvidence[];
+}
+
+interface StoredStagedBatchV2 {
+  version: 2;
+  batch: BatchCaptureResult;
+}
+
+type StoredStagedBatch = StoredStagedBatchV1 | StoredStagedBatchV2;
+
+interface StoredStagedConsumption {
+  version: 1;
+  batchId: string;
+  candidateIds: string[];
 }
 
 interface StoredVisibleSessionOwner {
@@ -49,9 +63,10 @@ interface StoredVisibleSessionOwner {
 
 let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
-let failNextStagedBatchPersistenceForE2E = false;
+let stagedBatchPersistenceFailuresRemainingForE2E = 0;
 let failNextStagedCommitForE2E = false;
 let failNextPostCommitStagedRefreshForE2E = false;
+let failNextExplicitStagedRefreshForE2E = false;
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
   return {
@@ -70,27 +85,92 @@ function evidenceFromResult(result: BatchCaptureResult): BatchCaptureEvidence[] 
   );
 }
 
-function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+function isStoredEvidence(value: unknown): value is BatchCaptureEvidence {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<StoredStagedBatch>;
-  if (candidate.version !== 1 || typeof candidate.batchId !== "string" || !candidate.batchId.trim()) {
+  const evidence = value as Partial<BatchCaptureEvidence>;
+  return typeof evidence.surfaceText === "string"
+    && typeof evidence.context === "string"
+    && typeof evidence.language === "string"
+    && typeof evidence.capturedAt === "string"
+    && Boolean(evidence.source)
+    && typeof evidence.source?.kind === "string"
+    && typeof evidence.source?.adapter === "string"
+    && typeof evidence.source?.url === "string"
+    && typeof evidence.source?.title === "string";
+}
+
+function isStoredStagedConsumption(value: unknown): value is StoredStagedConsumption {
+  if (!value || typeof value !== "object") return false;
+  const consumption = value as Partial<StoredStagedConsumption>;
+  return consumption.version === 1
+    && typeof consumption.batchId === "string"
+    && Boolean(consumption.batchId.trim())
+    && Array.isArray(consumption.candidateIds)
+    && consumption.candidateIds.every((candidateId) =>
+      typeof candidateId === "string" && Boolean(candidateId.trim())
+    );
+}
+
+function isStoredBatchResult(value: unknown): value is BatchCaptureResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<BatchCaptureResult>;
+  if (
+    typeof result.batchId !== "string" || !result.batchId.trim()
+    || !Number.isInteger(result.receivedCount) || (result.receivedCount ?? -1) < 0
+    || !Number.isInteger(result.ignoredEmptyCount) || (result.ignoredEmptyCount ?? -1) < 0
+    || !Number.isInteger(result.duplicatesCollapsed) || (result.duplicatesCollapsed ?? -1) < 0
+    || (
+      result.nextCandidateNumber !== undefined
+      && (!Number.isInteger(result.nextCandidateNumber) || result.nextCandidateNumber < 1)
+    )
+    || !Array.isArray(result.candidates)
+  ) {
     return false;
   }
-  if (!Array.isArray(candidate.evidence)) return false;
 
-  return candidate.evidence.every((item) => {
-    if (!item || typeof item !== "object") return false;
-    const evidence = item as Partial<BatchCaptureEvidence>;
-    return typeof evidence.surfaceText === "string"
-      && typeof evidence.context === "string"
-      && typeof evidence.language === "string"
-      && typeof evidence.capturedAt === "string"
-      && Boolean(evidence.source)
-      && typeof evidence.source?.kind === "string"
-      && typeof evidence.source?.adapter === "string"
-      && typeof evidence.source?.url === "string"
-      && typeof evidence.source?.title === "string";
-  });
+  return result.candidates.every((candidate) =>
+    isStoredEvidence(candidate)
+    && typeof candidate.id === "string"
+    && typeof candidate.batchId === "string"
+    && typeof candidate.normalizedSurfaceText === "string"
+    && typeof candidate.normalizedContext === "string"
+    && Number.isInteger(candidate.duplicateCount)
+    && candidate.duplicateCount >= 1
+    && typeof candidate.disposition === "string"
+    && Array.isArray(candidate.matchingLexicalUnitIds)
+    && candidate.matchingLexicalUnitIds.every((id) => typeof id === "string")
+  );
+}
+
+function cloneStagedResult(result: BatchCaptureResult): BatchCaptureResult {
+  return {
+    ...result,
+    candidates: result.candidates.map((candidate) => ({
+      ...candidate,
+      source: { ...candidate.source },
+      adapterMetadata: candidate.adapterMetadata ? { ...candidate.adapterMetadata } : undefined,
+      matchingLexicalUnitIds: [...candidate.matchingLexicalUnitIds],
+    })),
+  };
+}
+
+function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+  if (!value || typeof value !== "object") return false;
+  const version = (value as { version?: unknown }).version;
+
+  if (version === 1) {
+    const legacy = value as Partial<StoredStagedBatchV1>;
+    return typeof legacy.batchId === "string"
+      && Boolean(legacy.batchId.trim())
+      && Array.isArray(legacy.evidence)
+      && legacy.evidence.every(isStoredEvidence);
+  }
+
+  if (version === 2) {
+    return isStoredBatchResult((value as Partial<StoredStagedBatchV2>).batch);
+  }
+
+  return false;
 }
 
 async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
@@ -103,30 +183,82 @@ async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
     return null;
   }
 
+  if (value.version === 1) {
+    return {
+      version: 1,
+      batchId: value.batchId,
+      evidence: value.evidence.map(cloneEvidence),
+    };
+  }
+
   return {
-    version: 1,
-    batchId: value.batchId,
-    evidence: value.evidence.map(cloneEvidence),
+    version: 2,
+    batch: cloneStagedResult(value.batch),
   };
 }
 
+async function loadStoredStagedConsumption(): Promise<StoredStagedConsumption | null> {
+  const stored = await chrome.storage.session.get(STAGED_CONSUMPTION_SESSION_KEY);
+  const value = stored[STAGED_CONSUMPTION_SESSION_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredStagedConsumption(value)) {
+    await chrome.storage.session.remove(STAGED_CONSUMPTION_SESSION_KEY);
+    return null;
+  }
+
+  return {
+    version: 1,
+    batchId: value.batchId,
+    candidateIds: [...new Set(value.candidateIds)],
+  };
+}
+
+async function recordStagedConsumption(
+  batchId: string,
+  candidateIds: readonly string[],
+): Promise<void> {
+  const normalizedIds = [...new Set(candidateIds.map((candidateId) => candidateId.trim()).filter(Boolean))];
+  if (normalizedIds.length === 0) return;
+
+  const existing = await loadStoredStagedConsumption();
+  const combined = existing?.batchId === batchId
+    ? [...new Set([...existing.candidateIds, ...normalizedIds])]
+    : normalizedIds;
+  const payload: StoredStagedConsumption = {
+    version: 1,
+    batchId,
+    candidateIds: combined,
+  };
+  await chrome.storage.session.set({ [STAGED_CONSUMPTION_SESSION_KEY]: payload });
+}
+
+async function clearStoredStagedConsumption(expectedBatchId?: string): Promise<void> {
+  if (expectedBatchId) {
+    const existing = await loadStoredStagedConsumption();
+    if (!existing || existing.batchId !== expectedBatchId) return;
+  }
+  await chrome.storage.session.remove(STAGED_CONSUMPTION_SESSION_KEY);
+}
+
 async function persistStagedBatch(result: BatchCaptureResult | null): Promise<void> {
-  if (__COLLECTOR_E2E__ && failNextStagedBatchPersistenceForE2E) {
-    failNextStagedBatchPersistenceForE2E = false;
+  if (__COLLECTOR_E2E__ && stagedBatchPersistenceFailuresRemainingForE2E > 0) {
+    stagedBatchPersistenceFailuresRemainingForE2E -= 1;
     throw new Error("Injected staged-session persistence failure.");
   }
 
   if (!result || result.candidates.length === 0) {
     await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    await clearStoredStagedConsumption().catch(() => undefined);
     return;
   }
 
-  const payload: StoredStagedBatch = {
-    version: 1,
-    batchId: result.batchId,
-    evidence: evidenceFromResult(result),
+  const payload: StoredStagedBatchV2 = {
+    version: 2,
+    batch: cloneStagedResult(result),
   };
   await chrome.storage.session.set({ [STAGED_BATCH_SESSION_KEY]: payload });
+  await clearStoredStagedConsumption(result.batchId).catch(() => undefined);
 }
 
 function withStagedBatchLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -140,13 +272,109 @@ async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> 
   if (active) return active;
 
   const stored = await loadStoredStagedBatch();
-  if (!stored) return null;
+  const consumption = await loadStoredStagedConsumption();
+  if (!stored) {
+    if (consumption) {
+      await clearStoredStagedConsumption(consumption.batchId).catch(() => undefined);
+    }
+    return null;
+  }
 
-  return batchPipeline.stageBatch(stored.batchId, stored.evidence);
+  const batchId = stored.version === 1 ? stored.batchId : stored.batch.batchId;
+  let shouldCompactSnapshot = stored.version === 1;
+
+  try {
+    if (stored.version === 1) {
+      await batchPipeline.stageBatch(stored.batchId, stored.evidence);
+    } else {
+      batchPipeline.restoreActiveBatch(stored.batch);
+    }
+  } catch (error) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    batchPipeline.discard();
+    throw error;
+  }
+
+  if (consumption?.batchId === batchId) {
+    const current = batchPipeline.getActiveBatch();
+    const presentConsumedIds = current?.candidates
+      .filter((candidate) => consumption.candidateIds.includes(candidate.id))
+      .map((candidate) => candidate.id) ?? [];
+    if (presentConsumedIds.length > 0) {
+      await batchPipeline.discardCandidates(presentConsumedIds);
+    }
+    shouldCompactSnapshot = true;
+  } else if (consumption) {
+    await clearStoredStagedConsumption(consumption.batchId).catch(() => undefined);
+  }
+
+  const refreshed = await batchPipeline.refreshActiveBatch();
+  if (shouldCompactSnapshot) {
+    try {
+      await persistStagedBatch(refreshed);
+    } catch {
+      // Keep the restored in-memory batch usable. If compaction fails, the
+      // consumption journal remains available for the next reconstruction.
+    }
+  }
+  return refreshed;
 }
 
 async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
   return withStagedBatchLock(() => restoreStagedBatchUnlocked());
+}
+
+async function refreshStagedBatch() {
+  return withStagedBatchLock(async () => {
+    let existing = batchPipeline.getActiveBatch();
+    let restoreRepositoryListForE2E: (() => void) | undefined;
+
+    try {
+      existing = existing ?? await restoreStagedBatchUnlocked();
+      if (!existing) {
+        return {
+          ok: true as const,
+          batch: null,
+          staged: stagedSummary(null),
+        };
+      }
+
+      if (__COLLECTOR_E2E__ && failNextExplicitStagedRefreshForE2E) {
+        failNextExplicitStagedRefreshForE2E = false;
+        const originalList = repository.list.bind(repository);
+        let injected = false;
+        repository.list = async (status) => {
+          if (!injected) {
+            injected = true;
+            throw new Error("Injected explicit staged refresh failure.");
+          }
+          return originalList(status);
+        };
+        restoreRepositoryListForE2E = () => {
+          repository.list = originalList;
+        };
+      }
+
+      const refreshed = await batchPipeline.refreshActiveBatch();
+      await persistStagedBatch(refreshed);
+      return {
+        ok: true as const,
+        batch: refreshed,
+        staged: stagedSummary(refreshed),
+      };
+    } catch (error) {
+      const retained = batchPipeline.getActiveBatch() ?? existing;
+      return {
+        ok: false as const,
+        error: `Could not refresh staged dispositions: ${errorMessage(error)} Staged evidence was retained and can be retried safely.`,
+        ...(retained
+          ? { batch: retained, staged: stagedSummary(retained) }
+          : {}),
+      };
+    } finally {
+      restoreRepositoryListForE2E?.();
+    }
+  });
 }
 
 function isStoredVisibleSessionOwner(value: unknown): value is StoredVisibleSessionOwner {
@@ -363,7 +591,7 @@ async function stageVisibleEvidence(
       await persistStagedBatch(result);
     } catch (error) {
       if (existing) {
-        await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+        batchPipeline.restoreActiveBatch(existing);
       } else {
         batchPipeline.discard();
       }
@@ -381,13 +609,12 @@ async function mutateStagedBatch(
     const existing = await restoreStagedBatchUnlocked();
     if (!existing) throw new Error("No staged batch is active.");
 
-    const previousEvidence = evidenceFromResult(existing);
     try {
       const result = await operation(existing);
       await persistStagedBatch(result);
       return result;
     } catch (error) {
-      await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+      batchPipeline.restoreActiveBatch(existing);
       throw error;
     }
   });
@@ -470,9 +697,20 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
 
     const active = batchPipeline.getActiveBatch();
     let warning = result.warning;
+    let consumptionJournalRecorded = false;
 
     try {
+      await recordStagedConsumption(existing.batchId, request.candidateIds);
+      consumptionJournalRecorded = true;
+    } catch {
+      // The updated staged snapshot below is sufficient if it persists. If both
+      // paths fail, retry the consumption journal before returning committed success.
+    }
+
+    let snapshotPersisted = false;
+    try {
       await persistStagedBatch(active);
+      snapshotPersisted = true;
     } catch (error) {
       try {
         // A transient session-storage failure must not make a completed corpus
@@ -480,10 +718,27 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
         // if it remains unavailable, a stale snapshot reclassifies committed
         // evidence as already represented on the next worker start.
         await persistStagedBatch(active);
+        snapshotPersisted = true;
       } catch {
-        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Reload Staged review before retrying; committed evidence will reclassify as already represented.`;
+        if (!consumptionJournalRecorded) {
+          try {
+            await recordStagedConsumption(existing.batchId, request.candidateIds);
+            consumptionJournalRecorded = true;
+          } catch {
+            // The warning below accurately reports that transient recovery state
+            // could not be durably rewritten; corpus success still remains final.
+          }
+        }
+        const recoveryDetail = consumptionJournalRecorded
+          ? " A committed-consumption journal was retained so selected candidates stay consumed after worker reconstruction."
+          : " Keep this Staged view open until Refresh staged succeeds; transient recovery state could not be durably rewritten.";
+        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)}${recoveryDetail} Use Refresh staged before retrying.`;
         warning = warning ? `${warning} ${persistenceWarning}` : persistenceWarning;
       }
+    }
+
+    if (snapshotPersisted) {
+      await clearStoredStagedConsumption(existing.batchId).catch(() => undefined);
     }
 
     chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
@@ -713,7 +968,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 if (__COLLECTOR_E2E__) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE") {
-      failNextStagedBatchPersistenceForE2E = true;
+      const requestedCount = Number(message.count ?? 1);
+      stagedBatchPersistenceFailuresRemainingForE2E = Number.isInteger(requestedCount)
+        ? Math.max(1, requestedCount)
+        : 1;
       sendResponse({ ok: true });
       return false;
     }
@@ -726,6 +984,18 @@ if (__COLLECTOR_E2E__) {
 
     if (message?.type === "E2E_FAIL_NEXT_POST_COMMIT_STAGED_REFRESH") {
       failNextPostCommitStagedRefreshForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "E2E_FAIL_NEXT_EXPLICIT_STAGED_REFRESH") {
+      failNextExplicitStagedRefreshForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "E2E_DROP_IN_MEMORY_STAGED_BATCH") {
+      batchPipeline.discard();
       sendResponse({ ok: true });
       return false;
     }
@@ -933,6 +1203,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void currentStagedBatch()
       .then((batch) => sendResponse({ ok: true, batch }))
       .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "REFRESH_STAGED_BATCH") {
+    void refreshStagedBatch().then(sendResponse);
     return true;
   }
 
