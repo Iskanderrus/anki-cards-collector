@@ -147,6 +147,7 @@ describe("export preview", () => {
 
   it("translates normal recovery failures into user actions", () => {
     expect(friendlyExportFailure("Failed to fetch AnkiConnect")).toMatch(/Open Anki Desktop/);
+    expect(friendlyExportFailure("Anki unavailable fixture")).toMatch(/Open Anki Desktop/);
     expect(friendlyExportFailure("field mapping changed")).toMatch(/revalidate/i);
     expect(friendlyExportFailure("destination deck is missing")).toMatch(/destination/i);
   });

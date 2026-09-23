@@ -139,6 +139,7 @@ export function friendlyExportFailure(error: string): string {
   if (
     lower.includes("failed to fetch")
     || lower.includes("network")
+    || lower.includes("anki unavailable")
     || lower.includes("ankiconnect")
     || lower.includes("connect")
   ) {
