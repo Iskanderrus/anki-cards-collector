@@ -42,7 +42,7 @@ const STEPS: Step[] = [
     title: "Staged material stays separate",
     body: "Explicit Duolingo/backfill scans first collect visible material into Staged.",
     points: [
-      "Staged material has not entered your normal corpus yet.",
+      "Staged material has not entered your normal collection yet.",
       "Accepting Staged evidence moves it to Inbox, never directly to Ready.",
       "Normal use does not require uploading study material to a remote Collector service.",
     ],
