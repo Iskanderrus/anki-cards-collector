@@ -54,6 +54,7 @@ function blockedReason(item: CollectedItem, error: unknown): string {
     lower.includes("mapping")
     || lower.includes("field")
     || lower.includes("note type")
+    || lower.includes("note-type")
     || lower.includes("model")
   ) {
     return "This Anki profile needs attention. Open Settings → Anki profiles and revalidate its note type and field mapping.";
