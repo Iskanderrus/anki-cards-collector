@@ -433,7 +433,7 @@ async function openExportPreview(panel) {
 
 async function exportReady(panel) {
   const dialog = await openExportPreview(panel);
-  const execute = dialog.getByRole("button", { name: /^Export \\d+ items?$/ });
+  const execute = dialog.getByRole("button", { name: /^Export \d+ items?$/ });
   assert.equal(await execute.isDisabled(), false, "At least one Ready item should be exportable.");
   await execute.click();
   await dialog.waitFor({ state: "detached" });
@@ -567,6 +567,43 @@ try {
   const panel = await context.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await panel.locator("h1").waitFor();
+
+  markE2eStage("accp012-first-run-onboarding");
+  let onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
+  await onboarding.waitFor();
+  assert.match(await onboarding.innerText(), /Collector does not continuously watch your browsing/);
+  const onboardingAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    onboardingAccessibility.violations.length,
+    0,
+    "First-run onboarding accessibility violations:\n"
+      + JSON.stringify(onboardingAccessibility.violations, null, 2),
+  );
+  await onboarding.getByRole("button", { name: "Skip introduction" }).click();
+  await onboarding.waitFor({ state: "detached" });
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await panel.waitForTimeout(150);
+  assert.equal(
+    await panel.getByRole("dialog").count(),
+    0,
+    "Skipped onboarding must not reappear on the next side-panel load.",
+  );
+
+  await openSettings(panel);
+  await panel.getByRole("button", { name: "View introduction" }).click();
+  onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
+  await onboarding.waitFor();
+  for (let step = 0; step < 3; step += 1) {
+    await onboarding.getByRole("button", { name: "Next" }).click();
+  }
+  await onboarding.getByText(/Staged material has not entered your normal corpus yet/).waitFor();
+  await onboarding.getByRole("button", { name: "Finish" }).click();
+  await onboarding.waitFor({ state: "detached" });
+  await ensureQueue(panel);
   assert.equal(await termCount(panel), 0);
 
   // ACCP-021 starts with a dedicated empty staged surface. Staged review has no
