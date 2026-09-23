@@ -572,6 +572,7 @@ try {
   let onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
   await onboarding.waitFor();
   assert.match(await onboarding.innerText(), /Collector does not continuously watch your browsing/);
+  onboarding = panel.locator(".onboarding-dialog");
   const onboardingAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -599,6 +600,7 @@ try {
   await panel.getByRole("button", { name: "View introduction" }).click();
   onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
   await onboarding.waitFor();
+  onboarding = panel.locator(".onboarding-dialog");
   for (let step = 0; step < 3; step += 1) {
     await onboarding.getByRole("button", { name: "Next" }).click();
   }
