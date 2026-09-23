@@ -1302,7 +1302,12 @@ try {
   );
 
   ankiRequests.length = 0;
-  await exportReady(panel);
+  const mixedDestinationPreview = await openExportPreview(panel);
+  assert.match(await mixedDestinationPreview.innerText(), /Hebrew RU/);
+  assert.match(await mixedDestinationPreview.innerText(), /Serbian RU/);
+  assert.match(await mixedDestinationPreview.innerText(), /2 Ready/);
+  await mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ }).click();
+  await mixedDestinationPreview.waitFor({ state: "detached" });
   await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
 
   const addNotes = ankiRequests.filter((request) => request.action === "addNote");
@@ -1478,6 +1483,22 @@ try {
   );
   const afterOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   assert.deepEqual(afterOfflineSettings, beforeOfflineSettings, "Offline discovery must not rewrite saved profile configuration.");
+
+  markE2eStage("accp012-anki-offline-export");
+  await ensureQueue(panel);
+  const offlineCorpusCount = await termCount(panel);
+  await exportReady(panel);
+  await panel.locator(".notice.error", {
+    hasText: "Anki isn't available. Open Anki Desktop",
+  }).waitFor();
+  assert.equal(await termCount(panel), offlineCorpusCount, "Offline export must not remove local study material.");
+  const afterOfflineExportSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.deepEqual(
+    afterOfflineExportSettings,
+    beforeOfflineSettings,
+    "Offline export must not erase or rewrite saved profile configuration.",
+  );
+  await openSettings(panel);
 
   ankiAvailable = true;
   await clickPanelButton(panel, "Refresh from Anki");
