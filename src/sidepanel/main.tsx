@@ -1260,7 +1260,7 @@ function App(): React.ReactElement {
       setError(
         reconcileError instanceof Error
           ? reconcileError.message
-          : "Retry Send ready to Anki before changing this deck.",
+          : "Retry Export Ready before changing this deck.",
       );
       return;
     }
@@ -2737,7 +2737,7 @@ function App(): React.ReactElement {
                         disabled={busy || reconciliationPending}
                         title={
                           reconciliationPending
-                            ? "Retry Send ready to Anki before deleting this item."
+                            ? "Retry Export Ready before deleting this item."
                             : undefined
                         }
                         onClick={() => void repository.remove(unit.id).then(async () => {
