@@ -60,7 +60,7 @@ function sourceLabel(candidate: BatchCaptureCandidate): string {
   } catch {
     // Keep the human-readable title/URL fallback.
   }
-  return [source.adapter, location].filter(Boolean).join(" · ");
+  return location;
 }
 
 function normalizedSearch(value: string): string {
