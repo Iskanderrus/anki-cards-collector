@@ -152,17 +152,19 @@ async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
 
 async function refreshStagedBatch() {
   return withStagedBatchLock(async () => {
-    const existing = await restoreStagedBatchUnlocked();
-    if (!existing) {
-      return {
-        ok: true as const,
-        batch: null,
-        staged: stagedSummary(null),
-      };
-    }
-
+    let existing = batchPipeline.getActiveBatch();
     let restoreRepositoryListForE2E: (() => void) | undefined;
+
     try {
+      existing = existing ?? await restoreStagedBatchUnlocked();
+      if (!existing) {
+        return {
+          ok: true as const,
+          batch: null,
+          staged: stagedSummary(null),
+        };
+      }
+
       if (__COLLECTOR_E2E__ && failNextExplicitStagedRefreshForE2E) {
         failNextExplicitStagedRefreshForE2E = false;
         const originalList = repository.list.bind(repository);
@@ -191,8 +193,9 @@ async function refreshStagedBatch() {
       return {
         ok: false as const,
         error: `Could not refresh staged dispositions: ${errorMessage(error)} Staged evidence was retained and can be retried safely.`,
-        batch: retained,
-        staged: stagedSummary(retained),
+        ...(retained
+          ? { batch: retained, staged: stagedSummary(retained) }
+          : {}),
       };
     } finally {
       restoreRepositoryListForE2E?.();
