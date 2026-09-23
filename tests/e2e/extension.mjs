@@ -623,6 +623,7 @@ try {
   await clickPanelButton(panel, "Collect");
 
   await panel.locator(".queue-row .term", { hasText: "Aunque llueva" }).waitFor();
+  await panel.locator(".notice", { hasText: "Collected to Inbox" }).waitFor();
   assert.equal(await termCount(panel), 1, "Explicit capture should add one lexical unit.");
   const firstQueueRowAfterCapture = await queueRowForTerm(panel, "Aunque llueva");
   assert.match(
@@ -671,6 +672,28 @@ try {
   await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
 
+  markE2eStage("accp012-sequential-inbox-review");
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  await panel.locator(".detail-heading", { hasText: "Inbox review 1 of 2" }).waitFor();
+  const firstReviewedTerm = await panel.locator(".detail-card .term").innerText();
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-heading", { hasText: "Inbox review 2 of 2" }).waitFor();
+  const secondReviewedTerm = await panel.locator(".detail-card .term").innerText();
+  assert.notEqual(secondReviewedTerm, firstReviewedTerm, "Ready should advance to the next Inbox item.");
+  await panel.keyboard.press("a");
+  await panel.locator(".notice", { hasText: "Inbox reviewed." }).waitFor();
+  await panel.locator(".queue").waitFor();
+
+  // Restore the two baseline fixtures to Inbox so the established keyboard
+  // regression below keeps its original state transitions.
+  for (const term of ["Aunque llueva", "Context menu phrase"]) {
+    const card = await cardForTerm(panel, term);
+    const backToInbox = card.getByRole("button", { name: "Back to inbox" });
+    if (await backToInbox.count()) await backToInbox.click();
+    await card.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+    await ensureQueue(panel);
+  }
+
   // Keyboard review: the first captured item remains active even though the newer item sorts above it.
   await panel.bringToFront();
   const firstRow = await queueRowForTerm(panel, "Aunque llueva");
@@ -715,6 +738,7 @@ try {
   await selectText(contentPage, "#repeat", "Aunque llueva");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: "Added another occurrence" }).waitFor();
   assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
   const firstCard = await cardForTerm(panel, "Aunque llueva");
   await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
