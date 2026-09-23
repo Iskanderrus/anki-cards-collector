@@ -22,7 +22,8 @@ The following work is already part of the current baseline:
 - **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell;
 - **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation;
 - **ACCP-014** — mapped export through existing user-owned Anki note types with fail-closed validation;
-- **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance.
+- **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
+- **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics.
 
 ---
 
@@ -58,11 +59,13 @@ ACCP-014 is now baseline behavior: mapped user-owned note types are pinned by li
 
 Guided language/profile routing, live deck/model identity, mapped-only writes, and real-Anki acceptance are now baseline behavior.
 
-### ACCP-021 — batch backfill review and import — current merge gate
+### ACCP-021 — batch backfill review and import — completed
 
-Depends on completed ACCP-019, ACCP-020, ACCP-011, and the completed ACCP-018 path used by its final real-Anki acceptance.
+ACCP-021 is now baseline behavior. It builds the staged-candidate UI, commits selected evidence into the normal corpus, retains unselected staged evidence, and preserves the irreversible corpus-success boundary when a later staged reclassification read fails.
 
-Builds the staged-candidate UI and commits selected evidence into the normal corpus. Imported evidence remains Inbox material until normal lexical/card review explicitly promotes it.
+### ACCP-022 — staged refresh/reclassification recovery — current merge gate
+
+Small post-ACCP-021 correctness/UX follow-up. An explicit Staged refresh reclassifies the active staged batch against current corpus state without rebuilding source evidence, retrying corpus mutation, promoting items to Ready, or invoking Anki.
 
 ### ACCP-012 — onboarding and user journey
 
@@ -102,14 +105,14 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-021 — batch backfill review/import
+1. ACCP-022 — staged refresh/reclassification recovery
 2. ACCP-012 — onboarding/user journey
 3. ACCP-004 — explicit merge/split
 4. ACCP-005 — learning-card policy v2
 5. ACCP-006 — morphology assistance
 6. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, and ACCP-018 are now baseline work. ACCP-021 is the next linear merge gate and requires browser plus full original-workflow real-Anki acceptance before closure.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, and ACCP-021 are now baseline work. ACCP-022 is the immediate small post-ACCP-021 correctness/UX recovery gate; ACCP-012 remains the next planned product/user-journey gate after it.
 
 ---
 
