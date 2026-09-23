@@ -1949,10 +1949,17 @@ function App(): React.ReactElement {
       {view === "settings" && (
       <section className="settings settings-view" aria-labelledby="settings-title">
         <div className="settings-view-head">
-          <h2 id="settings-title">Settings & Anki</h2>
-          <button className="ghost" type="button" onClick={showQueue}>Back to queue</button>
+          <div>
+            <h2 id="settings-title">Settings</h2>
+            <div className="setting-help">Languages, Anki profiles, privacy, backup, and advanced controls.</div>
+          </div>
+          <div className="settings-head-actions">
+            <button className="ghost" type="button" onClick={() => setOnboardingOpen(true)}>View introduction</button>
+            <button className="ghost" type="button" onClick={showQueue}>Back to Inbox</button>
+          </div>
         </div>
         <div className="settings-grid">
+          <h3 className="settings-task-title">Anki connection & profiles</h3>
           <div className="anki-catalog">
             <div className="anki-catalog-head">
               <div>
@@ -1981,7 +1988,10 @@ function App(): React.ReactElement {
                 <>Showing the last loaded decks. Refresh failed: {catalogState.error}</>
               )}
               {catalogState.kind === "unavailable" && (
-                <>Could not connect to Anki: {catalogState.error}</>
+                <>
+                  Anki isn't available. Your local Inbox and saved profiles are still here.
+                  Open Anki Desktop, make sure AnkiConnect is running, then Refresh from Anki.
+                </>
               )}
             </div>
           </div>
@@ -2004,6 +2014,7 @@ function App(): React.ReactElement {
             onError={setError}
           />
 
+          <h3 className="settings-task-title">Languages & routing</h3>
           <div className="language-decks">
             <div className="anki-catalog-head">
               <div>
@@ -2251,9 +2262,13 @@ function App(): React.ReactElement {
             </section>
           )}
 
-          <details className="advanced-settings">
-            <summary>Advanced</summary>
+          <section className="advanced-settings settings-task-group" aria-labelledby="privacy-backup-advanced-title">
+            <h3 id="privacy-backup-advanced-title" className="settings-task-title">Privacy, backup & advanced</h3>
             <div className="advanced-settings-grid">
+              <p className="setting-help settings-privacy-summary">
+                Captures stay in Collector's local storage. Browsing is not continuously watched.
+                Duolingo collection is explicit, and direct export talks to local AnkiConnect.
+              </p>
           {modelState.kind !== "idle" && (
             <div className="anki-model-inspector" aria-live="polite">
               {modelState.kind === "loading" && <span>Inspecting note type…</span>}
@@ -2364,7 +2379,7 @@ function App(): React.ReactElement {
             </div>
           )}
             </div>
-          </details>
+          </section>
         </div>
       </section>
       )}
@@ -2372,17 +2387,21 @@ function App(): React.ReactElement {
       {view === "detail" && (
         <>
           <div className="detail-heading">
-            <button className="ghost" type="button" onClick={showQueue}>← Back to queue</button>
-            <span className="setting-help">
+            <button className="ghost" type="button" onClick={showQueue}>
+              {reviewSessionItems.length > 0 ? "Exit review" : "← Back to Inbox"}
+            </button>
+            <span className="setting-help" role="status" aria-live="polite">
               {activeItem
-                ? `${Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1)} of ${items.length}`
+                ? reviewSessionItems.length > 0
+                  ? "Inbox review " + Math.max(1, reviewSessionItems.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1) + " of " + reviewSessionItems.length
+                  : "Item " + Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1) + " of " + items.length
                 : "No item selected"}
             </span>
           </div>
       <section className="list detail-list" aria-label="Focused review detail">
         {!activeItem && (
           <div className="empty">
-            Choose an item from the queue to review it.
+            Choose an item from Inbox to review it.
           </div>
         )}
 
@@ -2560,7 +2579,7 @@ function App(): React.ReactElement {
                         {currentDeckName || "choose a deck in Settings"}
                       </span>
                       {binding?.ankiNoteId !== undefined && (
-                        <span className="setting-help">note {binding.ankiNoteId}</span>
+                        <span className="setting-help">Existing linked note</span>
                       )}
                     </div>
 
@@ -2663,17 +2682,28 @@ function App(): React.ReactElement {
 
                   {exportOutcome?.kind === "failed" && (
                     <div className="item-export-result error" role="alert">
-                      Anki export failed: {exportOutcome.error}
+                      <span>{friendlyExportFailure(exportOutcome.error)}</span>
+                      <details>
+                        <summary>Technical detail</summary>
+                        <code>{exportOutcome.error}</code>
+                      </details>
                     </div>
                   )}
                   {exportOutcome?.kind === "exported_untracked" && (
                     <div className="item-export-result warning" role="status">
-                      {exportOutcome.error}
+                      <span>
+                        Export succeeded, but Collector could not save the local Anki link.
+                        Refresh and Retry before changing this destination.
+                      </span>
+                      <details>
+                        <summary>Technical detail</summary>
+                        <code>{exportOutcome.error}</code>
+                      </details>
                     </div>
                   )}
                   {exportOutcome?.kind === "exported" && (
                     <div className="item-export-result success" role="status">
-                      Exported to {exportOutcome.deckName}, Anki note {exportOutcome.noteId}.
+                      Exported successfully to {exportOutcome.deckName}.
                     </div>
                   )}
 
