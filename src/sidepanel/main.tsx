@@ -55,7 +55,11 @@ import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { ReviewQueue } from "./queue";
 import { GuidedProfileSetup } from "./profile-setup";
-import { StagedReview, type StagedImportResult } from "./staged-review";
+import {
+  StagedReview,
+  clearStagedRefreshWarning,
+  type StagedImportResult,
+} from "./staged-review";
 
 type CatalogUiState =
   | { kind: "idle" }
@@ -646,9 +650,7 @@ function App(): React.ReactElement {
         throw new Error(response.error ?? "Could not refresh staged dispositions.");
       }
 
-      setStagedImportResult((current) => current
-        ? { ...current, stagedWarning: undefined }
-        : current);
+      setStagedImportResult(clearStagedRefreshWarning);
       setNotice(
         "Staged dispositions refreshed against the current corpus. No corpus or Anki write was performed.",
       );
