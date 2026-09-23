@@ -53,7 +53,11 @@ import {
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
+import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
+import { Onboarding } from "./onboarding";
+import { ExportPreviewDialog } from "./export-preview-dialog";
+import { buildExportPreview, friendlyExportFailure } from "./export-preview";
 import { GuidedProfileSetup } from "./profile-setup";
 import {
   StagedReview,
@@ -323,6 +327,10 @@ function App(): React.ReactElement {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [reviewSessionIds, setReviewSessionIds] = useState<string[]>([]);
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [exportTechnicalError, setExportTechnicalError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
@@ -458,6 +466,21 @@ function App(): React.ReactElement {
   }, [load]);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadOnboardingState().then(
+      (state) => {
+        if (!cancelled) setOnboardingOpen(!state.dismissed);
+      },
+      () => {
+        if (!cancelled) setOnboardingOpen(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!backfill.status.active) return undefined;
 
     const timer = window.setInterval(() => {
@@ -475,6 +498,18 @@ function App(): React.ReactElement {
   const activeItem = useMemo(
     () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
     [activeId, items],
+  );
+
+  const exportPreview = useMemo(
+    () => buildExportPreview(items, settings, exportBindings),
+    [exportBindings, items, settings],
+  );
+
+  const reviewSessionItems = useMemo(
+    () => reviewSessionIds
+      .map((id) => items.find((item) => item.lexicalUnit.id === id))
+      .filter((item): item is CollectedItem => item !== undefined),
+    [items, reviewSessionIds],
   );
 
   useEffect(() => {
@@ -553,6 +588,8 @@ function App(): React.ReactElement {
 
   function showQueue(): void {
     cancelEdit();
+    setReviewSessionIds([]);
+    setExportPreviewOpen(false);
     setView("queue");
     requestAnimationFrame(() => {
       const currentActiveId = activeIdRef.current;
@@ -566,6 +603,8 @@ function App(): React.ReactElement {
 
   function showStaged(): void {
     cancelEdit();
+    setReviewSessionIds([]);
+    setExportPreviewOpen(false);
     setView("staged");
     void refreshStagedCandidates();
     requestAnimationFrame(() => {
@@ -577,23 +616,60 @@ function App(): React.ReactElement {
 
   function showSettings(): void {
     cancelEdit();
+    setReviewSessionIds([]);
+    setExportPreviewOpen(false);
     closeDeckAnalysis();
     setView("settings");
+  }
+
+  async function dismissIntroduction(): Promise<void> {
+    try {
+      await dismissOnboarding();
+    } finally {
+      setOnboardingOpen(false);
+    }
+  }
+
+  function startInboxReview(): void {
+    const inboxIds = items
+      .filter((item) => item.lexicalUnit.status === "inbox")
+      .map((item) => item.lexicalUnit.id);
+    if (inboxIds.length === 0) {
+      setNotice("Inbox is clear. Collect useful language while reading, or review Staged material.");
+      return;
+    }
+
+    setReviewSessionIds(inboxIds);
+    selectActiveId(inboxIds[0]!);
+    setView("detail");
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+    });
   }
 
   async function capture(): Promise<void> {
     setBusy(true);
     setError("");
     setNotice("");
+    setExportTechnicalError("");
 
     try {
       const response = await chrome.runtime.sendMessage({
         type: "COLLECT_ACTIVE_SELECTION",
         language: captureLanguageForSettings(settings),
-      }) as { ok: boolean; error?: string };
+      }) as {
+        ok: boolean;
+        error?: string;
+        captureKind?: "new" | "occurrence";
+        canonicalText?: string;
+      };
 
       if (!response.ok) throw new Error(response.error ?? "Capture failed.");
-      setNotice("Collected. Review it before exporting.");
+      setNotice(
+        response.captureKind === "occurrence"
+          ? "Added another occurrence to “" + (response.canonicalText ?? "this item") + "”. Keep reading; review it later."
+          : "Collected to Inbox. Keep reading; review it later.",
+      );
       await load();
     } catch (captureError) {
       setError(captureError instanceof Error ? captureError.message : "Capture failed.");
@@ -1032,42 +1108,23 @@ function App(): React.ReactElement {
   }
 
   async function exportToAnki(): Promise<void> {
-    const ready = items.filter((item) => item.lexicalUnit.status === "ready");
-    if (!ready.length) {
-      setError("Mark at least one item as ready first.");
-      return;
-    }
-
-    const blocked = ready.filter((item) => !proposeLearningCard(item).recommended);
-    if (blocked.length > 0) {
-      setError(`${blocked.length} ready item${blocked.length === 1 ? "" : "s"} need review before export.`);
-      return;
-    }
-
-    const legacyCustom = ready.filter((item) => {
-      const binding = exportBindings[item.lexicalUnit.id];
-      const profile = binding
-        ? settings.exportProfiles.find((candidate) => candidate.id === binding.profileId)
-        : undefined;
-      return profile?.mode === "mapped-user-model"
-        && !mappedProfileIsConfigured(profile);
-    });
-    const exportable = ready.filter((item) => !legacyCustom.includes(item));
+    const exportableIds = new Set(exportPreview.exportableIds);
+    const exportable = items.filter((item) => exportableIds.has(item.lexicalUnit.id));
 
     if (exportable.length === 0) {
-      if (legacyCustom.length > 0) {
-        setNotice(
-          `${legacyCustom.length} existing Anki card${legacyCustom.length === 1 ? "" : "s"} use custom note types and were left unchanged.`,
-        );
-      } else {
-        setError("No Ready cards can be exported.");
-      }
+      setError(
+        exportPreview.totalReady === 0
+          ? "Nothing is Ready for export yet. Review Inbox items and explicitly mark the ones you want to study as Ready."
+          : "Ready items are blocked. Review the destination/profile guidance before retrying.",
+      );
       return;
     }
 
+    setExportPreviewOpen(false);
     setBusy(true);
     setError("");
     setNotice("");
+    setExportTechnicalError("");
     setExportOutcomes({});
     setExportProgress({ completed: 0, total: exportable.length });
 
@@ -1085,25 +1142,23 @@ function App(): React.ReactElement {
         report.results.map((result) => [result.id, result]),
       ));
 
-      const parts = [`${report.exported} exported`];
-      if (legacyCustom.length > 0) {
-        parts.push(`${legacyCustom.length} existing custom-card${legacyCustom.length === 1 ? "" : "s"} skipped`);
-      }
-      if (report.failed > 0) parts.push(`${report.failed} failed`);
-      if (report.warnings > 0) parts.push(`${report.warnings} local warning${report.warnings === 1 ? "" : "s"}`);
+      const parts = [String(report.exported) + " exported"];
+      if (exportPreview.blocked > 0) parts.push(String(exportPreview.blocked) + " blocked");
+      if (report.failed > 0) parts.push(String(report.failed) + " failed");
+      if (report.warnings > 0) parts.push(String(report.warnings) + " local warning" + (report.warnings === 1 ? "" : "s"));
 
-      if (report.failed > 0 || report.warnings > 0) {
-        setError(`Anki export finished: ${parts.join(", ")}. See the affected cards below.`);
+      if (report.failed > 0) {
+        setError("Anki export finished with items that need attention: " + parts.join(", ") + ".");
+      } else if (report.warnings > 0) {
+        setNotice("Anki export finished with recoverable warnings: " + parts.join(", ") + ".");
       } else {
-        setNotice(`Anki export finished: ${parts.join(", ")}.`);
+        setNotice("Anki export finished: " + parts.join(", ") + ".");
       }
       await load();
     } catch (ankiError) {
-      setError(
-        ankiError instanceof Error
-          ? `${ankiError.message} Is Anki running with AnkiConnect enabled?`
-          : "Anki export failed.",
-      );
+      const detail = ankiError instanceof Error ? ankiError.message : "Anki export failed.";
+      setExportTechnicalError(detail);
+      setError(friendlyExportFailure(detail));
     } finally {
       setExportProgress(null);
       setBusy(false);
