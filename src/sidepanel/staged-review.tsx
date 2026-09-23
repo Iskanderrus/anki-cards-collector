@@ -14,10 +14,10 @@ const DISPOSITION_LABELS: Record<CandidateDisposition, string> = {
 };
 
 const DISPOSITION_HELP: Record<CandidateDisposition, string> = {
-  new: "No matching lexical unit or observed form is currently represented in the corpus.",
-  "already-represented": "The same persisted evidence is already represented. Importing it is a no-op.",
-  "repeated-evidence": "An existing lexical unit owns this form, but this context/source evidence is new.",
-  "needs-review": "More than one existing lexical unit could own this evidence. Choose the intended owner before import.",
+  new: "This looks new in your collection.",
+  "already-represented": "The same evidence is already in your collection. Importing it would make no change.",
+  "repeated-evidence": "This item already exists, but this context or source is new evidence.",
+  "needs-review": "This evidence matches more than one existing item. Choose the intended item before import.",
 };
 
 type DispositionFilter = "all" | CandidateDisposition;
@@ -274,7 +274,7 @@ export function StagedReview({
     >
       <div className="staged-review-head">
         <div>
-          <h2 id="staged-review-title">Backfill review</h2>
+          <h2 id="staged-review-title">Staged review</h2>
           <p>
             Captured evidence only. Nothing here is Ready or exported until it enters the normal
             corpus and completes ordinary review.
@@ -289,7 +289,7 @@ export function StagedReview({
           >
             Refresh staged
           </button>
-          <button className="ghost" type="button" disabled={busy} onClick={onBack}>Back to queue</button>
+          <button className="ghost" type="button" disabled={busy} onClick={onBack}>Back to Inbox</button>
         </div>
       </div>
 
@@ -352,7 +352,7 @@ export function StagedReview({
 
       {candidates.length === 0 ? (
         <div className="empty staged-empty">
-          No staged evidence. Run an explicit visible backfill scan or session from Queue first.
+          No staged evidence. Run an explicit visible Duolingo scan or session from Inbox first.
         </div>
       ) : visibleCandidates.length === 0 ? (
         <div className="empty staged-empty">
@@ -580,7 +580,7 @@ export function StagedReview({
         <span><kbd>K</kbd>/<kbd>↑</kbd> previous visible</span>
         <span><kbd>Space</kbd> select</span>
         <span><kbd>Enter</kbd> inspect</span>
-        <span><kbd>Esc</kbd> queue</span>
+        <span><kbd>Esc</kbd> Inbox</span>
       </div>
     </section>
   );
