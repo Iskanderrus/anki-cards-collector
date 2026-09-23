@@ -1626,6 +1626,11 @@ function App(): React.ReactElement {
       return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
     }
 
+    function isNativeActivationTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.closest("button, a[href], summary") !== null;
+    }
+
     function focusItem(id: string): void {
       selectActiveId(id);
       requestAnimationFrame(() => {
@@ -1639,7 +1644,18 @@ function App(): React.ReactElement {
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      if (busy || editingId !== null || isTypingTarget(event.target)) return;
+      if (
+        busy
+        || editingId !== null
+        || onboardingOpen
+        || exportPreviewOpen
+        || isTypingTarget(event.target)
+      ) return;
+
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isNativeActivationTarget(event.target)
+      ) return;
 
       const key = event.key.toLowerCase();
       if (view === "detail" && (event.key === "Escape" || key === "b")) {
@@ -1700,7 +1716,16 @@ function App(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, busy, editingId, items, reviewSessionItems, view]);
+  }, [
+    activeId,
+    busy,
+    editingId,
+    exportPreviewOpen,
+    items,
+    onboardingOpen,
+    reviewSessionItems,
+    view,
+  ]);
 
   return (
     <main className="app">
