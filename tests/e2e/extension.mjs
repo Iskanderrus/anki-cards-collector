@@ -423,6 +423,22 @@ async function clickPanelButton(panel, name) {
   }, name);
 }
 
+async function openExportPreview(panel) {
+  const button = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  await button.click();
+  const dialog = panel.getByRole("dialog", { name: "Export Ready items" });
+  await dialog.waitFor();
+  return dialog;
+}
+
+async function exportReady(panel) {
+  const dialog = await openExportPreview(panel);
+  const execute = dialog.getByRole("button", { name: /^Export \\d+ items?$/ });
+  assert.equal(await execute.isDisabled(), false, "At least one Ready item should be exportable.");
+  await execute.click();
+  await dialog.waitFor({ state: "detached" });
+}
+
 async function sendPanelMessage(panel, message, label, timeoutMs = 10000) {
   return panel.evaluate(
     async ({ payload, stage, timeout }) => {
@@ -463,7 +479,7 @@ async function waitForPanelMessage(panel, message, label, predicate, timeoutMs =
 
 async function ensureQueue(panel) {
   if (await panel.locator(".queue").count() === 0) {
-    await panel.getByRole("button", { name: "Queue", exact: true }).click();
+    await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   }
   await panel.locator(".queue").waitFor();
 }
@@ -558,16 +574,16 @@ try {
   await panel.getByRole("button", { name: "Staged", exact: true }).click();
   await panel.getByText("No staged evidence.").waitFor();
   assert.equal(
-    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    await panel.getByRole("button", { name: /^Export Ready/ }).count(),
     0,
     "Staged review must not expose a direct staged-to-Anki action.",
   );
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
 
   // Explicit selection capture through the same runtime message used by the side-panel button.
   await selectText(contentPage, "#first", "Aunque llueva");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
 
   await panel.locator(".queue-row .term", { hasText: "Aunque llueva" }).waitFor();
   assert.equal(await termCount(panel), 1, "Explicit capture should add one lexical unit.");
@@ -594,7 +610,7 @@ try {
   // Empty selection should fail usefully and must not write another item.
   await contentPage.evaluate(() => window.getSelection()?.removeAllRanges());
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await panel.locator(".notice.error").filter({ hasText: "Select a word, phrase, or sentence first." }).waitFor();
   assert.equal(await panel.locator(".notice.error").getAttribute("role"), "alert");
   assert.equal(await termCount(panel), 1, "Empty selection must not add data.");
@@ -661,7 +677,7 @@ try {
   // The newer occurrence is deliberately weak so the older, stronger context should remain selected.
   await selectText(contentPage, "#repeat", "Aunque llueva");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
   const firstCard = await cardForTerm(panel, "Aunque llueva");
   await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
@@ -718,7 +734,7 @@ try {
     3,
     "Staged Duolingo evidence should be inspectable in the dedicated review surface without entering the corpus.",
   );
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const initialStagedBatch = await sendPanelMessage(
     panel,
     { type: "GET_STAGED_BATCH" },
@@ -1225,7 +1241,7 @@ try {
   );
 
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
 
   const addNotes = ankiRequests.filter((request) => request.action === "addNote");
@@ -1392,7 +1408,7 @@ try {
   const beforeOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   ankiAvailable = false;
   await clickPanelButton(panel, "Refresh from Anki");
-  await panel.locator(".anki-catalog-status", { hasText: /Showing the last loaded decks|Could not connect to Anki/ }).waitFor();
+  await panel.locator(".anki-catalog-status", { hasText: /Showing the last loaded decks|Anki isn't available/ }).waitFor();
   await hebrewGuidedProfile.waitFor();
   assert.equal(
     await guidedProfiles.getByRole("button", { name: "New profile" }).isDisabled(),
@@ -1489,7 +1505,7 @@ try {
 
   await selectText(contentPage, "#mapped", "Mapped export phrase");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const mappedCard = await cardForTerm(panel, "Mapped export phrase");
   assert.match(await mappedCard.locator(".meta").first().innerText(), /^he\s+·/);
   const mappedReady = mappedCard.getByRole("button", { name: "Ready" });
@@ -1498,7 +1514,7 @@ try {
   assert.match(await mappedCard.locator(".export-destination").innerText(), /Anki:\s*Hebrew RU/);
 
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   const mappedAdds = ankiRequests.filter(
     (request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing",
@@ -1521,7 +1537,7 @@ try {
 
   // Repeat send updates the same mapped note rather than creating a duplicate.
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   assert.equal(
     ankiRequests.filter((request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing").length,
@@ -1636,7 +1652,7 @@ try {
   await setCaptureLanguage(panel, "he");
   await selectText(contentPage, "#mapped-sr", "Serbian mapped export phrase");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const serbianMappedCard = await cardForTerm(panel, "Serbian mapped export phrase");
   assert.match(await serbianMappedCard.locator(".meta").first().innerText(), /^sr\s+·/);
   const serbianReady = serbianMappedCard.getByRole("button", { name: "Ready" });
@@ -1648,7 +1664,7 @@ try {
     "The Serbian guided card should resolve to the saved Serbian route before export.",
   );
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   const serbianAdds = ankiRequests.filter(
     (request) => request.action === "addNote" && request.params?.note?.modelName === "Serbian Existing",
@@ -1726,7 +1742,7 @@ try {
   const stagedReview = panel.locator(".staged-review");
   await stagedReview.waitFor();
   assert.equal(
-    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    await panel.getByRole("button", { name: /^Export Ready/ }).count(),
     0,
     "The staged surface must not expose the Anki export action.",
   );
@@ -1744,7 +1760,7 @@ try {
     "Committing staged evidence to the corpus must not call Anki.",
   );
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const importedHebrewRow = await queueRowForTerm(panel, "מרק");
   await importedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
   assert.equal(
@@ -1771,7 +1787,7 @@ try {
   assert.ok(importedHebrewId);
   const importedIdentityTag = collectorIdentityTagForE2e(importedHebrewId);
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
 
   const importedAdd = ankiRequests.find(
@@ -1802,7 +1818,7 @@ try {
   const importedNoteId = Number(importedNoteIdMatch[1]);
 
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   assert.equal(
     ankiRequests.some(
@@ -2064,7 +2080,7 @@ try {
   await stagedReview.locator(".staged-import-result", { hasText: "1 occurrence added to existing units" }).waitFor();
   assert.equal(await editedRow.count(), 0, "Successful retry should consume the committed candidate.");
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const enrichedHebrewRow = await queueRowForTerm(panel, "מרק");
   await enrichedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
   await panel.getByRole("button", { name: /^Staged/ }).click();
@@ -2092,7 +2108,7 @@ try {
   await discardRow.waitFor({ state: "detached" });
 
   markE2eStage("accp021-late-ambiguity-recovery");
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
 
   const lateSurface = "צורת-בעלות-מאוחרת";
   const firstLateOwner = await sendPanelMessage(
@@ -2208,7 +2224,7 @@ try {
   const committedCandidateId = postCommitBatch.batch.candidates[0].id;
   const remainingCandidateId = postCommitBatch.batch.candidates[1].id;
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   await panel.getByRole("button", { name: /^Staged/ }).click();
   const committedBeforeRefreshRow = stagedReview.locator(".staged-review-row").filter({
     hasText: "first staged item committed before refresh failure",
@@ -2353,7 +2369,7 @@ try {
   }).waitFor();
   await remainingAfterRefreshRow.waitFor({ state: "detached" });
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const refreshedCorpusRow = await queueRowForTerm(panel, postCommitSurface);
   await refreshedCorpusRow.getByText("inbox", { exact: true }).waitFor();
   await refreshedCorpusRow.getByText(/2 occurrences/).waitFor();
@@ -2455,7 +2471,7 @@ try {
   assert.equal(journalReadback.batch.candidates[0].id, journalRemainingId);
   assert.equal(journalReadback.batch.candidates[0].disposition, "repeated-evidence");
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const journalCorpusRowBeforeSecondImport = await queueRowForTerm(panel, journalSurface);
   await journalCorpusRowBeforeSecondImport.getByText(/1 occurrence/).waitFor();
   assert.equal(
@@ -2469,7 +2485,7 @@ try {
   await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
   await journalRemainingRow.waitFor({ state: "detached" });
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const journalCorpusRowAfterSecondImport = await queueRowForTerm(panel, journalSurface);
   await journalCorpusRowAfterSecondImport.getByText(/2 occurrences/).waitFor();
   assert.equal(
@@ -2532,7 +2548,7 @@ try {
   const restrictedPage = await context.newPage();
   await restrictedPage.goto("chrome://version/");
   await restrictedPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
 
   await panel.waitForFunction(() => {
     const node = document.querySelector(".notice.error");
@@ -2555,7 +2571,7 @@ try {
   const longTarget = "Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear";
   await selectText(contentPage, "#long", longTarget);
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const longRow = await queueRowForTerm(panel, longTarget);
   await longRow.waitFor();
   const longTermStyle = await longRow.locator(".term").evaluate((node) => {
@@ -2580,12 +2596,12 @@ try {
 
   await selectText(contentPage, "#canonical-base", "tener");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await (await queueRowForTerm(panel, "tener")).waitFor();
 
   await selectText(contentPage, "#canonical-observed", "Tengo");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await (await queueRowForTerm(panel, "Tengo")).waitFor();
   assert.equal(
     await termCount(panel),
