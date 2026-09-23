@@ -468,6 +468,56 @@ describe("BatchCapturePipeline", () => {
     expect(refreshed?.candidates[0]?.id).not.toBe(committedId);
   });
 
+  it("does not reuse the highest committed candidate ID when more evidence is staged", async () => {
+    const staged = await pipeline.stageBatch("commit-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+    const firstId = staged.candidates[0]!.id;
+    const committedHighestId = staged.candidates[1]!.id;
+    expect(committedHighestId).toBe("commit-high-water:0002");
+
+    await pipeline.commit({ candidateIds: [committedHighestId] });
+
+    const restaged = await pipeline.stageBatch("commit-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      firstId,
+      "commit-high-water:0003",
+    ]);
+    expect(restaged.candidates[1]!.id).not.toBe(committedHighestId);
+  });
+
+  it("does not reuse the highest discarded candidate ID after snapshot reconstruction", async () => {
+    const staged = await pipeline.stageBatch("discard-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שתיים", "שתיים כאן."),
+    ]);
+    const firstId = staged.candidates[0]!.id;
+    const discardedHighestId = staged.candidates[1]!.id;
+    expect(discardedHighestId).toBe("discard-high-water:0002");
+
+    await pipeline.discardCandidates([discardedHighestId]);
+    const persistedSnapshot = pipeline.getActiveBatch();
+    expect(persistedSnapshot?.nextCandidateNumber).toBe(3);
+
+    const reconstructed = new BatchCapturePipeline(repository);
+    reconstructed.restoreActiveBatch(persistedSnapshot!);
+    const restaged = await reconstructed.stageBatch("discard-high-water", [
+      evidence("אחד", "אחד כאן."),
+      evidence("שלוש", "שלוש כאן."),
+    ]);
+
+    expect(restaged.candidates.map((candidate) => candidate.id)).toEqual([
+      firstId,
+      "discard-high-water:0003",
+    ]);
+    expect(restaged.candidates[1]!.id).not.toBe(discardedHighestId);
+  });
+
   it("preserves existing IDs when more evidence is staged into the same active batch", async () => {
     const staged = await pipeline.stageBatch("stable-restage", [
       evidence("אחד", "אחד כאן."),
