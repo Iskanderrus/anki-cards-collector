@@ -35,11 +35,18 @@ const batchPipeline = new BatchCapturePipeline(repository);
 const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
 const VISIBLE_SESSION_OWNER_KEY = "collectorVisibleSessionOwnerV1";
 
-interface StoredStagedBatch {
+interface StoredStagedBatchV1 {
   version: 1;
   batchId: string;
   evidence: BatchCaptureEvidence[];
 }
+
+interface StoredStagedBatchV2 {
+  version: 2;
+  batch: BatchCaptureResult;
+}
+
+type StoredStagedBatch = StoredStagedBatchV1 | StoredStagedBatchV2;
 
 interface StoredVisibleSessionOwner {
   version: 1;
@@ -71,27 +78,76 @@ function evidenceFromResult(result: BatchCaptureResult): BatchCaptureEvidence[] 
   );
 }
 
-function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+function isStoredEvidence(value: unknown): value is BatchCaptureEvidence {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<StoredStagedBatch>;
-  if (candidate.version !== 1 || typeof candidate.batchId !== "string" || !candidate.batchId.trim()) {
+  const evidence = value as Partial<BatchCaptureEvidence>;
+  return typeof evidence.surfaceText === "string"
+    && typeof evidence.context === "string"
+    && typeof evidence.language === "string"
+    && typeof evidence.capturedAt === "string"
+    && Boolean(evidence.source)
+    && typeof evidence.source?.kind === "string"
+    && typeof evidence.source?.adapter === "string"
+    && typeof evidence.source?.url === "string"
+    && typeof evidence.source?.title === "string";
+}
+
+function isStoredBatchResult(value: unknown): value is BatchCaptureResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<BatchCaptureResult>;
+  if (
+    typeof result.batchId !== "string" || !result.batchId.trim()
+    || !Number.isInteger(result.receivedCount) || (result.receivedCount ?? -1) < 0
+    || !Number.isInteger(result.ignoredEmptyCount) || (result.ignoredEmptyCount ?? -1) < 0
+    || !Number.isInteger(result.duplicatesCollapsed) || (result.duplicatesCollapsed ?? -1) < 0
+    || !Array.isArray(result.candidates)
+  ) {
     return false;
   }
-  if (!Array.isArray(candidate.evidence)) return false;
 
-  return candidate.evidence.every((item) => {
-    if (!item || typeof item !== "object") return false;
-    const evidence = item as Partial<BatchCaptureEvidence>;
-    return typeof evidence.surfaceText === "string"
-      && typeof evidence.context === "string"
-      && typeof evidence.language === "string"
-      && typeof evidence.capturedAt === "string"
-      && Boolean(evidence.source)
-      && typeof evidence.source?.kind === "string"
-      && typeof evidence.source?.adapter === "string"
-      && typeof evidence.source?.url === "string"
-      && typeof evidence.source?.title === "string";
-  });
+  return result.candidates.every((candidate) =>
+    isStoredEvidence(candidate)
+    && typeof candidate.id === "string"
+    && typeof candidate.batchId === "string"
+    && typeof candidate.normalizedSurfaceText === "string"
+    && typeof candidate.normalizedContext === "string"
+    && Number.isInteger(candidate.duplicateCount)
+    && candidate.duplicateCount >= 1
+    && typeof candidate.disposition === "string"
+    && Array.isArray(candidate.matchingLexicalUnitIds)
+    && candidate.matchingLexicalUnitIds.every((id) => typeof id === "string")
+  );
+}
+
+function cloneStagedResult(result: BatchCaptureResult): BatchCaptureResult {
+  return {
+    ...result,
+    candidates: result.candidates.map((candidate) => ({
+      ...candidate,
+      source: { ...candidate.source },
+      adapterMetadata: candidate.adapterMetadata ? { ...candidate.adapterMetadata } : undefined,
+      matchingLexicalUnitIds: [...candidate.matchingLexicalUnitIds],
+    })),
+  };
+}
+
+function isStoredStagedBatch(value: unknown): value is StoredStagedBatch {
+  if (!value || typeof value !== "object") return false;
+  const version = (value as { version?: unknown }).version;
+
+  if (version === 1) {
+    const legacy = value as Partial<StoredStagedBatchV1>;
+    return typeof legacy.batchId === "string"
+      && Boolean(legacy.batchId.trim())
+      && Array.isArray(legacy.evidence)
+      && legacy.evidence.every(isStoredEvidence);
+  }
+
+  if (version === 2) {
+    return isStoredBatchResult((value as Partial<StoredStagedBatchV2>).batch);
+  }
+
+  return false;
 }
 
 async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
@@ -104,10 +160,17 @@ async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
     return null;
   }
 
+  if (value.version === 1) {
+    return {
+      version: 1,
+      batchId: value.batchId,
+      evidence: value.evidence.map(cloneEvidence),
+    };
+  }
+
   return {
-    version: 1,
-    batchId: value.batchId,
-    evidence: value.evidence.map(cloneEvidence),
+    version: 2,
+    batch: cloneStagedResult(value.batch),
   };
 }
 
@@ -122,10 +185,9 @@ async function persistStagedBatch(result: BatchCaptureResult | null): Promise<vo
     return;
   }
 
-  const payload: StoredStagedBatch = {
-    version: 1,
-    batchId: result.batchId,
-    evidence: evidenceFromResult(result),
+  const payload: StoredStagedBatchV2 = {
+    version: 2,
+    batch: cloneStagedResult(result),
   };
   await chrome.storage.session.set({ [STAGED_BATCH_SESSION_KEY]: payload });
 }
@@ -143,7 +205,21 @@ async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> 
   const stored = await loadStoredStagedBatch();
   if (!stored) return null;
 
-  return batchPipeline.stageBatch(stored.batchId, stored.evidence);
+  if (stored.version === 1) {
+    const migrated = await batchPipeline.stageBatch(stored.batchId, stored.evidence);
+    await persistStagedBatch(migrated);
+    return migrated;
+  }
+
+  try {
+    batchPipeline.restoreActiveBatch(stored.batch);
+  } catch (error) {
+    await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    batchPipeline.discard();
+    throw error;
+  }
+
+  return batchPipeline.refreshActiveBatch();
 }
 
 async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
@@ -417,7 +493,7 @@ async function stageVisibleEvidence(
       await persistStagedBatch(result);
     } catch (error) {
       if (existing) {
-        await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+        batchPipeline.restoreActiveBatch(existing);
       } else {
         batchPipeline.discard();
       }
@@ -441,7 +517,7 @@ async function mutateStagedBatch(
       await persistStagedBatch(result);
       return result;
     } catch (error) {
-      await batchPipeline.stageBatch(existing.batchId, previousEvidence);
+      batchPipeline.restoreActiveBatch(existing);
       throw error;
     }
   });
@@ -786,6 +862,12 @@ if (__COLLECTOR_E2E__) {
 
     if (message?.type === "E2E_FAIL_NEXT_EXPLICIT_STAGED_REFRESH") {
       failNextExplicitStagedRefreshForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "E2E_DROP_IN_MEMORY_STAGED_BATCH") {
+      batchPipeline.discard();
       sendResponse({ ok: true });
       return false;
     }
