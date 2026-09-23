@@ -2265,124 +2265,133 @@ function App(): React.ReactElement {
             </section>
           )}
 
-          <section className="advanced-settings settings-task-group" aria-labelledby="privacy-backup-advanced-title">
-            <h3 id="privacy-backup-advanced-title" className="settings-task-title">Privacy, backup & advanced</h3>
-            <div className="advanced-settings-grid">
-              <p className="setting-help settings-privacy-summary">
-                Captures stay in Collector's local storage. Browsing is not continuously watched.
-                Duolingo collection is explicit, and direct export talks to local AnkiConnect.
-              </p>
-          {modelState.kind !== "idle" && (
-            <div className="anki-model-inspector" aria-live="polite">
-              {modelState.kind === "loading" && <span>Inspecting note type…</span>}
-              {modelState.kind === "unavailable" && (
-                <span>Could not inspect this note type: {modelState.error}</span>
-              )}
-              {(modelState.kind === "live" || modelState.kind === "stale") && (
-                <>
-                  <strong>{modelState.detail.name}</strong>
-                  {modelState.kind === "stale" && (
-                    <span className="setting-help">Showing cached metadata: {modelState.error}</span>
-                  )}
-                  <span><strong>Fields:</strong> {modelState.detail.fields.join(", ") || "none"}</span>
-                  <span>
-                    <strong>Templates:</strong>{" "}
-                    {modelState.detail.templates.map((template) => template.name).join(", ") || "none"}
-                  </span>
-                  <span>
-                    <strong>Styling:</strong>{" "}
-                    {modelState.detail.css.length > 0
-                      ? `${modelState.detail.css.length} CSS characters detected`
-                      : "no CSS returned"}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-          <label>
-            Legacy capture language fallback
-            <input
-              value={settings.defaultLanguage}
-              placeholder="es, sr, he…"
-              onChange={(event) => {
-                const defaultLanguage = event.target.value || "und";
-                void persistSettings((current) => ({ ...current, defaultLanguage }));
-              }}
-            />
-            <span className="setting-help">
-              Preserved for older configuration. When an active export profile supplies a language, normal capture uses the profile language instead.
-            </span>
-          </label>
-          <label>
-            Source URL retention
-            <select
-              value={settings.sourceUrlMode}
-              onChange={(event) => {
-                const sourceUrlMode = event.target.value as SourceUrlMode;
-                void persistSettings((current) => ({ ...current, sourceUrlMode }));
-              }}
-            >
-              <option value="sanitized">Origin + path only (default)</option>
-              <option value="query">Keep non-tracking query parameters</option>
-              <option value="none">Do not store source URL</option>
-            </select>
-            <span className="setting-help">
-              Credentials and fragments are never stored. Tracking parameters are removed in every retained mode.
-            </span>
-          </label>
-          <div className="toolbar">
-            <button className="ghost" disabled={busy} onClick={exportTsv}>Download ready as TSV</button>
-            <button className="ghost" disabled={busy} onClick={backupJson}>Backup JSON</button>
-          </div>
-
-          <label>
-            Restore JSON backup
-            <input
-              type="file"
-              accept=".json,application/json"
-              disabled={busy}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                void previewBackupFile(file);
-              }}
-            />
-          </label>
-
-          {restorePreview && (
-            <div className="restore-preview">
-              <strong>Restore preview</strong>
-              <div className="restore-stats">
-                <span>{restorePreview.lexicalUnitsAdded} items to add</span>
-                <span>{restorePreview.lexicalUnitsUpdated} items to update</span>
-                <span>{restorePreview.lexicalUnitsSkipped} items unchanged</span>
-                <span>{restorePreview.occurrencesAdded} occurrences to add</span>
-                <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
-                <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
-                <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
-                <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
-              </div>
-
-              {restorePreview.conflicts.length > 0 && (
-                <ul className="conflict-list">
-                  {restorePreview.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
-                </ul>
-              )}
-
-              <div className="toolbar">
-                <button
-                  className="primary"
-                  disabled={busy || restorePreview.conflicts.length > 0}
-                  onClick={() => void restorePendingBackup()}
-                >
-                  Restore backup
-                </button>
-                <button className="ghost" disabled={busy} onClick={clearRestorePreview}>Cancel</button>
-              </div>
-            </div>
-          )}
-            </div>
+          <section className="settings-task-group" aria-labelledby="privacy-title">
+            <h3 id="privacy-title" className="settings-task-title">Privacy & source retention</h3>
+            <p className="setting-help settings-privacy-summary">
+              Captures stay in Collector's local storage. Browsing is not continuously watched.
+              Duolingo collection is explicit, and direct export talks to local AnkiConnect.
+            </p>
+            <label>
+              Source URL retention
+              <select
+                value={settings.sourceUrlMode}
+                onChange={(event) => {
+                  const sourceUrlMode = event.target.value as SourceUrlMode;
+                  void persistSettings((current) => ({ ...current, sourceUrlMode }));
+                }}
+              >
+                <option value="sanitized">Origin + path only (default)</option>
+                <option value="query">Keep non-tracking query parameters</option>
+                <option value="none">Do not store source URL</option>
+              </select>
+              <span className="setting-help">
+                Credentials and fragments are never stored. Tracking parameters are removed in every retained mode.
+              </span>
+            </label>
           </section>
+
+          <section className="settings-task-group" aria-labelledby="backup-title">
+            <h3 id="backup-title" className="settings-task-title">Backup & restore</h3>
+            <div className="toolbar">
+              <button className="ghost" disabled={busy} onClick={backupJson}>Backup JSON</button>
+            </div>
+            <label>
+              Restore JSON backup
+              <input
+                type="file"
+                accept=".json,application/json"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  void previewBackupFile(file);
+                }}
+              />
+            </label>
+
+            {restorePreview && (
+              <div className="restore-preview">
+                <strong>Restore preview</strong>
+                <div className="restore-stats">
+                  <span>{restorePreview.lexicalUnitsAdded} items to add</span>
+                  <span>{restorePreview.lexicalUnitsUpdated} items to update</span>
+                  <span>{restorePreview.lexicalUnitsSkipped} items unchanged</span>
+                  <span>{restorePreview.occurrencesAdded} occurrences to add</span>
+                  <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
+                  <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
+                  <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
+                  <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
+                </div>
+
+                {restorePreview.conflicts.length > 0 && (
+                  <ul className="conflict-list">
+                    {restorePreview.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
+                  </ul>
+                )}
+
+                <div className="toolbar">
+                  <button
+                    className="primary"
+                    disabled={busy || restorePreview.conflicts.length > 0}
+                    onClick={() => void restorePendingBackup()}
+                  >
+                    Restore backup
+                  </button>
+                  <button className="ghost" disabled={busy} onClick={clearRestorePreview}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <details className="advanced-settings">
+            <summary>Advanced</summary>
+            <div className="advanced-settings-grid">
+              {modelState.kind !== "idle" && (
+                <div className="anki-model-inspector" aria-live="polite">
+                  {modelState.kind === "loading" && <span>Inspecting note type…</span>}
+                  {modelState.kind === "unavailable" && (
+                    <span>Could not inspect this note type: {modelState.error}</span>
+                  )}
+                  {(modelState.kind === "live" || modelState.kind === "stale") && (
+                    <>
+                      <strong>{modelState.detail.name}</strong>
+                      {modelState.kind === "stale" && (
+                        <span className="setting-help">Showing cached metadata: {modelState.error}</span>
+                      )}
+                      <span><strong>Fields:</strong> {modelState.detail.fields.join(", ") || "none"}</span>
+                      <span>
+                        <strong>Templates:</strong>{" "}
+                        {modelState.detail.templates.map((template) => template.name).join(", ") || "none"}
+                      </span>
+                      <span>
+                        <strong>Styling:</strong>{" "}
+                        {modelState.detail.css.length > 0
+                          ? String(modelState.detail.css.length) + " CSS characters detected"
+                          : "no CSS returned"}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+              <label>
+                Legacy capture language fallback
+                <input
+                  value={settings.defaultLanguage}
+                  placeholder="es, sr, he…"
+                  onChange={(event) => {
+                    const defaultLanguage = event.target.value || "und";
+                    void persistSettings((current) => ({ ...current, defaultLanguage }));
+                  }}
+                />
+                <span className="setting-help">
+                  Preserved for older configuration. When an active export profile supplies a language, normal capture uses the profile language instead.
+                </span>
+              </label>
+              <div className="toolbar">
+                <button className="ghost" disabled={busy} onClick={exportTsv}>Download Ready as TSV</button>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
       )}
