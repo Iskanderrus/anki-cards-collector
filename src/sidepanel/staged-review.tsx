@@ -24,7 +24,8 @@ type DispositionFilter = "all" | CandidateDisposition;
 
 export interface StagedImportResult {
   summary: BatchCommitSummary;
-  warning?: string;
+  stagedWarning?: string;
+  queueWarning?: string;
 }
 
 interface StagedReviewProps {
@@ -563,7 +564,8 @@ export function StagedReview({
           <span>{importResult.summary.evidenceAdded} occurrence{importResult.summary.evidenceAdded === 1 ? "" : "s"} added to existing units</span>
           <span>{importResult.summary.unchanged} already represented / no-op</span>
           <span>{importResult.summary.needsReview} still require manual review</span>
-          {importResult.warning && <span>{importResult.warning}</span>}
+          {importResult.stagedWarning && <span>{importResult.stagedWarning}</span>}
+          {importResult.queueWarning && <span>{importResult.queueWarning}</span>}
         </div>
       )}
 
