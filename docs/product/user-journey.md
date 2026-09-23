@@ -141,7 +141,9 @@ Settings is organized around normal tasks before rare implementation controls:
 
 - **Anki connection & profiles**
 - **Languages & routing**
-- **Privacy, backup & advanced**
+- **Privacy & source retention**
+- **Backup & restore**
+- **Advanced**
 - **View introduction**
 
 Guided profile setup, live Anki inspection/revalidation, source URL retention, JSON backup/restore, TSV export, and advanced compatibility controls remain available.
