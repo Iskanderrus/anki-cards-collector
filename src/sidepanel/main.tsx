@@ -620,8 +620,46 @@ function App(): React.ReactElement {
         staged: stagedSummaryForCandidates(nextBatchId, candidates),
       }));
     } catch {
-      // Staging is ephemeral; an unavailable service-worker snapshot simply has no preview.
-      setStagedCandidates([]);
+      // Staging is ephemeral; keep any already-rendered snapshot if the worker is unavailable.
+    }
+  }
+
+  async function refreshStagedDispositions(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "REFRESH_STAGED_BATCH",
+      }) as {
+        ok: boolean;
+        error?: string;
+        batch?: { batchId?: string; candidates?: StagedCandidatePreview[] } | null;
+        staged?: StagedBatchSummary;
+      };
+
+      if (response.batch !== undefined || response.staged !== undefined) {
+        applyStagedMutationResponse(response.batch, response.staged);
+      }
+      if (!response.ok) {
+        throw new Error(response.error ?? "Could not refresh staged dispositions.");
+      }
+
+      setStagedImportResult((current) => current
+        ? { ...current, warning: undefined }
+        : current);
+      setNotice(
+        "Staged dispositions refreshed against the current corpus. No corpus or Anki write was performed.",
+      );
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Could not refresh staged dispositions.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1710,6 +1748,7 @@ function App(): React.ReactElement {
           onEdit={editStagedCandidate}
           onCommit={commitStagedCandidates}
           onDiscard={discardStagedCandidates}
+          onRefresh={refreshStagedDispositions}
           onBack={showQueue}
         />
       )}
