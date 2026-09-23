@@ -33,6 +33,7 @@ type VisibleContentResponse =
 
 const batchPipeline = new BatchCapturePipeline(repository);
 const STAGED_BATCH_SESSION_KEY = "collectorStagedBatchV1";
+const STAGED_CONSUMPTION_SESSION_KEY = "collectorStagedConsumptionV1";
 const VISIBLE_SESSION_OWNER_KEY = "collectorVisibleSessionOwnerV1";
 
 interface StoredStagedBatchV1 {
@@ -48,6 +49,12 @@ interface StoredStagedBatchV2 {
 
 type StoredStagedBatch = StoredStagedBatchV1 | StoredStagedBatchV2;
 
+interface StoredStagedConsumption {
+  version: 1;
+  batchId: string;
+  candidateIds: string[];
+}
+
 interface StoredVisibleSessionOwner {
   version: 1;
   tabId: number;
@@ -56,7 +63,7 @@ interface StoredVisibleSessionOwner {
 
 let visibleSessionOwner: StoredVisibleSessionOwner | null = null;
 let stagedBatchQueue: Promise<void> = Promise.resolve();
-let failNextStagedBatchPersistenceForE2E = false;
+let stagedBatchPersistenceFailuresRemainingForE2E = 0;
 let failNextStagedCommitForE2E = false;
 let failNextPostCommitStagedRefreshForE2E = false;
 let failNextExplicitStagedRefreshForE2E = false;
@@ -92,6 +99,18 @@ function isStoredEvidence(value: unknown): value is BatchCaptureEvidence {
     && typeof evidence.source?.title === "string";
 }
 
+function isStoredStagedConsumption(value: unknown): value is StoredStagedConsumption {
+  if (!value || typeof value !== "object") return false;
+  const consumption = value as Partial<StoredStagedConsumption>;
+  return consumption.version === 1
+    && typeof consumption.batchId === "string"
+    && Boolean(consumption.batchId.trim())
+    && Array.isArray(consumption.candidateIds)
+    && consumption.candidateIds.every((candidateId) =>
+      typeof candidateId === "string" && Boolean(candidateId.trim())
+    );
+}
+
 function isStoredBatchResult(value: unknown): value is BatchCaptureResult {
   if (!value || typeof value !== "object") return false;
   const result = value as Partial<BatchCaptureResult>;
@@ -100,6 +119,10 @@ function isStoredBatchResult(value: unknown): value is BatchCaptureResult {
     || !Number.isInteger(result.receivedCount) || (result.receivedCount ?? -1) < 0
     || !Number.isInteger(result.ignoredEmptyCount) || (result.ignoredEmptyCount ?? -1) < 0
     || !Number.isInteger(result.duplicatesCollapsed) || (result.duplicatesCollapsed ?? -1) < 0
+    || (
+      result.nextCandidateNumber !== undefined
+      && (!Number.isInteger(result.nextCandidateNumber) || result.nextCandidateNumber < 1)
+    )
     || !Array.isArray(result.candidates)
   ) {
     return false;
@@ -174,14 +197,59 @@ async function loadStoredStagedBatch(): Promise<StoredStagedBatch | null> {
   };
 }
 
+async function loadStoredStagedConsumption(): Promise<StoredStagedConsumption | null> {
+  const stored = await chrome.storage.session.get(STAGED_CONSUMPTION_SESSION_KEY);
+  const value = stored[STAGED_CONSUMPTION_SESSION_KEY];
+  if (value === undefined) return null;
+
+  if (!isStoredStagedConsumption(value)) {
+    await chrome.storage.session.remove(STAGED_CONSUMPTION_SESSION_KEY);
+    return null;
+  }
+
+  return {
+    version: 1,
+    batchId: value.batchId,
+    candidateIds: [...new Set(value.candidateIds)],
+  };
+}
+
+async function recordStagedConsumption(
+  batchId: string,
+  candidateIds: readonly string[],
+): Promise<void> {
+  const normalizedIds = [...new Set(candidateIds.map((candidateId) => candidateId.trim()).filter(Boolean))];
+  if (normalizedIds.length === 0) return;
+
+  const existing = await loadStoredStagedConsumption();
+  const combined = existing?.batchId === batchId
+    ? [...new Set([...existing.candidateIds, ...normalizedIds])]
+    : normalizedIds;
+  const payload: StoredStagedConsumption = {
+    version: 1,
+    batchId,
+    candidateIds: combined,
+  };
+  await chrome.storage.session.set({ [STAGED_CONSUMPTION_SESSION_KEY]: payload });
+}
+
+async function clearStoredStagedConsumption(expectedBatchId?: string): Promise<void> {
+  if (expectedBatchId) {
+    const existing = await loadStoredStagedConsumption();
+    if (!existing || existing.batchId !== expectedBatchId) return;
+  }
+  await chrome.storage.session.remove(STAGED_CONSUMPTION_SESSION_KEY);
+}
+
 async function persistStagedBatch(result: BatchCaptureResult | null): Promise<void> {
-  if (__COLLECTOR_E2E__ && failNextStagedBatchPersistenceForE2E) {
-    failNextStagedBatchPersistenceForE2E = false;
+  if (__COLLECTOR_E2E__ && stagedBatchPersistenceFailuresRemainingForE2E > 0) {
+    stagedBatchPersistenceFailuresRemainingForE2E -= 1;
     throw new Error("Injected staged-session persistence failure.");
   }
 
   if (!result || result.candidates.length === 0) {
     await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
+    await clearStoredStagedConsumption().catch(() => undefined);
     return;
   }
 
@@ -190,6 +258,7 @@ async function persistStagedBatch(result: BatchCaptureResult | null): Promise<vo
     batch: cloneStagedResult(result),
   };
   await chrome.storage.session.set({ [STAGED_BATCH_SESSION_KEY]: payload });
+  await clearStoredStagedConsumption(result.batchId).catch(() => undefined);
 }
 
 function withStagedBatchLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -203,23 +272,52 @@ async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> 
   if (active) return active;
 
   const stored = await loadStoredStagedBatch();
-  if (!stored) return null;
-
-  if (stored.version === 1) {
-    const migrated = await batchPipeline.stageBatch(stored.batchId, stored.evidence);
-    await persistStagedBatch(migrated);
-    return migrated;
+  const consumption = await loadStoredStagedConsumption();
+  if (!stored) {
+    if (consumption) {
+      await clearStoredStagedConsumption(consumption.batchId).catch(() => undefined);
+    }
+    return null;
   }
 
+  const batchId = stored.version === 1 ? stored.batchId : stored.batch.batchId;
+  let shouldCompactSnapshot = stored.version === 1;
+
   try {
-    batchPipeline.restoreActiveBatch(stored.batch);
+    if (stored.version === 1) {
+      await batchPipeline.stageBatch(stored.batchId, stored.evidence);
+    } else {
+      batchPipeline.restoreActiveBatch(stored.batch);
+    }
   } catch (error) {
     await chrome.storage.session.remove(STAGED_BATCH_SESSION_KEY);
     batchPipeline.discard();
     throw error;
   }
 
-  return batchPipeline.refreshActiveBatch();
+  if (consumption?.batchId === batchId) {
+    const current = batchPipeline.getActiveBatch();
+    const presentConsumedIds = current?.candidates
+      .filter((candidate) => consumption.candidateIds.includes(candidate.id))
+      .map((candidate) => candidate.id) ?? [];
+    if (presentConsumedIds.length > 0) {
+      await batchPipeline.discardCandidates(presentConsumedIds);
+    }
+    shouldCompactSnapshot = true;
+  } else if (consumption) {
+    await clearStoredStagedConsumption(consumption.batchId).catch(() => undefined);
+  }
+
+  const refreshed = await batchPipeline.refreshActiveBatch();
+  if (shouldCompactSnapshot) {
+    try {
+      await persistStagedBatch(refreshed);
+    } catch {
+      // Keep the restored in-memory batch usable. If compaction fails, the
+      // consumption journal remains available for the next reconstruction.
+    }
+  }
+  return refreshed;
 }
 
 async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
@@ -599,9 +697,20 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
 
     const active = batchPipeline.getActiveBatch();
     let warning = result.warning;
+    let consumptionJournalRecorded = false;
 
     try {
+      await recordStagedConsumption(existing.batchId, request.candidateIds);
+      consumptionJournalRecorded = true;
+    } catch {
+      // The updated staged snapshot below is sufficient if it persists. If both
+      // paths fail, retry the consumption journal before returning committed success.
+    }
+
+    let snapshotPersisted = false;
+    try {
       await persistStagedBatch(active);
+      snapshotPersisted = true;
     } catch (error) {
       try {
         // A transient session-storage failure must not make a completed corpus
@@ -609,10 +718,27 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
         // if it remains unavailable, a stale snapshot reclassifies committed
         // evidence as already represented on the next worker start.
         await persistStagedBatch(active);
+        snapshotPersisted = true;
       } catch {
-        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Use Refresh staged before retrying; committed evidence will reclassify against current corpus state.`;
+        if (!consumptionJournalRecorded) {
+          try {
+            await recordStagedConsumption(existing.batchId, request.candidateIds);
+            consumptionJournalRecorded = true;
+          } catch {
+            // The warning below accurately reports that transient recovery state
+            // could not be durably rewritten; corpus success still remains final.
+          }
+        }
+        const recoveryDetail = consumptionJournalRecorded
+          ? " A committed-consumption journal was retained so selected candidates stay consumed after worker reconstruction."
+          : " Keep this Staged view open until Refresh staged succeeds; transient recovery state could not be durably rewritten.";
+        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)}${recoveryDetail} Use Refresh staged before retrying.`;
         warning = warning ? `${warning} ${persistenceWarning}` : persistenceWarning;
       }
+    }
+
+    if (snapshotPersisted) {
+      await clearStoredStagedConsumption(existing.batchId).catch(() => undefined);
     }
 
     chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
@@ -842,7 +968,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 if (__COLLECTOR_E2E__) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "E2E_FAIL_NEXT_STAGED_BATCH_PERSISTENCE") {
-      failNextStagedBatchPersistenceForE2E = true;
+      const requestedCount = Number(message.count ?? 1);
+      stagedBatchPersistenceFailuresRemainingForE2E = Number.isInteger(requestedCount)
+        ? Math.max(1, requestedCount)
+        : 1;
       sendResponse({ ok: true });
       return false;
     }
