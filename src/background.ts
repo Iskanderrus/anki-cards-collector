@@ -494,11 +494,16 @@ async function activeTabId(): Promise<number> {
   return tab.id;
 }
 
+interface CaptureConfirmation {
+  captureKind: "new" | "occurrence";
+  canonicalText: string;
+}
+
 async function collectFromTab(
   tabId: number,
   language: string,
   sourceUrlMode: SourceUrlMode,
-): Promise<void> {
+): Promise<CaptureConfirmation> {
   await injectContentScript(tabId);
 
   const response = await chrome.tabs.sendMessage(tabId, {
@@ -508,7 +513,7 @@ async function collectFromTab(
   if (!response?.ok) throw new Error(response?.error ?? "Could not read the current selection.");
   if (!response.draft) throw new Error("Select a word, phrase, or sentence first.");
 
-  await repository.capture({
+  const captured = await repository.capture({
     ...response.draft,
     language,
     source: {
@@ -517,6 +522,10 @@ async function collectFromTab(
     },
   });
   chrome.runtime.sendMessage({ type: "DATA_CHANGED" }).catch(() => undefined);
+  return {
+    captureKind: captured.occurrences.length > 1 ? "occurrence" : "new",
+    canonicalText: captured.lexicalUnit.canonicalText,
+  };
 }
 
 function stagedSummary(result: BatchCaptureResult | null) {
@@ -1120,12 +1129,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const tabId = await activeTabId();
         const settings = await loadSettings();
-        await collectFromTab(
+        const result = await collectFromTab(
           tabId,
           message.language ?? captureLanguageForSettings(settings),
           settings.sourceUrlMode,
         );
-        sendResponse({ ok: true });
+        sendResponse({ ok: true, ...result });
       } catch (error) {
         sendResponse({ ok: false, error: errorMessage(error) });
       }
