@@ -604,7 +604,7 @@ function App(): React.ReactElement {
   function showQueue(): void {
     cancelEdit();
     setReviewSessionIds([]);
-    closeExportPreview();
+    closeExportPreview(false);
     setView("queue");
     requestAnimationFrame(() => {
       const currentActiveId = activeIdRef.current;
@@ -619,7 +619,7 @@ function App(): React.ReactElement {
   function showStaged(): void {
     cancelEdit();
     setReviewSessionIds([]);
-    closeExportPreview();
+    closeExportPreview(false);
     setView("staged");
     void refreshStagedCandidates();
     requestAnimationFrame(() => {
@@ -651,8 +651,9 @@ function App(): React.ReactElement {
     }
   }
 
-  function closeExportPreview(): void {
+  function closeExportPreview(restoreFocus = true): void {
     setExportPreviewOpen(false);
+    if (!restoreFocus) return;
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>("[data-export-ready]")?.focus({ preventScroll: true });
     });
