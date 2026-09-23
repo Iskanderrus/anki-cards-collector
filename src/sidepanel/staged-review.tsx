@@ -28,6 +28,12 @@ export interface StagedImportResult {
   queueWarning?: string;
 }
 
+export function clearStagedRefreshWarning(
+  result: StagedImportResult | null,
+): StagedImportResult | null {
+  return result ? { ...result, stagedWarning: undefined } : result;
+}
+
 interface StagedReviewProps {
   candidates: BatchCaptureCandidate[];
   ownerLabels: Record<string, string>;
