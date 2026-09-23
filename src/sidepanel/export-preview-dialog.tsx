@@ -37,12 +37,15 @@ export function ExportPreviewDialog({
           }
           if (event.key === "Tab" && dialogRef.current) {
             const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+              'button:not([disabled]), [href], summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
             )];
             if (focusable.length === 0) return;
             const first = focusable[0]!;
             const last = focusable[focusable.length - 1]!;
-            if (event.shiftKey && document.activeElement === first) {
+            if (
+              event.shiftKey
+              && (document.activeElement === first || document.activeElement === headingRef.current)
+            ) {
               event.preventDefault();
               last.focus();
             } else if (!event.shiftKey && document.activeElement === last) {

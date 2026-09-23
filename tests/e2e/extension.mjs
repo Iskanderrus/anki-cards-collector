@@ -582,6 +582,12 @@ try {
     "First-run onboarding accessibility violations:\n"
       + JSON.stringify(onboardingAccessibility.violations, null, 2),
   );
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await onboarding.getByRole("button", { name: "Next" }).evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the onboarding heading must stay inside the modal.",
+  );
   const skipIntroduction = onboarding.getByRole("button", { name: "Skip introduction" });
   await skipIntroduction.focus();
   await panel.keyboard.press("Enter");
@@ -1316,6 +1322,13 @@ try {
   assert.match(await mixedDestinationPreview.innerText(), /Hebrew RU/);
   assert.match(await mixedDestinationPreview.innerText(), /Serbian RU/);
   assert.match(await mixedDestinationPreview.innerText(), /2 Ready/);
+  const executeMixedExport = mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ });
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await executeMixedExport.evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the export-preview heading must stay inside the modal.",
+  );
   const exportPreviewAccessibility = await new AxeBuilder({ page: panel })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -1325,7 +1338,6 @@ try {
     "Export-preview accessibility violations:\n"
       + JSON.stringify(exportPreviewAccessibility.violations, null, 2),
   );
-  const executeMixedExport = mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ });
   await executeMixedExport.focus();
   await panel.keyboard.press("Enter");
   await mixedDestinationPreview.waitFor({ state: "detached" });
