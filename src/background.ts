@@ -52,6 +52,7 @@ let stagedBatchQueue: Promise<void> = Promise.resolve();
 let failNextStagedBatchPersistenceForE2E = false;
 let failNextStagedCommitForE2E = false;
 let failNextPostCommitStagedRefreshForE2E = false;
+let failNextExplicitStagedRefreshForE2E = false;
 
 function cloneEvidence(evidence: BatchCaptureEvidence): BatchCaptureEvidence {
   return {
@@ -147,6 +148,56 @@ async function restoreStagedBatchUnlocked(): Promise<BatchCaptureResult | null> 
 
 async function currentStagedBatch(): Promise<BatchCaptureResult | null> {
   return withStagedBatchLock(() => restoreStagedBatchUnlocked());
+}
+
+async function refreshStagedBatch() {
+  return withStagedBatchLock(async () => {
+    const existing = await restoreStagedBatchUnlocked();
+    if (!existing) {
+      return {
+        ok: true as const,
+        batch: null,
+        staged: stagedSummary(null),
+      };
+    }
+
+    let restoreRepositoryListForE2E: (() => void) | undefined;
+    try {
+      if (__COLLECTOR_E2E__ && failNextExplicitStagedRefreshForE2E) {
+        failNextExplicitStagedRefreshForE2E = false;
+        const originalList = repository.list.bind(repository);
+        let injected = false;
+        repository.list = async (status) => {
+          if (!injected) {
+            injected = true;
+            throw new Error("Injected explicit staged refresh failure.");
+          }
+          return originalList(status);
+        };
+        restoreRepositoryListForE2E = () => {
+          repository.list = originalList;
+        };
+      }
+
+      const refreshed = await batchPipeline.refreshActiveBatch();
+      await persistStagedBatch(refreshed);
+      return {
+        ok: true as const,
+        batch: refreshed,
+        staged: stagedSummary(refreshed),
+      };
+    } catch (error) {
+      const retained = batchPipeline.getActiveBatch() ?? existing;
+      return {
+        ok: false as const,
+        error: `Could not refresh staged dispositions: ${errorMessage(error)} Staged evidence was retained and can be retried safely.`,
+        batch: retained,
+        staged: stagedSummary(retained),
+      };
+    } finally {
+      restoreRepositoryListForE2E?.();
+    }
+  });
 }
 
 function isStoredVisibleSessionOwner(value: unknown): value is StoredVisibleSessionOwner {
@@ -481,7 +532,7 @@ async function commitStagedCandidates(request: BatchCommitRequest) {
         // evidence as already represented on the next worker start.
         await persistStagedBatch(active);
       } catch {
-        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Reload Staged review before retrying; committed evidence will reclassify as already represented.`;
+        const persistenceWarning = `Corpus import completed, but the transient staged snapshot could not be updated: ${errorMessage(error)} Use Refresh staged before retrying; committed evidence will reclassify against current corpus state.`;
         warning = warning ? `${warning} ${persistenceWarning}` : persistenceWarning;
       }
     }
@@ -730,6 +781,12 @@ if (__COLLECTOR_E2E__) {
       return false;
     }
 
+    if (message?.type === "E2E_FAIL_NEXT_EXPLICIT_STAGED_REFRESH") {
+      failNextExplicitStagedRefreshForE2E = true;
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type === "E2E_REPLACE_STAGED_BATCH") {
       const evidence = Array.isArray(message.evidence)
         ? message.evidence as BatchCaptureEvidence[]
@@ -933,6 +990,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void currentStagedBatch()
       .then((batch) => sendResponse({ ok: true, batch }))
       .catch((error) => sendResponse({ ok: false, error: errorMessage(error) }));
+    return true;
+  }
+
+  if (message?.type === "REFRESH_STAGED_BATCH") {
+    void refreshStagedBatch().then(sendResponse);
     return true;
   }
 
