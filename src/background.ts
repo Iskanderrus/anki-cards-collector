@@ -511,7 +511,6 @@ async function mutateStagedBatch(
     const existing = await restoreStagedBatchUnlocked();
     if (!existing) throw new Error("No staged batch is active.");
 
-    const previousEvidence = evidenceFromResult(existing);
     try {
       const result = await operation(existing);
       await persistStagedBatch(result);
