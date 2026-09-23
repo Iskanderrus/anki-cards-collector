@@ -1021,7 +1021,7 @@ function App(): React.ReactElement {
       if (item) {
         const proposal = proposeLearningCard(item);
         if (!proposal.recommended) {
-          setError(proposal.warning ?? "Review this item before marking it ready.");
+          setError(proposal.warning ?? "Review this item before marking it Ready.");
           return;
         }
       }
@@ -1030,6 +1030,22 @@ function App(): React.ReactElement {
     setError("");
     await repository.setStatus(id, status);
     await load(id);
+
+    if (reviewSessionIds.includes(id) && (status === "ready" || status === "archived")) {
+      const currentIndex = reviewSessionIds.indexOf(id);
+      const nextId = reviewSessionIds[currentIndex + 1];
+      if (nextId) {
+        selectActiveId(nextId);
+        setView("detail");
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+        });
+      } else {
+        setReviewSessionIds([]);
+        setView("queue");
+        setNotice("Inbox reviewed. You can export Ready items now or collect more language.");
+      }
+    }
   }
 
   function beginEdit(item: CollectedItem): void {
@@ -1585,8 +1601,8 @@ function App(): React.ReactElement {
       selectActiveId(id);
       requestAnimationFrame(() => {
         const selector = view === "queue"
-          ? `[data-queue-id="${CSS.escape(id)}"]`
-          : `[data-card-id="${CSS.escape(id)}"]`;
+          ? "[data-queue-id=\"" + CSS.escape(id) + "\"]"
+          : "[data-card-id=\"" + CSS.escape(id) + "\"]";
         const element = document.querySelector<HTMLElement>(selector);
         element?.focus({ preventScroll: true });
         element?.scrollIntoView({ block: "nearest" });
@@ -1602,28 +1618,30 @@ function App(): React.ReactElement {
         showQueue();
         return;
       }
-      if (view === "settings" || view === "staged" || items.length === 0) return;
+      if (view === "settings" || view === "staged") return;
 
+      const navigableItems = reviewSessionItems.length > 0 ? reviewSessionItems : items;
+      if (navigableItems.length === 0) return;
       const currentIndex = Math.max(
         0,
-        items.findIndex((item) => item.lexicalUnit.id === activeId),
+        navigableItems.findIndex((item) => item.lexicalUnit.id === activeId),
       );
 
       if (key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
-        const next = Math.min(items.length - 1, currentIndex + 1);
-        focusItem(items[next]!.lexicalUnit.id);
+        const next = Math.min(navigableItems.length - 1, currentIndex + 1);
+        focusItem(navigableItems[next]!.lexicalUnit.id);
         return;
       }
 
       if (key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         const previous = Math.max(0, currentIndex - 1);
-        focusItem(items[previous]!.lexicalUnit.id);
+        focusItem(navigableItems[previous]!.lexicalUnit.id);
         return;
       }
 
-      const currentItem = items[currentIndex];
+      const currentItem = navigableItems[currentIndex];
       if (!currentItem) return;
 
       if (view === "queue" && (event.key === "Enter" || key === "o")) {
@@ -1653,7 +1671,7 @@ function App(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, busy, editingId, items, view]);
+  }, [activeId, busy, editingId, items, reviewSessionItems, view]);
 
   return (
     <main className="app">
