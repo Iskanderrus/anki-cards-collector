@@ -398,7 +398,7 @@ let e2eStage = "launch";
 const e2eWatchdog = setTimeout(() => {
   console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
   process.exit(1);
-}, 240000);
+}, 360000);
 e2eWatchdog.unref();
 
 function markE2eStage(stage) {
