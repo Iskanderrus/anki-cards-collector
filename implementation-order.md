@@ -25,6 +25,7 @@ The following work is already part of the current baseline:
 - **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
 - **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics;
 - **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
+- **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation.
 
 ---
 
@@ -68,19 +69,19 @@ ACCP-021 is now baseline behavior. It builds the staged-candidate UI, commits se
 
 Explicit Staged refresh/reclassification, durable staged identity, worker reconstruction, and stale-snapshot recovery are baseline behavior.
 
-### ACCP-012 — onboarding and user journey — current merge gate
+### ACCP-012 — onboarding and user journey — completed
 
-Build the coherent daily product journey on top of the completed profile and staged workflows.
+ACCP-012 is now baseline behavior. Sequential Inbox review, live destination preview, focus/keyboard behavior, and review-session identity reconciliation are part of the starting point for corpus identity operations.
 
 ---
 
 ## Gate E — corpus operations and card quality
 
-### ACCP-004 — explicit merge and split
+### ACCP-004 — explicit merge and split — current merge gate
 
-Depends on ACCP-003.
+Depends on completed ACCP-003 and ACCP-012.
 
-Requires migration/backup coverage if canonical uniqueness assumptions change.
+This gate changes the foundational identity invariant: lexical-unit ID is primary, canonical/content keys become non-unique lookup data, and merge/split are explicit transactional operations. Frozen v4 → v5 migration and backup v4 round-trip coverage are mandatory.
 
 ### ACCP-005 — learning-card policy v2
 
@@ -106,13 +107,12 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-012 — onboarding/user journey
-2. ACCP-004 — explicit merge/split
-3. ACCP-005 — learning-card policy v2
-4. ACCP-006 — morphology assistance
-5. ACCP-007 — learning-value decision
+1. ACCP-004 — explicit merge/split
+2. ACCP-005 — learning-card policy v2
+3. ACCP-006 — morphology assistance
+4. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, and ACCP-022 are now baseline work. ACCP-012 is the current product/user-journey merge gate.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, and ACCP-012 are now baseline work. ACCP-004 is the current corpus-identity merge gate.
 
 ---
 
