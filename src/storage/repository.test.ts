@@ -241,7 +241,7 @@ describe("CaptureRepository", () => {
 
   it("restores a current backup idempotently and skips duplicate occurrences", async () => {
     const backup: BackupDocument = {
-      version: 3,
+      version: 4,
       exportedAt: "2026-09-19T10:00:00Z",
       settings: DEFAULT_SETTINGS,
       exportBindings: [],
@@ -407,7 +407,7 @@ describe("CaptureRepository", () => {
   it("restores export bindings idempotently and rejects a conflicting local destination", async () => {
     const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
     const backup: BackupDocument = {
-      version: 3,
+      version: 4,
       exportedAt: "2026-09-20T10:00:00Z",
       settings: DEFAULT_SETTINGS,
       items: [captured],
