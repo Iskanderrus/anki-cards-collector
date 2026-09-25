@@ -1,6 +1,6 @@
 # ADR 0003: Separate canonical lexical units from occurrences
 
-**Status:** Accepted
+**Status:** Accepted; identity details amended by [ADR 0012](0012-lexical-id-primary-identity.md)
 
 ## Context
 
@@ -10,21 +10,22 @@ A learning target is also not necessarily identical to the form observed on a pa
 
 ## Decision
 
-Store the canonical learnable item as a `LexicalUnit` and each encounter as an `Occurrence`.
+Store the learnable item as a `LexicalUnit` and each encounter as an `Occurrence`.
 
-A lexical unit owns its canonical text, a language + normalized-canonical-text content key, review state, and optional Anki identity.
+A lexical unit owns a stable lexical-unit ID, canonical text, derived language + normalized-canonical-text content key, review state, and optional Anki identity. The lexical-unit ID is identity; the content key is non-unique lookup data.
 
-An occurrence owns the observed surface text, normalized surface text, context and source metadata, and capture time.
+An occurrence owns a stable occurrence ID, its owning lexical-unit ID, observed surface text, normalized surface text, context and source metadata, and capture time.
 
-A repeated capture first checks direct canonical identity. If that does not match, an already-observed surface form may route the capture back to one unambiguous canonical unit.
+A repeated capture may use canonical and observed-form indexes to discover possible owners. One unambiguous owner may receive the new evidence. Multiple plausible owners require explicit ownership resolution rather than first-match selection.
 
-Manual canonicalization may consolidate two compatible local units. An exported Collector identity is preserved when only one side has one. If both sides are already tied to different Anki note IDs, consolidation is rejected.
+Canonical editing changes one lexical unit in place. Canonical equality does not imply identity equality and never causes an automatic merge. Identity consolidation is the explicit ACCP-004 merge operation; deliberate separation is the explicit split operation defined by ADR 0012.
 
 ## Consequences
 
 - canonicalization does not destroy inflected or contextual forms;
-- repeated surface forms can return to a previously canonicalized unit;
-- repeated contexts remain available without multiplying cards;
-- changing study content invalidates prior `ready` approval and requires review again;
-- v1 IndexedDB data migrates by treating its old expression as both canonical and observed, because the older schema did not retain a separate surface form;
-- homographs or genuinely separate senses still require an explicit future split operation.
+- repeated surface forms can return to one unambiguous canonicalized unit;
+- same-canonical homographs and separate senses can coexist under different lexical IDs;
+- repeated contexts remain available without multiplying lexical identities;
+- changing study evidence invalidates prior `ready` approval and requires review again;
+- v1 IndexedDB data still migrates by treating its old expression as both canonical and observed, because the older schema did not retain a separate surface form;
+- merge/split preserve occurrence IDs and obey the Anki identity rules in ADR 0012.
