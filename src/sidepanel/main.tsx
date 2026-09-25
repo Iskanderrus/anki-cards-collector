@@ -1933,6 +1933,8 @@ function App(): React.ReactElement {
         || editingId !== null
         || onboardingOpen
         || exportPreviewOpen
+        || mergeDialog !== null
+        || splitDialog !== null
         || isTypingTarget(event.target)
       ) return;
 
@@ -2013,11 +2015,28 @@ function App(): React.ReactElement {
     editingId,
     exportPreviewOpen,
     items,
+    mergeDialog,
     onboardingOpen,
+    splitDialog,
     reviewSessionIds,
     reviewSessionItems,
     view,
   ]);
+
+  const mergeSource = mergeDialog
+    ? items.find((item) => item.lexicalUnit.id === mergeDialog.sourceId)
+    : undefined;
+  const splitSource = splitDialog
+    ? items.find((item) => item.lexicalUnit.id === splitDialog.sourceId)
+    : undefined;
+  const mergeCandidates = mergeSource
+    ? items.filter(
+        (item) =>
+          item.lexicalUnit.id !== mergeSource.lexicalUnit.id
+          && item.lexicalUnit.language.trim().toLowerCase()
+            === mergeSource.lexicalUnit.language.trim().toLowerCase(),
+      )
+    : [];
 
   return (
     <main className="app">
@@ -2036,6 +2055,49 @@ function App(): React.ReactElement {
           busy={busy}
           onClose={closeExportPreview}
           onExport={() => void exportToAnki()}
+        />
+      )}
+
+      {mergeDialog && mergeSource && (
+        <MergeLexicalUnitDialog
+          source={mergeSource}
+          candidates={mergeCandidates}
+          preview={mergeDialog.preview}
+          canonicalText={mergeDialog.canonicalText}
+          note={mergeDialog.note}
+          error={mergeDialog.error}
+          busy={busy}
+          onChooseCandidate={(id) => void chooseMergeCandidate(id)}
+          onCanonicalTextChange={(value) => setMergeDialog((current) =>
+            current ? { ...current, canonicalText: value } : current
+          )}
+          onNoteChange={(value) => setMergeDialog((current) =>
+            current ? { ...current, note: value } : current
+          )}
+          onCancel={closeMergeDialog}
+          onConfirm={() => void confirmMerge()}
+        />
+      )}
+
+      {splitDialog && splitSource && (
+        <SplitLexicalUnitDialog
+          source={splitSource}
+          selectedOccurrenceIds={splitDialog.selectedOccurrenceIds}
+          canonicalText={splitDialog.canonicalText}
+          note={splitDialog.note}
+          preview={splitDialog.preview}
+          error={splitDialog.error}
+          busy={busy}
+          onToggleOccurrence={toggleSplitOccurrence}
+          onCanonicalTextChange={(value) => setSplitDialog((current) =>
+            current ? { ...current, canonicalText: value, preview: null, error: "" } : current
+          )}
+          onNoteChange={(value) => setSplitDialog((current) =>
+            current ? { ...current, note: value, preview: null, error: "" } : current
+          )}
+          onReview={() => void reviewSplit()}
+          onCancel={closeSplitDialog}
+          onConfirm={() => void confirmSplit()}
         />
       )}
 
@@ -2878,7 +2940,7 @@ function App(): React.ReactElement {
                   </label>
                   <div
                     className={`canonicalization-preview${canonicalizationState.kind === "live" ? ` ${canonicalizationState.preview.kind}` : ""}`}
-                    role={canonicalizationState.kind === "live" && canonicalizationState.preview.kind === "conflict" ? "alert" : "status"}
+                    role="status"
                     aria-live="polite"
                   >
                     {canonicalizationState.kind === "loading" && "Checking canonical identity…"}
@@ -2906,11 +2968,7 @@ function App(): React.ReactElement {
                     <button
                       className="primary"
                       type="submit"
-                      disabled={
-                        busy
-                        || canonicalizationState.kind !== "live"
-                        || canonicalizationState.preview.kind === "conflict"
-                      }
+                      disabled={busy || canonicalizationState.kind !== "live"}
                     >
                       Save
                     </button>
@@ -3079,6 +3137,27 @@ function App(): React.ReactElement {
                   <details className="more-actions">
                     <summary>More actions</summary>
                     <div className="more-actions-body">
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy}
+                        onClick={(event) => beginMerge(item, event.currentTarget)}
+                      >
+                        Merge with another unit…
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy || item.occurrences.length < 2}
+                        title={
+                          item.occurrences.length < 2
+                            ? "A split needs at least two occurrences."
+                            : undefined
+                        }
+                        onClick={(event) => beginSplit(item, event.currentTarget)}
+                      >
+                        Split occurrences…
+                      </button>
                       <button
                         className="ghost danger"
                         disabled={busy || reconciliationPending}
