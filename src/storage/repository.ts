@@ -548,110 +548,42 @@ export class CaptureRepository {
     const current = await this.database.lexicalUnits.get(id);
     if (!current) throw new Error("Collected item no longer exists.");
 
-    const currentOccurrenceCount = await this.database.occurrences
-      .where("lexicalUnitId")
-      .equals(current.id)
-      .count();
+    const [currentOccurrenceCount, sameCanonicalUnits] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(current.id).count(),
+      this.database.lexicalUnits.where("contentKey").equals(contentKey).toArray(),
+    ]);
 
-    if (
+    const sameCanonicalCandidates = (
+      await Promise.all(
+        sameCanonicalUnits
+          .filter((unit) => unit.id !== current.id)
+          .map(async (unit): Promise<CanonicalizationTargetSummary> => ({
+            id: unit.id,
+            canonicalText: unit.canonicalText,
+            language: unit.language,
+            status: unit.status,
+            occurrenceCount: await this.database.occurrences
+              .where("lexicalUnitId")
+              .equals(unit.id)
+              .count(),
+          })),
+      )
+    ).sort((left, right) => left.id.localeCompare(right.id));
+
+    const unchanged =
       current.contentKey === contentKey
       && current.canonicalText === canonicalText
-      && normalizeLanguage(current.language) === language
-    ) {
-      return {
-        kind: "unchanged",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: false,
-        survivingLexicalUnitId: current.id,
-        resultingOccurrenceCount: currentOccurrenceCount,
-      };
-    }
-
-    const collision = current.contentKey === contentKey
-      ? undefined
-      : await this.database.lexicalUnits
-      .where("contentKey")
-      .equals(contentKey)
-      .first();
-
-    if (!collision || collision.id === current.id) {
-      return {
-        kind: "rename",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: current.status === "ready",
-        survivingLexicalUnitId: current.id,
-        resultingOccurrenceCount: currentOccurrenceCount,
-      };
-    }
-
-    const [currentBinding, collisionBinding, collisionOccurrenceCount] = await Promise.all([
-      this.database.exportBindings.get(current.id),
-      this.database.exportBindings.get(collision.id),
-      this.database.occurrences.where("lexicalUnitId").equals(collision.id).count(),
-    ]);
-    const target: CanonicalizationTargetSummary = {
-      id: collision.id,
-      canonicalText: collision.canonicalText,
-      language: collision.language,
-      status: collision.status,
-      occurrenceCount: collisionOccurrenceCount,
-    };
-    const conflictReason = consolidationConflictReason(
-      current,
-      collision,
-      currentBinding,
-      collisionBinding,
-    );
-
-    if (conflictReason) {
-      return {
-        kind: "conflict",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: false,
-        target,
-        resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
-        conflictReason,
-      };
-    }
-
-    const currentHasIdentity =
-      currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
-    const collisionHasIdentity =
-      collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
-    const keepCurrent = currentHasIdentity && !collisionHasIdentity;
-    const survivingLexicalUnitId = keepCurrent ? current.id : collision.id;
-    const binding = preferredBinding(
-      keepCurrent ? currentBinding : collisionBinding,
-      keepCurrent ? collisionBinding : currentBinding,
-      survivingLexicalUnitId,
-    );
-    const preservedAnkiNoteId = binding?.ankiNoteId
-      ?? (keepCurrent ? current.ankiNoteId : collision.ankiNoteId);
+      && normalizeLanguage(current.language) === language;
 
     return {
-      kind: "consolidate",
+      kind: unchanged ? "unchanged" : "rename",
       currentId: current.id,
       currentCanonicalText: current.canonicalText,
       requestedCanonicalText: canonicalText,
       requestedLanguage: language,
       currentOccurrenceCount,
-      willReturnToInbox: true,
-      target,
-      survivingLexicalUnitId,
-      resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
-      preservedAnkiNoteId,
+      willReturnToInbox: !unchanged && current.status !== "inbox",
+      sameCanonicalCandidates,
     };
   }
 
@@ -706,11 +638,13 @@ export class CaptureRepository {
       .filter((unit) => normalizeLanguage(unit.language) === language);
     const matchingOwners = new Map(observedUnits.map((unit) => [unit.id, unit]));
 
-    const directOwner = await this.database.lexicalUnits
+    const directOwners = await this.database.lexicalUnits
       .where("contentKey")
       .equals(directContentKey)
-      .first();
-    if (directOwner) matchingOwners.set(directOwner.id, directOwner);
+      .toArray();
+    for (const directOwner of directOwners) {
+      matchingOwners.set(directOwner.id, directOwner);
+    }
 
     const exactOwnerIds = new Set<string>();
     for (const occurrence of surfaceOccurrences) {
