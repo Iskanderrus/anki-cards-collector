@@ -349,6 +349,7 @@ function App(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [reviewSessionIds, setReviewSessionIds] = useState<string[]>([]);
+  const reviewSessionIdsRef = useRef<string[]>([]);
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
   const [exportTechnicalError, setExportTechnicalError] = useState("");
@@ -626,6 +627,16 @@ function App(): React.ReactElement {
     setActiveId(id);
   }
 
+  function commitReviewSessionIds(
+    next: React.SetStateAction<string[]>,
+  ): void {
+    const resolved = typeof next === "function"
+      ? next(reviewSessionIdsRef.current)
+      : next;
+    reviewSessionIdsRef.current = resolved;
+    setReviewSessionIds(resolved);
+  }
+
   function openDetail(id: string): void {
     selectActiveId(id);
     setView("detail");
@@ -636,7 +647,7 @@ function App(): React.ReactElement {
 
   function showQueue(): void {
     cancelEdit();
-    setReviewSessionIds([]);
+    commitReviewSessionIds([]);
     closeExportPreview(false);
     setView("queue");
     requestAnimationFrame(() => {
@@ -651,7 +662,7 @@ function App(): React.ReactElement {
 
   function showStaged(): void {
     cancelEdit();
-    setReviewSessionIds([]);
+    commitReviewSessionIds([]);
     closeExportPreview(false);
     setView("staged");
     void refreshStagedCandidates();
@@ -664,7 +675,7 @@ function App(): React.ReactElement {
 
   function showSettings(): void {
     cancelEdit();
-    setReviewSessionIds([]);
+    commitReviewSessionIds([]);
     closeExportPreview();
     closeDeckAnalysis();
     setView("settings");
@@ -726,7 +737,7 @@ function App(): React.ReactElement {
       return;
     }
 
-    setReviewSessionIds(inboxIds);
+    commitReviewSessionIds(inboxIds);
     selectActiveId(inboxIds[0]!);
     setView("detail");
     requestAnimationFrame(() => {
@@ -1118,9 +1129,10 @@ function App(): React.ReactElement {
     await repository.setStatus(id, status);
     await load(id);
 
-    if (reviewSessionIds.includes(id) && (status === "ready" || status === "archived")) {
-      const currentIndex = reviewSessionIds.indexOf(id);
-      const nextId = reviewSessionIds[currentIndex + 1];
+    const sessionIds = reviewSessionIdsRef.current;
+    if (sessionIds.includes(id) && (status === "ready" || status === "archived")) {
+      const currentIndex = sessionIds.indexOf(id);
+      const nextId = sessionIds[currentIndex + 1];
       if (nextId) {
         selectActiveId(nextId);
         setView("detail");
@@ -1128,7 +1140,7 @@ function App(): React.ReactElement {
           document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
         });
       } else {
-        setReviewSessionIds([]);
+        commitReviewSessionIds([]);
         setView("queue");
         setNotice("Inbox reviewed. You can export Ready items now or collect more language.");
       }
@@ -1190,7 +1202,7 @@ function App(): React.ReactElement {
 
       const updated = await repository.update(id, editDraft);
       if (updated.lexicalUnit.id !== id) {
-        setReviewSessionIds((current) =>
+        commitReviewSessionIds((current) =>
           reconcileReviewSessionIds(current, id, updated.lexicalUnit.id)
         );
       }
@@ -1734,8 +1746,13 @@ function App(): React.ReactElement {
       }
       if (view === "settings" || view === "staged") return;
 
-      const inReviewSession = reviewSessionIds.length > 0;
-      const navigableItems = inReviewSession ? reviewSessionItems : items;
+      const sessionIds = reviewSessionIdsRef.current;
+      const inReviewSession = sessionIds.length > 0;
+      const navigableItems = inReviewSession
+        ? sessionIds
+          .map((id) => items.find((item) => item.lexicalUnit.id === id))
+          .filter((item): item is CollectedItem => item !== undefined)
+        : items;
       if (navigableItems.length === 0) return;
       const foundIndex = navigableItems.findIndex(
         (item) => item.lexicalUnit.id === activeId,
