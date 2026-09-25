@@ -18,8 +18,10 @@ import type {
 } from "../core/types";
 import type {
   CanonicalizationPreview,
+  MergePreview,
   ObservedFormGroup,
   RestorePreview,
+  SplitPreview,
 } from "../storage/repository";
 import { repository } from "../storage/repository";
 import {
@@ -57,6 +59,10 @@ import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
 import { Onboarding } from "./onboarding";
 import { ExportPreviewDialog } from "./export-preview-dialog";
+import {
+  MergeLexicalUnitDialog,
+  SplitLexicalUnitDialog,
+} from "./identity-operations-dialog";
 import {
   buildExportPreview,
   friendlyExportFailure,
@@ -99,6 +105,23 @@ type ObservedFormsUiState =
   | { kind: "live"; lexicalUnitId: string; groups: ObservedFormGroup[] }
   | { kind: "error"; lexicalUnitId: string; error: string };
 
+interface MergeDialogState {
+  sourceId: string;
+  preview: MergePreview | null;
+  canonicalText: string;
+  note: string;
+  error: string;
+}
+
+interface SplitDialogState {
+  sourceId: string;
+  selectedOccurrenceIds: string[];
+  canonicalText: string;
+  note: string;
+  preview: SplitPreview | null;
+  error: string;
+}
+
 function sameCanonicalizationPreview(
   left: CanonicalizationPreview,
   right: CanonicalizationPreview,
@@ -108,43 +131,25 @@ function sameCanonicalizationPreview(
     && left.currentId === right.currentId
     && left.requestedCanonicalText === right.requestedCanonicalText
     && left.requestedLanguage === right.requestedLanguage
-    && left.target?.id === right.target?.id
-    && left.survivingLexicalUnitId === right.survivingLexicalUnitId
-    && left.resultingOccurrenceCount === right.resultingOccurrenceCount
-    && left.preservedAnkiNoteId === right.preservedAnkiNoteId
-    && left.conflictReason === right.conflictReason
+    && left.willReturnToInbox === right.willReturnToInbox
+    && JSON.stringify(left.sameCanonicalCandidates) === JSON.stringify(right.sameCanonicalCandidates)
   );
 }
 
 function canonicalizationPreviewMessage(preview: CanonicalizationPreview): string {
+  const duplicateMessage = preview.sameCanonicalCandidates.length > 0
+    ? ` ${preview.sameCanonicalCandidates.length} separate lexical unit${preview.sameCanonicalCandidates.length === 1 ? "" : "s"} already use this canonical form. They stay separate unless you explicitly merge them.`
+    : "";
+
   if (preview.kind === "unchanged") {
-    return "Canonical identity is unchanged.";
+    return `Canonical text is unchanged.${duplicateMessage}`;
   }
 
-  if (preview.kind === "rename") {
-    return [
-      `Rename “${preview.currentCanonicalText}” to “${preview.requestedCanonicalText}”.`,
-      `${preview.currentOccurrenceCount} captured occurrence${preview.currentOccurrenceCount === 1 ? "" : "s"} stay attached.`,
-      preview.willReturnToInbox ? "The item will return to Inbox for re-approval." : "",
-    ].filter(Boolean).join(" ");
-  }
-
-  if (preview.kind === "conflict") {
-    return preview.conflictReason ?? "This canonical change cannot be applied safely.";
-  }
-
-  const targetCount = preview.target?.occurrenceCount ?? 0;
-  const keepsCurrent = preview.survivingLexicalUnitId === preview.currentId;
   return [
-    `Consolidate with existing “${preview.target?.canonicalText ?? preview.requestedCanonicalText}”.`,
-    `${preview.currentOccurrenceCount} + ${targetCount} occurrences become ${preview.resultingOccurrenceCount ?? preview.currentOccurrenceCount + targetCount}.`,
-    keepsCurrent
-      ? "This item’s Collector identity will be kept."
-      : "The existing canonical unit’s Collector identity will be kept.",
-    preview.preservedAnkiNoteId !== undefined
-      ? `Anki note ${preview.preservedAnkiNoteId} will be preserved.`
-      : "",
-    "The result returns to Inbox for re-approval.",
+    `Rename “${preview.currentCanonicalText}” to “${preview.requestedCanonicalText}”.`,
+    `${preview.currentOccurrenceCount} captured occurrence${preview.currentOccurrenceCount === 1 ? "" : "s"} stay attached to this Collector ID.`,
+    preview.willReturnToInbox ? "The item will return to Inbox for re-approval." : "",
+    duplicateMessage.trim(),
   ].filter(Boolean).join(" ");
 }
 
@@ -311,29 +316,27 @@ function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
 }
 
-function reconcileReviewSessionIds(
+function reconcileReviewSessionMerge(
   ids: string[],
-  oldId: string,
+  sourceId: string,
+  targetId: string,
   survivingId: string,
 ): string[] {
-  const oldIndex = ids.indexOf(oldId);
-  if (oldIndex < 0 || oldId === survivingId) return ids;
+  const involved = new Set([sourceId, targetId, survivingId]);
+  const involvedIndexes = ids
+    .map((id, index) => involved.has(id) ? index : -1)
+    .filter((index) => index >= 0);
+  if (involvedIndexes.length === 0) return ids;
 
-  const survivorIndex = ids.indexOf(survivingId);
-  const withoutEither = ids.filter((id) => id !== oldId && id !== survivingId);
-  const logicalCurrentIndex = oldIndex - (
-    survivorIndex >= 0 && survivorIndex < oldIndex ? 1 : 0
-  );
-  const insertionIndex = Math.min(
-    Math.max(0, logicalCurrentIndex),
-    withoutEither.length,
-  );
+  const insertionAtOriginalIndex = Math.min(...involvedIndexes);
+  const before = ids
+    .slice(0, insertionAtOriginalIndex)
+    .filter((id) => !involved.has(id));
+  const after = ids
+    .slice(insertionAtOriginalIndex)
+    .filter((id) => !involved.has(id));
 
-  return [
-    ...withoutEither.slice(0, insertionIndex),
-    survivingId,
-    ...withoutEither.slice(insertionIndex),
-  ];
+  return [...before, survivingId, ...after];
 }
 
 function sourceLabel(occurrence: Occurrence | undefined): string {
