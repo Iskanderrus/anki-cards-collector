@@ -384,6 +384,13 @@ const server = createServer((request, response) => {
           <p id="duplicate-archive-current">duplicate archive current appears in a controlled sentence.</p>
           <p id="duplicate-archive-next">duplicate archive next appears in a controlled sentence.</p>
           <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
+          <p id="exported-merge-target">exported merge target appears in a controlled sentence.</p>
+          <p id="exported-merge-source">exported merge source appears in a controlled sentence.</p>
+          <p id="merge-conflict-a">merge conflict alpha appears in a controlled sentence.</p>
+          <p id="merge-conflict-b">merge conflict beta appears in a controlled sentence.</p>
+          <p id="review-split-a">review split appears in the first controlled split context.</p>
+          <p id="review-split-b">review split appears in the second controlled split context.</p>
+          <p id="review-split-next">review split next appears in a controlled sentence.</p>
         </main>
       </body>
     </html>`);
