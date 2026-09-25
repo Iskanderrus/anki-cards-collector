@@ -2854,6 +2854,7 @@ try {
     return ready instanceof HTMLButtonElement && !ready.disabled;
   });
   await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /review next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /review next/i,
@@ -2894,6 +2895,7 @@ try {
     return archive instanceof HTMLButtonElement && !archive.disabled;
   });
   await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /archive next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /archive next/i,
