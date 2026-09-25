@@ -1584,15 +1584,6 @@ try {
 
   // Same-name deck replacement must fail closed and never rewrite the pinned ID.
   ankiDecks.set("Hebrew RU", 22);
-  await ensureQueue(panel);
-  const replacedDeckPreview = await openExportPreview(panel);
-  assert.match(
-    await replacedDeckPreview.innerText(),
-    /changed in live Anki|revalidate/i,
-    "PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: live identity drift must be blocked before execution.",
-  );
-  await replacedDeckPreview.getByRole("button", { name: "Cancel" }).click();
-  await openSettings(panel);
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText(/Same-name deck replacement rejected/).waitFor();
   let revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
@@ -1679,6 +1670,22 @@ try {
   if (await mappedReady.count()) await mappedReady.click();
   await mappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assert.match(await mappedCard.locator(".export-destination").innerText(), /Anki:\s*Hebrew RU/);
+
+  // PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: this Ready item resolves through
+  // the mapped profile and has no export binding yet, so a same-name live deck
+  // replacement must be visible as blocked before any write is attempted.
+  ankiDecks.set("Hebrew RU", 22);
+  const mappedReplacementPreview = await openExportPreview(panel);
+  const mappedReplacementText = await mappedReplacementPreview.innerText();
+  assert.match(mappedReplacementText, /Mapped export phrase/);
+  assert.match(
+    mappedReplacementText,
+    /changed in live Anki|revalidate/i,
+    "PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: mapped live identity drift must be blocked before execution.",
+  );
+  assert.match(mappedReplacementText, /blocked/i);
+  ankiDecks.set("Hebrew RU", 2);
+  await mappedReplacementPreview.getByRole("button", { name: "Cancel" }).click();
 
   ankiRequests.length = 0;
   await exportReady(panel);
