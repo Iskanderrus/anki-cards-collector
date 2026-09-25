@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackupDocument } from "../backup/format";
 import { DEFAULT_SETTINGS } from "../settings";
 import type { CaptureDraft } from "../core/types";
@@ -120,71 +120,104 @@ describe("CaptureRepository", () => {
     expect(items[0]?.occurrences).toHaveLength(2);
   });
 
-  it("consolidates compatible forms under one canonical unit and preserves an exported identity", async () => {
-    const first = await repository.capture(draft("tengo ganas de", "Hoy tengo ganas de salir."));
-    await repository.update(first.lexicalUnit.id, {
-      canonicalText: "tener ganas de",
-      language: "es",
-      note: "Common construction.",
-      occurrenceId: first.occurrences[0]!.id,
-      surfaceText: "tengo ganas de",
-      context: "Hoy tengo ganas de salir.",
-    });
-    await repository.setAnkiNoteId(first.lexicalUnit.id, 4242);
 
-    const second = await repository.capture(draft("tenía ganas de", "Ayer tenía ganas de dormir."));
-    const consolidated = await repository.update(second.lexicalUnit.id, {
-      canonicalText: "tener ganas de",
+  it("allows a canonical edit to match another unit without implicit merge", async () => {
+    const first = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const second = await repository.capture(draft("tengo", "Tengo tiempo."));
+
+    const updated = await repository.update(second.lexicalUnit.id, {
+      canonicalText: "tener",
       language: "es",
-      note: "",
+      note: "separate sense",
       occurrenceId: second.occurrences[0]!.id,
-      surfaceText: "tenía ganas de",
-      context: "Ayer tenía ganas de dormir.",
+      surfaceText: "tengo",
+      context: "Tengo tiempo.",
     });
 
-    expect(consolidated.lexicalUnit.id).toBe(first.lexicalUnit.id);
-    expect(consolidated.lexicalUnit.ankiNoteId).toBe(4242);
-    expect(consolidated.lexicalUnit.status).toBe("inbox");
-    expect(consolidated.occurrences.map((occurrence) => occurrence.surfaceText).sort()).toEqual([
-      "tengo ganas de",
-      "tenía ganas de",
-    ]);
+    const items = await repository.list();
+    expect(items).toHaveLength(2);
+    expect(updated.lexicalUnit.id).toBe(second.lexicalUnit.id);
+    expect(items.map((item) => item.lexicalUnit.id).sort()).toEqual(
+      [first.lexicalUnit.id, second.lexicalUnit.id].sort(),
+    );
+    expect(items.every((item) => item.lexicalUnit.contentKey === "es::tener")).toBe(true);
+  });
+
+
+  it("explicit merge preserves the exported lexical identity and all occurrence ids", async () => {
+    const unexported = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const exported = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: exported.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 777,
+      deckName: "Spanish RU",
+      deckId: "2",
+      modelName: "Collector Basic",
+      modelId: "10",
+    });
+    const occurrenceIds = [
+      ...unexported.occurrences.map((occurrence) => occurrence.id),
+      ...exported.occurrences.map((occurrence) => occurrence.id),
+    ].sort();
+
+    const preview = await repository.previewMerge(unexported.lexicalUnit.id, exported.lexicalUnit.id);
+    expect(preview.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+    expect(preview.blocked).toBe(false);
+
+    const merged = await repository.mergeLexicalUnits({
+      sourceId: unexported.lexicalUnit.id,
+      targetId: exported.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "tener",
+      note: "chosen note",
+    });
+
+    expect(merged.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+    expect(merged.item.lexicalUnit.status).toBe("inbox");
+    expect(merged.item.lexicalUnit.note).toBe("chosen note");
+    expect(merged.item.occurrences.map((occurrence) => occurrence.id).sort()).toEqual(occurrenceIds);
+    expect(await repository.getExportBinding(exported.lexicalUnit.id)).toMatchObject({
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 777,
+      deckId: "2",
+      modelId: "10",
+    });
     expect(await repository.list()).toHaveLength(1);
   });
 
-  it("preserves the edited exported identity when the existing canonical unit is unexported", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
-    await repository.setAnkiNoteId(observed.lexicalUnit.id, 777);
 
-    const consolidated = await repository.update(observed.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
+  it("blocks explicit merge for different Anki note identities without mutating either unit", async () => {
+    const first = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const second = await repository.capture(draft("tengo", "Tengo tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: first.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 100,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+    await repository.setExportBinding({
+      lexicalUnitId: second.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 200,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
     });
 
-    expect(consolidated.lexicalUnit.id).toBe(observed.lexicalUnit.id);
-    expect(consolidated.lexicalUnit.ankiNoteId).toBe(777);
-    expect(consolidated.occurrences).toHaveLength(2);
-    expect(await database.lexicalUnits.get(canonical.lexicalUnit.id)).toBeUndefined();
-  });
-
-  it("refuses to consolidate units tied to different Anki notes", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
-    await repository.setAnkiNoteId(canonical.lexicalUnit.id, 100);
-    await repository.setAnkiNoteId(observed.lexicalUnit.id, 200);
-
-    await expect(repository.update(observed.lexicalUnit.id, {
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("different Anki notes");
+    await expect(repository.mergeLexicalUnits({
+      sourceId: first.lexicalUnit.id,
+      targetId: second.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
       canonicalText: "tener",
-      language: "es",
       note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
     })).rejects.toThrow("different Anki notes");
 
     expect(await repository.list()).toHaveLength(2);
@@ -292,41 +325,33 @@ describe("CaptureRepository", () => {
     expect((await repository.list())[0]?.lexicalUnit.id).toBe(captured.lexicalUnit.id);
   });
 
-  it("refuses canonical consolidation when units are pinned to different export profiles", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
 
+  it("blocks explicit merge when units have different export bindings", async () => {
+    const first = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const second = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
-      lexicalUnitId: canonical.lexicalUnit.id,
+      lexicalUnitId: first.lexicalUnit.id,
       profileId: "profile-a",
       state: "override",
     });
     await repository.setExportBinding({
-      lexicalUnitId: observed.lexicalUnit.id,
+      lexicalUnitId: second.lexicalUnit.id,
       profileId: "profile-b",
       state: "override",
     });
 
-    await expect(repository.update(observed.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
-    })).rejects.toThrow("different export destinations");
-
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("different Anki destination bindings");
     expect(await repository.list()).toHaveLength(2);
   });
 
 
-
-  it("blocks canonical consolidation when same-name mapped bindings pin different model ids", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
-
+  it("blocks explicit merge when same-name bindings pin different model ids", async () => {
+    const first = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const second = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
-      lexicalUnitId: canonical.lexicalUnit.id,
+      lexicalUnitId: first.lexicalUnit.id,
       profileId: "profile-a",
       state: "override",
       deckName: "Spanish RU",
@@ -335,7 +360,7 @@ describe("CaptureRepository", () => {
       modelId: "11",
     });
     await repository.setExportBinding({
-      lexicalUnitId: observed.lexicalUnit.id,
+      lexicalUnitId: second.lexicalUnit.id,
       profileId: "profile-a",
       state: "override",
       deckName: "Spanish RU",
@@ -344,24 +369,17 @@ describe("CaptureRepository", () => {
       modelId: "999",
     });
 
-    await expect(repository.update(observed.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
-    })).rejects.toThrow("different export destinations");
-
-    expect(await repository.list()).toHaveLength(2);
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("different Anki destination bindings");
   });
 
-  it("moves a compatible binding with the surviving lexical unit during consolidation", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
 
+  it("explicit merge keeps one compatible binding on the surviving unit", async () => {
+    const unexported = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const exported = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
-      lexicalUnitId: observed.lexicalUnit.id,
+      lexicalUnitId: exported.lexicalUnit.id,
       profileId: "profile-a",
       state: "exported",
       ankiNoteId: 6060,
@@ -369,21 +387,21 @@ describe("CaptureRepository", () => {
       modelName: "Collector Basic",
     });
 
-    const consolidated = await repository.update(observed.lexicalUnit.id, {
+    const preview = await repository.previewMerge(unexported.lexicalUnit.id, exported.lexicalUnit.id);
+    const result = await repository.mergeLexicalUnits({
+      sourceId: unexported.lexicalUnit.id,
+      targetId: exported.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
       canonicalText: "tener",
-      language: "es",
       note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
     });
 
-    expect(consolidated.lexicalUnit.id).toBe(observed.lexicalUnit.id);
-    expect(await repository.getExportBinding(observed.lexicalUnit.id)).toMatchObject({
+    expect(result.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+    expect(await repository.getExportBinding(exported.lexicalUnit.id)).toMatchObject({
       profileId: "profile-a",
       ankiNoteId: 6060,
     });
-    expect(await repository.getExportBinding(canonical.lexicalUnit.id)).toBeNull();
+    expect(await repository.getExportBinding(unexported.lexicalUnit.id)).toBeNull();
   });
 
   it("restores export bindings idempotently and rejects a conflicting local destination", async () => {
@@ -440,12 +458,12 @@ describe("CaptureRepository", () => {
   });
 
 
-  it("refuses consolidation when the same profile id has conflicting pinned destination snapshots", async () => {
-    const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
-    const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
 
+  it("blocks explicit merge for conflicting pinned destination snapshots", async () => {
+    const first = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    const second = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
-      lexicalUnitId: canonical.lexicalUnit.id,
+      lexicalUnitId: first.lexicalUnit.id,
       profileId: "profile-a",
       state: "exported",
       ankiNoteId: 1111,
@@ -453,7 +471,7 @@ describe("CaptureRepository", () => {
       modelName: "Collector Basic",
     });
     await repository.setExportBinding({
-      lexicalUnitId: observed.lexicalUnit.id,
+      lexicalUnitId: second.lexicalUnit.id,
       profileId: "profile-a",
       state: "exported",
       ankiNoteId: 1111,
@@ -461,18 +479,10 @@ describe("CaptureRepository", () => {
       modelName: "Collector Basic",
     });
 
-    await expect(repository.update(observed.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: observed.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
-    })).rejects.toThrow("different export destinations");
-
-    expect(await repository.list()).toHaveLength(2);
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("different Anki destination bindings");
   });
-
 
   it("refuses deletion while a reserved Anki identity is awaiting reconciliation", async () => {
     const captured = await repository.capture(draft("aunque", "Aunque llueva, voy."));
@@ -499,10 +509,10 @@ describe("CaptureRepository", () => {
     });
   });
 
-  it("blocks canonical consolidation when the edited unit has a reserved external identity", async () => {
-    const reserved = await repository.capture(draft("tengo", "Tengo tiempo."));
-    const collision = await repository.capture(draft("tener", "Quiero tener tiempo."));
 
+  it("blocks explicit merge when one side has a reserved external identity", async () => {
+    const reserved = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const other = await repository.capture(draft("tener", "Quiero tener tiempo."));
     await repository.setExportBinding({
       lexicalUnitId: reserved.lexicalUnit.id,
       profileId: "es-profile",
@@ -511,30 +521,16 @@ describe("CaptureRepository", () => {
       modelName: "Collector Basic",
     });
 
-    await expect(repository.update(reserved.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: reserved.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
-    })).rejects.toThrow("awaiting reconciliation");
-
-    const items = await repository.list();
-    expect(items.map((item) => item.lexicalUnit.id).sort()).toEqual(
-      [reserved.lexicalUnit.id, collision.lexicalUnit.id].sort(),
-    );
-    expect(await repository.getExportBinding(reserved.lexicalUnit.id)).toMatchObject({
-      lexicalUnitId: reserved.lexicalUnit.id,
-      state: "reserved",
-    });
-    expect(await repository.getExportBinding(collision.lexicalUnit.id)).toBeNull();
+    const preview = await repository.previewMerge(reserved.lexicalUnit.id, other.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("reserved");
+    expect(await repository.list()).toHaveLength(2);
   });
 
-  it("blocks consolidation when both units hold independent reserved identities", async () => {
+
+  it("blocks explicit merge when both units hold reserved identities", async () => {
     const first = await repository.capture(draft("tengo", "Tengo tiempo."));
     const second = await repository.capture(draft("tener", "Quiero tener tiempo."));
-
     for (const lexicalUnitId of [first.lexicalUnit.id, second.lexicalUnit.id]) {
       await repository.setExportBinding({
         lexicalUnitId,
@@ -545,24 +541,10 @@ describe("CaptureRepository", () => {
       });
     }
 
-    await expect(repository.update(first.lexicalUnit.id, {
-      canonicalText: "tener",
-      language: "es",
-      note: "",
-      occurrenceId: first.occurrences[0]!.id,
-      surfaceText: "tengo",
-      context: "Tengo tiempo.",
-    })).rejects.toThrow("awaiting reconciliation");
-
-    expect(await repository.list()).toHaveLength(2);
-    expect(await repository.getExportBinding(first.lexicalUnit.id)).toMatchObject({
-      lexicalUnitId: first.lexicalUnit.id,
-      state: "reserved",
-    });
-    expect(await repository.getExportBinding(second.lexicalUnit.id)).toMatchObject({
-      lexicalUnitId: second.lexicalUnit.id,
-      state: "reserved",
-    });
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(true);
+    expect(preview.conflictReason).toContain("reserved");
+    expect(await repository.listExportBindings()).toHaveLength(2);
   });
 
   it("allows a reserved item to be edited when its Collector ID is retained", async () => {
@@ -712,7 +694,8 @@ describe("CaptureRepository", () => {
     ]);
   });
 
-  it("previews a canonical rename without mutating the corpus", async () => {
+
+  it("previews a canonical rename without mutating identity", async () => {
     const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setStatus(captured.lexicalUnit.id, "ready");
 
@@ -730,14 +713,14 @@ describe("CaptureRepository", () => {
       requestedLanguage: "es",
       currentOccurrenceCount: 1,
       willReturnToInbox: true,
-      survivingLexicalUnitId: captured.lexicalUnit.id,
-      resultingOccurrenceCount: 1,
+      sameCanonicalCandidates: [],
     });
     expect((await repository.list())[0]?.lexicalUnit.canonicalText).toBe("tengo");
     expect((await repository.list())[0]?.lexicalUnit.status).toBe("ready");
   });
 
-  it("previews safe consolidation and identifies the surviving exported identity", async () => {
+
+  it("canonicalization preview reports same-canonical candidates but never implies merge", async () => {
     const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
     const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
@@ -755,26 +738,19 @@ describe("CaptureRepository", () => {
       "es",
     );
 
-    expect(preview).toMatchObject({
-      kind: "consolidate",
-      currentId: observed.lexicalUnit.id,
-      requestedCanonicalText: "tener",
-      requestedLanguage: "es",
-      currentOccurrenceCount: 1,
-      willReturnToInbox: true,
-      survivingLexicalUnitId: observed.lexicalUnit.id,
-      resultingOccurrenceCount: 2,
-      preservedAnkiNoteId: 6060,
-      target: {
-        id: canonical.lexicalUnit.id,
-        canonicalText: "tener",
-        occurrenceCount: 1,
-      },
-    });
+    expect(preview.kind).toBe("rename");
+    expect(preview.sameCanonicalCandidates).toEqual([{
+      id: canonical.lexicalUnit.id,
+      canonicalText: "tener",
+      language: "es",
+      status: "inbox",
+      occurrenceCount: 1,
+    }]);
     expect(await repository.list()).toHaveLength(2);
   });
 
-  it("previews consolidation conflicts before any write occurs", async () => {
+
+  it("canonicalization remains an edit even when a possible merge would be blocked", async () => {
     const canonical = await repository.capture(draft("tener", "Quiero tener tiempo."));
     const observed = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
@@ -799,11 +775,23 @@ describe("CaptureRepository", () => {
       "tener",
       "es",
     );
+    expect(preview.kind).toBe("rename");
+    expect(preview.sameCanonicalCandidates[0]?.id).toBe(canonical.lexicalUnit.id);
 
-    expect(preview.kind).toBe("conflict");
-    expect(preview.conflictReason).toContain("different Anki notes");
-    expect(preview.target?.id).toBe(canonical.lexicalUnit.id);
+    const updated = await repository.update(observed.lexicalUnit.id, {
+      canonicalText: "tener",
+      language: "es",
+      note: "",
+    });
+    expect(updated.lexicalUnit.id).toBe(observed.lexicalUnit.id);
     expect(await repository.list()).toHaveLength(2);
+
+    const mergePreview = await repository.previewMerge(
+      observed.lexicalUnit.id,
+      canonical.lexicalUnit.id,
+    );
+    expect(mergePreview.blocked).toBe(true);
+    expect(mergePreview.conflictReason).toContain("different Anki notes");
   });
 
 });
