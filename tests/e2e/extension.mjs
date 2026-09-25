@@ -2964,12 +2964,11 @@ try {
   await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
   await mergeDialog.waitFor({ state: "detached" });
   await ensureQueue(panel);
+  const remergedCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
   assert.equal(
-    panel.locator(".queue-row").filter({
-      has: panel.locator(".term", { hasText: /^tener$/ }),
-    }).count ? await panel.locator(".queue-row").filter({
-      has: panel.locator(".term", { hasText: /^tener$/ }),
-    }).count() : -1,
+    await remergedCanonicalRows.count(),
     1,
     "The reloaded split identities must merge only after explicit confirmation.",
   );
