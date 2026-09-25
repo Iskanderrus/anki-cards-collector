@@ -2688,25 +2688,26 @@ try {
   );
 
   markE2eStage("post-accp018-regression-suite");
-  // ACCP-003: a canonical edit that would merge independently exported units is
-  // blocked before any corpus mutation. Re-open the Serbian card because the
-  // mapped-export acceptance above intentionally focused a different detail.
+  // ACCP-004 changes the ACCP-003 invariant: canonical equality is only a
+  // possible merge candidate, never an implicit consolidation/conflict.
+  // Use the two already-exported baseline cards to prove the edit preview stays
+  // non-destructive even though an explicit merge of them would later be unsafe.
   secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
-  const conflictEditor = secondRoutingCard.locator(".editor");
-  await conflictEditor.getByLabel("Canonical form").fill("Aunque llueva");
-  await conflictEditor.getByLabel("Language code").fill("he");
-  const conflictPreview = secondRoutingCard.locator(".canonicalization-preview.conflict");
-  await conflictPreview.waitFor();
+  const sameCanonicalEditor = secondRoutingCard.locator(".editor");
+  await sameCanonicalEditor.getByLabel("Canonical form").fill("Aunque llueva");
+  await sameCanonicalEditor.getByLabel("Language code").fill("he");
+  const sameCanonicalPreview = secondRoutingCard.locator(".canonicalization-preview.rename");
+  await sameCanonicalPreview.waitFor();
   assert.match(
-    await conflictPreview.innerText(),
-    /(different export destinations|different Anki notes)/i,
-    "Unsafe consolidation should explain the identity conflict before Save.",
+    await sameCanonicalPreview.innerText(),
+    /separate lexical unit.*already use this canonical form/i,
+    "Canonical equality should be presented as a separate possible merge candidate.",
   );
   assert.equal(
     await secondRoutingCard.getByRole("button", { name: "Save" }).isDisabled(),
-    true,
-    "Conflict preview must block Save instead of relying on a failed write.",
+    false,
+    "Same-canonical text must not turn canonical editing into an implicit merge conflict.",
   );
   await secondRoutingCard.getByRole("button", { name: "Cancel" }).click();
 
