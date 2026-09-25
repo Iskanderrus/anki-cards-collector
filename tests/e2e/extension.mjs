@@ -2848,6 +2848,11 @@ try {
   await remediationCard.getByRole("button", { name: "Save" }).click();
   await remediationCard.locator(".editor").waitFor({ state: "detached" });
   assert.match(await panel.locator(".detail-card .term").innerText(), /review survivor/i);
+  await panel.waitForFunction(() => {
+    const ready = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Ready");
+    return ready instanceof HTMLButtonElement && !ready.disabled;
+  });
   await panel.keyboard.press("r");
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
@@ -2883,6 +2888,11 @@ try {
   await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
   await remediationCard.getByRole("button", { name: "Save" }).click();
   await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const archive = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Archive");
+    return archive instanceof HTMLButtonElement && !archive.disabled;
+  });
   await panel.keyboard.press("a");
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
