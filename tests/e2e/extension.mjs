@@ -377,6 +377,12 @@ const server = createServer((request, response) => {
           <p id="archive-survivor">archive survivor appears in a controlled sentence.</p>
           <p id="archive-current">archive current appears in a controlled sentence.</p>
           <p id="archive-next">archive next appears in a controlled sentence.</p>
+          <p id="duplicate-ready-survivor">duplicate ready survivor appears in a controlled sentence.</p>
+          <p id="duplicate-ready-current">duplicate ready current appears in a controlled sentence.</p>
+          <p id="duplicate-ready-next">duplicate ready next appears in a controlled sentence.</p>
+          <p id="duplicate-archive-survivor">duplicate archive survivor appears in a controlled sentence.</p>
+          <p id="duplicate-archive-current">duplicate archive current appears in a controlled sentence.</p>
+          <p id="duplicate-archive-next">duplicate archive next appears in a controlled sentence.</p>
           <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
         </main>
       </body>
@@ -2904,6 +2910,92 @@ try {
   await panel.keyboard.press("b");
   await (await queueRowForTerm(panel, "archive survivor")).locator(".pill", { hasText: "archived" }).waitFor();
   await (await queueRowForTerm(panel, "archive next")).locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp012-review-duplicate-survivor-ordering");
+
+  // Duplicate-survivor regression: the survivor is part of the original Inbox
+  // session and has already been reviewed before the current item consolidates
+  // into it. Reconciliation must keep the current logical position rather than
+  // appending the survivor after the next unreviewed item.
+  await selectText(contentPage, "#duplicate-ready-next", "duplicate ready next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#duplicate-ready-current", "duplicate ready current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate ready survivor/i,
+    "Duplicate-survivor Ready fixture must begin with B in [B,A,C].",
+  );
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready current/i }).waitFor();
+
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate ready survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready survivor/i }).waitFor();
+
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate ready next/i,
+    "Duplicate survivor Ready must advance to C instead of ending the review session.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "duplicate ready survivor"))
+    .locator(".pill", { hasText: "ready" }).waitFor();
+  await (await queueRowForTerm(panel, "duplicate ready next"))
+    .locator(".pill", { hasText: "inbox" }).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-next", "duplicate archive next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#duplicate-archive-current", "duplicate archive current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate archive survivor/i,
+    "Duplicate-survivor Archive fixture must begin with B in [B,A,C].",
+  );
+  await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive current/i }).waitFor();
+
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate archive survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive survivor/i }).waitFor();
+
+  await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate archive next/i,
+    "Duplicate survivor Archive must advance to C instead of ending the review session.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "duplicate archive survivor"))
+    .locator(".pill", { hasText: "archived" }).waitFor();
+  await (await queueRowForTerm(panel, "duplicate archive next"))
+    .locator(".pill", { hasText: "inbox" }).waitFor();
 
   markE2eStage("accp012-ready-recapture-returns-to-inbox");
   await selectText(contentPage, "#recapture-approval", "recapture approval");

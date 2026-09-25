@@ -318,8 +318,17 @@ function reconcileReviewSessionIds(
 ): string[] {
   const oldIndex = ids.indexOf(oldId);
   if (oldIndex < 0 || oldId === survivingId) return ids;
+
+  const survivorIndex = ids.indexOf(survivingId);
   const withoutEither = ids.filter((id) => id !== oldId && id !== survivingId);
-  const insertionIndex = Math.min(oldIndex, withoutEither.length);
+  const logicalCurrentIndex = oldIndex - (
+    survivorIndex >= 0 && survivorIndex < oldIndex ? 1 : 0
+  );
+  const insertionIndex = Math.min(
+    Math.max(0, logicalCurrentIndex),
+    withoutEither.length,
+  );
+
   return [
     ...withoutEither.slice(0, insertionIndex),
     survivingId,
