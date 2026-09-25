@@ -389,23 +389,23 @@ function stableIdentitySnapshot(
 export class CaptureRepository {
   constructor(private readonly database: CollectorDatabase = defaultDb) {}
 
-  private async findUniqueUnitByObservedSurface(
+  private async findUnitsByObservedSurface(
     normalizedSurfaceText: string,
     language: string,
-  ): Promise<LexicalUnit | undefined> {
+  ): Promise<{ units: LexicalUnit[]; occurrences: Occurrence[] }> {
     const occurrences = await this.database.occurrences
       .where("normalizedSurfaceText")
       .equals(normalizedSurfaceText)
       .toArray();
 
     const ids = [...new Set(occurrences.map((occurrence) => occurrence.lexicalUnitId))];
-    if (ids.length === 0) return undefined;
+    if (ids.length === 0) return { units: [], occurrences };
 
     const units = (await this.database.lexicalUnits.bulkGet(ids))
       .filter((unit): unit is LexicalUnit => unit !== undefined)
       .filter((unit) => normalizeLanguage(unit.language) === normalizeLanguage(language));
 
-    return units.length === 1 ? units[0] : undefined;
+    return { units, occurrences };
   }
 
   private async captureWithinTransaction(
@@ -418,8 +418,10 @@ export class CaptureRepository {
     const normalizedSurfaceText = normalizeIdentityText(surfaceText);
     const language = normalizeLanguage(draft.language);
     const directContentKey = makeContentKey(surfaceText, language);
+    const context = normalizeText(draft.context).slice(0, 800);
     const now = draft.capturedAt || new Date().toISOString();
     let lexicalUnit: LexicalUnit;
+    let addOccurrence = true;
 
     if (targetLexicalUnitId) {
       const target = await this.database.lexicalUnits.get(targetLexicalUnitId);
@@ -431,16 +433,40 @@ export class CaptureRepository {
       lexicalUnit = { ...target, status: "inbox", updatedAt: now };
       await this.database.lexicalUnits.put(lexicalUnit);
     } else {
-      const direct = await this.database.lexicalUnits
-        .where("contentKey")
-        .equals(directContentKey)
-        .first();
-      const observedOwner = direct
-        ? undefined
-        : await this.findUniqueUnitByObservedSurface(normalizedSurfaceText, language);
-      const existing = direct ?? observedOwner;
+      const [directOwners, observed] = await Promise.all([
+        this.database.lexicalUnits.where("contentKey").equals(directContentKey).toArray(),
+        this.findUnitsByObservedSurface(normalizedSurfaceText, language),
+      ]);
+      const matchingOwners = new Map<string, LexicalUnit>();
+      for (const owner of directOwners) matchingOwners.set(owner.id, owner);
+      for (const owner of observed.units) matchingOwners.set(owner.id, owner);
 
-      if (existing) {
+      if (matchingOwners.size > 1) {
+        const exactOwnerIds = new Set<string>();
+        for (const occurrence of observed.occurrences) {
+          if (!matchingOwners.has(occurrence.lexicalUnitId)) continue;
+          if (normalizeText(occurrence.context) !== context) continue;
+          if (
+            occurrence.source.kind !== draft.source.kind
+            || occurrence.source.adapter !== draft.source.adapter
+            || occurrence.source.url !== draft.source.url
+            || occurrence.source.title !== draft.source.title
+          ) {
+            continue;
+          }
+          exactOwnerIds.add(occurrence.lexicalUnitId);
+        }
+
+        if (exactOwnerIds.size === 1) {
+          lexicalUnit = matchingOwners.get([...exactOwnerIds][0]!)!;
+          addOccurrence = false;
+        } else {
+          throw new Error(
+            "Capture is ambiguous between multiple lexical units. Resolve ownership in Staged review.",
+          );
+        }
+      } else if (matchingOwners.size === 1) {
+        const existing = [...matchingOwners.values()][0]!;
         lexicalUnit = { ...existing, status: "inbox", updatedAt: now };
         await this.database.lexicalUnits.put(lexicalUnit);
       } else {
@@ -459,15 +485,17 @@ export class CaptureRepository {
       }
     }
 
-    await this.database.occurrences.add({
-      id: crypto.randomUUID(),
-      lexicalUnitId: lexicalUnit.id,
-      surfaceText,
-      normalizedSurfaceText,
-      context: normalizeText(draft.context).slice(0, 800),
-      source: draft.source,
-      capturedAt: now,
-    });
+    if (addOccurrence) {
+      await this.database.occurrences.add({
+        id: crypto.randomUUID(),
+        lexicalUnitId: lexicalUnit.id,
+        surfaceText,
+        normalizedSurfaceText,
+        context,
+        source: draft.source,
+        capturedAt: now,
+      });
+    }
 
     return lexicalUnit;
   }
