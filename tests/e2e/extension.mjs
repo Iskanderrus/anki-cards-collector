@@ -2778,8 +2778,11 @@ try {
     "Capturing a long item should keep the user in the compact queue.",
   );
 
-  // ACCP-003: safe canonical consolidation is previewed, then committed without
-  // losing either observed form/context.
+  // ACCP-004: canonical equality no longer collapses identity. First prove
+  // that editing to an existing canonical keeps two units, then merge them
+  // explicitly, split them back into same-canonical identities, reload, and
+  // merge explicitly again.
+  markE2eStage("accp004-canonical-edit-explicit-merge-split");
   await setCaptureLanguage(panel, "es");
   const countBeforeCanonicalPair = await termCount(panel);
 
@@ -2798,39 +2801,162 @@ try {
     "Canonicalization fixture should begin as two distinct lexical units.",
   );
 
-  const observedCanonicalCard = await cardForTerm(panel, "Tengo");
+  let observedCanonicalCard = await cardForTerm(panel, "Tengo");
   await observedCanonicalCard.getByRole("button", { name: "Edit" }).click();
   await observedCanonicalCard.locator(".editor").getByLabel("Canonical form").fill("tener");
-  const consolidationPreview = observedCanonicalCard.locator(".canonicalization-preview.consolidate");
-  await consolidationPreview.waitFor();
+  const sameCanonicalRename = observedCanonicalCard.locator(".canonicalization-preview.rename");
+  await sameCanonicalRename.waitFor();
   assert.match(
-    await consolidationPreview.innerText(),
-    /1 \+ 1 occurrences become 2/,
-    "Consolidation preview should make the occurrence consequence explicit.",
-  );
-  assert.match(
-    await consolidationPreview.innerText(),
-    /returns to Inbox/i,
-    "Consolidation preview should make re-approval explicit.",
+    await sameCanonicalRename.innerText(),
+    /stay separate unless you explicitly merge/i,
+    "Canonical editing must advertise same-canonical units without consolidating them.",
   );
   await observedCanonicalCard.getByRole("button", { name: "Save" }).click();
   await observedCanonicalCard.locator(".editor").waitFor({ state: "detached" });
-
-  const consolidatedCard = panel.locator(".detail-card", {
-    has: panel.locator(".term", { hasText: "tener" }),
+  await ensureQueue(panel);
+  const sameCanonicalRowsAfterEdit = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
   });
-  await consolidatedCard.waitFor();
-  const consolidatedEvidence = consolidatedCard.locator(".canonical-evidence");
-  await consolidatedEvidence.getByText("Observed forms (2)").waitFor();
-  assert.match(await consolidatedEvidence.innerText(), /tener/);
-  assert.match(await consolidatedEvidence.innerText(), /Tengo/);
-  assert.match(await consolidatedEvidence.innerText(), /Quiero tener tiempo para estudiar\./);
-  assert.match(await consolidatedEvidence.innerText(), /Tengo tiempo para estudiar hoy\./);
+  assert.equal(
+    await sameCanonicalRowsAfterEdit.count(),
+    2,
+    "Saving a same-canonical edit must retain two lexical identities.",
+  );
+
+  await sameCanonicalRowsAfterEdit.nth(0).click();
+  observedCanonicalCard = panel.locator(".detail-card");
+  await observedCanonicalCard.waitFor();
+  await observedCanonicalCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  await observedCanonicalCard.getByRole("button", { name: "Merge with another unit…" }).click();
+  let mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.waitFor();
+  assert.equal(
+    await mergeDialog.getByRole("heading", { name: "Merge lexical units" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Merge dialog should put initial focus on its heading.",
+  );
+  const mergeA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    mergeA11y.violations.length,
+    0,
+    "Merge dialog accessibility violations:\n"
+      + JSON.stringify(mergeA11y.violations, null, 2),
+  );
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await mergeDialog.getByRole("button", { name: "Cancel" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the merge heading must remain inside the dialog.",
+  );
+  await mergeDialog.getByLabel("Find merge candidate").fill("tener");
+  await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
+  await mergeDialog.getByText("Surviving Collector ID").waitFor();
+  assert.match(await mergeDialog.innerText(), /2 occurrences will belong to the survivor/i);
+  await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await mergeDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "A local lexical merge must not call AnkiConnect.",
+  );
+  await panel.locator(".detail-card .pill", { hasText: "inbox" }).waitFor();
   await ensureQueue(panel);
   assert.equal(
     await termCount(panel),
     countBeforeCanonicalPair + 1,
-    "Successful canonical consolidation should reduce two compatible units to one.",
+    "Explicit merge should reduce the pair to one lexical identity.",
+  );
+
+  const mergedCanonicalRow = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  }).first();
+  await mergedCanonicalRow.click();
+  let identityCard = panel.locator(".detail-card");
+  await identityCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  await identityCard.getByRole("button", { name: "Split occurrences…" }).click();
+  let splitDialog = panel.getByRole("dialog", { name: "Split occurrences" });
+  await splitDialog.waitFor();
+  assert.equal(
+    await splitDialog.getByRole("heading", { name: "Split occurrences" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Split dialog should put initial focus on its heading.",
+  );
+  const splitA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    splitA11y.violations.length,
+    0,
+    "Split dialog accessibility violations:\n"
+      + JSON.stringify(splitA11y.violations, null, 2),
+  );
+  const splitChoices = splitDialog.locator('.identity-occurrence-choice input[type="checkbox"]');
+  assert.equal(await splitChoices.count(), 2);
+  await splitChoices.nth(1).check();
+  await splitDialog.getByLabel("New unit learner note").fill("deliberate second sense");
+  await splitDialog.getByRole("button", { name: "Review split" }).click();
+  await splitDialog.getByText("Split preview").waitFor();
+  assert.match(await splitDialog.innerText(), /new Collector ID, no Anki binding, and Inbox status/i);
+  await splitDialog.getByRole("button", { name: "Confirm split" }).click();
+  await splitDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "A local lexical split must not call AnkiConnect.",
+  );
+
+  await ensureQueue(panel);
+  let sameCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
+  assert.equal(
+    await sameCanonicalRows.count(),
+    2,
+    "Same-canonical split must persist as two distinct queue items.",
+  );
+  assert.equal(
+    await sameCanonicalRows.locator(".pill").filter({ hasText: "inbox" }).count(),
+    2,
+    "Both sides of a semantic split must require explicit review.",
+  );
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  sameCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
+  assert.equal(
+    await sameCanonicalRows.count(),
+    2,
+    "Same-canonical split identities must survive extension reload.",
+  );
+
+  await sameCanonicalRows.nth(0).click();
+  identityCard = panel.locator(".detail-card");
+  await identityCard.locator(".more-actions > summary").click();
+  await identityCard.getByRole("button", { name: "Merge with another unit…" }).click();
+  mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.getByLabel("Find merge candidate").fill("tener");
+  await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
+  await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await mergeDialog.waitFor({ state: "detached" });
+  await ensureQueue(panel);
+  assert.equal(
+    panel.locator(".queue-row").filter({
+      has: panel.locator(".term", { hasText: /^tener$/ }),
+    }).count ? await panel.locator(".queue-row").filter({
+      has: panel.locator(".term", { hasText: /^tener$/ }),
+    }).count() : -1,
+    1,
+    "The reloaded split identities must merge only after explicit confirmation.",
   );
 
   markE2eStage("accp012-review-canonicalization-identity-reconciliation");
