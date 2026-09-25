@@ -105,9 +105,13 @@ ExportBinding
 
 `ExportProfile` and language-route configuration live in extension settings; the per-item binding lives in IndexedDB so changing defaults cannot silently reinterpret an already-exported note.
 
-A new capture either creates a lexical unit or attaches another occurrence to an existing one. Once a unit has been canonicalized, a repeated capture of an already-observed surface form can still find that unit through the occurrence index.
+A new capture either creates a lexical unit or attaches another occurrence to one unambiguous existing owner. Once intentional same-canonical units exist, canonical/observed lookup may return several plausible owners. Normal capture then fails closed and staged capture requires explicit ownership resolution; Collector never selects the first match or auto-merges identities.
 
-The unique `contentKey` belongs to the canonical form. Surface-form identity belongs to occurrences. Manual canonicalization can consolidate compatible local units; if both candidates already point to different Anki notes, consolidation is refused rather than guessing which external identity should survive.
+`LexicalUnit.id` is primary identity. The derived `contentKey = normalized language + normalized canonical text` is a non-unique discovery/index key, while observed-form identity belongs to occurrences. Canonical editing renames one lexical unit in place and may show same-canonical merge candidates, but equality of canonical text does not imply identity equality.
+
+ACCP-004 identity operations live behind `CaptureRepository`. Explicit merge previews both units and their Anki state, preserves occurrence IDs, chooses one surviving lexical ID, and blocks reserved or incompatible external identities. Explicit split moves a proper subset of occurrence IDs to a newly generated lexical ID; the original retains its binding and the new unit starts unbound. Both operations are one Dexie transaction, revalidate current state at confirmation time, return changed study content to Inbox, and never call Anki directly. Dexie v5 makes `contentKey` non-unique without rewriting IDs; backup v4 permits the same content key on several distinct lexical units and restore matches identity by IDs rather than canonical text.
+
+See [ADR 0012](decisions/0012-lexical-id-primary-identity.md).
 
 ### Learning-card policy
 
@@ -144,7 +148,7 @@ Export first resolves an `ExportProfile` for each Ready item:
 2. language route;
 3. fallback profile.
 
-Ready items are grouped by their **resolved destination identity** (profile ID + resolved deck + resolved model + ownership mode), not merely by profile ID. This keeps an older pinned snapshot separate from the current definition of the same profile. Before the first Anki mutation for an unbound item, Collector persists a `reserved` destination binding containing the profile plus deck/model snapshot. A successful export upgrades it to `exported` and fills the Anki note ID. If the final local write fails or the network outcome is uncertain, the `reserved` state becomes an **external identity lock**: the destination cannot be cleared or rerouted, the lexical unit cannot be deleted, and canonical consolidation cannot replace its Collector ID until a retry reconciles it against Anki. Repository methods enforce those transitions directly; UI guards are only an additional convenience layer. This prevents a cross-system partial failure from losing or re-keying a possibly existing Anki note identity. Later route or profile-default changes therefore do not silently reinterpret or move that note.
+Ready items are grouped by their **resolved destination identity** (profile ID + resolved deck + resolved model + ownership mode), not merely by profile ID. This keeps an older pinned snapshot separate from the current definition of the same profile. Before the first Anki mutation for an unbound item, Collector persists a `reserved` destination binding containing the profile plus deck/model snapshot. A successful export upgrades it to `exported` and fills the Anki note ID. If the final local write fails or the network outcome is uncertain, the `reserved` state becomes an **external identity lock**: the destination cannot be cleared or rerouted, the lexical unit cannot be deleted, and explicit merge cannot consume that identity until a retry reconciles it against Anki. Repository methods enforce those transitions directly; UI guards are only an additional convenience layer. This prevents a cross-system partial failure from losing or re-keying a possibly existing Anki note identity. Later route or profile-default changes therefore do not silently reinterpret or move that note.
 
 For a Collector-managed profile, the Anki upsert path is:
 
@@ -182,11 +186,11 @@ The collector assumes partial failure is normal.
 
 - No selection: return a useful message and write nothing.
 - Restricted browser page: Chrome rejects injection; the side panel reports the capture failure.
-- Duplicate expression: keep the lexical unit and add an occurrence.
+- One unambiguous repeated expression: keep the lexical unit and add an occurrence; multiple plausible lexical owners require explicit resolution instead of first-match capture.
 - Anki is closed: local data stays untouched and TSV remains available.
 - An Anki note was deleted externally: the next export falls back to lookup / create while retaining the resolved profile.
 - A configured deck disappears: export fails usefully instead of silently recreating it. The side panel may create the saved deck only through an explicit user action after a live catalog refresh.
 - A profile or language route changes: already-exported notes keep their pinned binding snapshot until the user performs an explicit move.
-- A local note-ID write or export response is uncertain after Anki mutation: the binding remains `reserved`; destination changes, deletion, binding clearing, and ID-changing consolidation are blocked until retry/reconciliation.
+- A local note-ID write or export response is uncertain after Anki mutation: the binding remains `reserved`; destination changes, deletion, binding clearing, and merge that would consume the reserved identity are blocked until retry/reconciliation.
 - Backup/settings data contains an unknown export-profile ownership mode: restore/settings normalization fails closed before any Anki schema mutation.
 - A source adapter stops matching: generic capture remains available.
