@@ -32,7 +32,11 @@ function useDialogKeyboard(
       if (focusable.length === 0) return;
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
+      const heading = dialogRef.current.querySelector<HTMLElement>("[data-dialog-heading]");
+      if (
+        event.shiftKey
+        && (document.activeElement === first || document.activeElement === heading)
+      ) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
