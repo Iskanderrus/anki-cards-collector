@@ -555,7 +555,7 @@ async function cardForTerm(panel, term) {
 async function openMergeDialog(panel, card, candidateTerm) {
   const moreActions = card.locator(".more-actions");
   if (!(await moreActions.evaluate((node) => node instanceof HTMLDetailsElement && node.open))) {
-    await moreActions.locator("> summary").click();
+    await moreActions.locator("summary").first().click();
   }
   await card.getByRole("button", { name: "Merge with another unit…" }).click();
   const dialog = panel.getByRole("dialog", { name: "Merge lexical units" });
