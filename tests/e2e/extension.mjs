@@ -2974,99 +2974,12 @@ try {
     "The reloaded split identities must merge only after explicit confirmation.",
   );
 
-  markE2eStage("accp012-review-canonicalization-identity-reconciliation");
+  markE2eStage("accp004-review-session-merge-ready");
   await setCaptureLanguage(panel, "es");
 
-  await selectText(contentPage, "#review-survivor", "review survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  let remediationCard = await cardForTerm(panel, "review survivor");
-  await remediationCard.getByRole("button", { name: "Ready" }).click();
-  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
-  await ensureQueue(panel);
-
-  await selectText(contentPage, "#review-next", "review next");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "review next")).waitFor();
-
-  await selectText(contentPage, "#review-current", "review current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "review current")).waitFor();
-
-  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
-  assert.match(await panel.locator(".detail-card .term").innerText(), /review current/i);
-  remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("review survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
-  assert.match(await panel.locator(".detail-card .term").innerText(), /review survivor/i);
-  await panel.waitForFunction(() => {
-    const ready = [...document.querySelectorAll(".detail-card button")]
-      .find((button) => button.textContent?.trim() === "Ready");
-    return ready instanceof HTMLButtonElement && !ready.disabled;
-  });
-  await panel.keyboard.press("r");
-  await panel.locator(".detail-card .term", { hasText: /review next/i }).waitFor();
-  assert.match(
-    await panel.locator(".detail-card .term").innerText(),
-    /review next/i,
-    "REVIEW_CANONICALIZATION_IDENTITY_RECONCILIATION: Ready must mutate the visible survivor.",
-  );
-  await panel.keyboard.press("b");
-  await (await queueRowForTerm(panel, "review survivor")).locator(".pill", { hasText: "ready" }).waitFor();
-  await (await queueRowForTerm(panel, "review next")).locator(".pill", { hasText: "inbox" }).waitFor();
-
-  await selectText(contentPage, "#archive-survivor", "archive survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  remediationCard = await cardForTerm(panel, "archive survivor");
-  await remediationCard.getByRole("button", { name: "Ready" }).click();
-  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
-  await ensureQueue(panel);
-
-  await selectText(contentPage, "#archive-next", "archive next");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "archive next")).waitFor();
-  await selectText(contentPage, "#archive-current", "archive current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "archive current")).waitFor();
-
-  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
-  assert.match(await panel.locator(".detail-card .term").innerText(), /archive current/i);
-  remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("archive survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
-  await panel.waitForFunction(() => {
-    const archive = [...document.querySelectorAll(".detail-card button")]
-      .find((button) => button.textContent?.trim() === "Archive");
-    return archive instanceof HTMLButtonElement && !archive.disabled;
-  });
-  await panel.keyboard.press("a");
-  await panel.locator(".detail-card .term", { hasText: /archive next/i }).waitFor();
-  assert.match(
-    await panel.locator(".detail-card .term").innerText(),
-    /archive next/i,
-    "Archive must mutate the visible survivor and leave the next item untouched.",
-  );
-  await panel.keyboard.press("b");
-  await (await queueRowForTerm(panel, "archive survivor")).locator(".pill", { hasText: "archived" }).waitFor();
-  await (await queueRowForTerm(panel, "archive next")).locator(".pill", { hasText: "inbox" }).waitFor();
-
-  markE2eStage("accp012-review-duplicate-survivor-ordering");
-
-  // Duplicate-survivor regression: the survivor is part of the original Inbox
-  // session and has already been reviewed before the current item consolidates
-  // into it. Reconciliation must keep the current logical position rather than
-  // appending the survivor after the next unreviewed item.
+  // Build [B, A, C] in the Inbox review snapshot, with B already carrying an
+  // exported Anki identity. Review B, then merge active A into B. B must survive
+  // exactly once at A's logical position and Ready must advance to C.
   await selectText(contentPage, "#duplicate-ready-next", "duplicate ready next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
@@ -3080,31 +2993,57 @@ try {
   await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "duplicate ready survivor")).waitFor();
+  let remediationCard = await cardForTerm(panel, "duplicate ready survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Back to inbox" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate ready survivor/i,
-    "Duplicate-survivor Ready fixture must begin with B in [B,A,C].",
+    "Exported survivor fixture must begin the [B,A,C] review snapshot.",
   );
   await panel.keyboard.press("r");
   await panel.locator(".detail-card .term", { hasText: /duplicate ready current/i }).waitFor();
 
   remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate ready survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  ankiRequests.length = 0;
+  let reviewMergeDialog = await openMergeDialog(panel, remediationCard, "duplicate ready survivor");
+  assert.match(
+    await reviewMergeDialog.innerText(),
+    /Anki: exported/i,
+    "Merge preview must expose the exported target identity.",
+  );
+  assert.equal(
+    await reviewMergeDialog.getByLabel("Merged canonical form").inputValue(),
+    "duplicate ready survivor",
+    "The only exported lexical identity must determine the default survivor content.",
+  );
+  await reviewMergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await reviewMergeDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Merging an exported and an unexported unit must not mutate Anki immediately.",
+  );
   await panel.locator(".detail-card .term", { hasText: /duplicate ready survivor/i }).waitFor();
-
+  await panel.waitForFunction(() => {
+    const ready = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Ready");
+    return ready instanceof HTMLButtonElement && !ready.disabled;
+  });
   await panel.keyboard.press("r");
   await panel.locator(".detail-card .term", { hasText: /duplicate ready next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate ready next/i,
-    "Duplicate survivor Ready must advance to C instead of ending the review session.",
+    "Merge reconciliation must remove stale source/duplicate survivor IDs and advance to C.",
   );
   await panel.keyboard.press("b");
   await (await queueRowForTerm(panel, "duplicate ready survivor"))
@@ -3112,6 +3051,7 @@ try {
   await (await queueRowForTerm(panel, "duplicate ready next"))
     .locator(".pill", { hasText: "inbox" }).waitFor();
 
+  markE2eStage("accp004-review-session-merge-archive");
   await selectText(contentPage, "#duplicate-archive-next", "duplicate archive next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
@@ -3125,37 +3065,163 @@ try {
   await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "duplicate archive survivor")).waitFor();
+  remediationCard = await cardForTerm(panel, "duplicate archive survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Back to inbox" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate archive survivor/i,
-    "Duplicate-survivor Archive fixture must begin with B in [B,A,C].",
+    "Archive fixture must begin with exported survivor B.",
   );
   await panel.keyboard.press("a");
   await panel.locator(".detail-card .term", { hasText: /duplicate archive current/i }).waitFor();
-
   remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate archive survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  reviewMergeDialog = await openMergeDialog(panel, remediationCard, "duplicate archive survivor");
+  await reviewMergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await reviewMergeDialog.waitFor({ state: "detached" });
   await panel.locator(".detail-card .term", { hasText: /duplicate archive survivor/i }).waitFor();
-
   await panel.keyboard.press("a");
   await panel.locator(".detail-card .term", { hasText: /duplicate archive next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate archive next/i,
-    "Duplicate survivor Archive must advance to C instead of ending the review session.",
+    "Archive after merge must mutate the visible survivor and advance to C.",
   );
   await panel.keyboard.press("b");
   await (await queueRowForTerm(panel, "duplicate archive survivor"))
     .locator(".pill", { hasText: "archived" }).waitFor();
-  await (await queueRowForTerm(panel, "duplicate archive next"))
-    .locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp004-exported-merge-conflict");
+  await selectText(contentPage, "#merge-conflict-a", "merge conflict alpha");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "merge conflict alpha")).waitFor();
+  await selectText(contentPage, "#merge-conflict-b", "merge conflict beta");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "merge conflict beta")).waitFor();
+
+  let conflictCard = await cardForTerm(panel, "merge conflict alpha");
+  await conflictCard.getByRole("button", { name: "Ready" }).click();
+  await conflictCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+  conflictCard = await cardForTerm(panel, "merge conflict beta");
+  await conflictCard.getByRole("button", { name: "Ready" }).click();
+  await conflictCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  await ensureQueue(panel);
+
+  conflictCard = await cardForTerm(panel, "merge conflict alpha");
+  ankiRequests.length = 0;
+  const conflictMergeButton = conflictCard.getByRole("button", { name: "Merge with another unit…" });
+  await conflictCard.locator(".more-actions > summary").click();
+  await conflictMergeButton.click();
+  let conflictMergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await conflictMergeDialog.getByLabel("Find merge candidate").fill("merge conflict beta");
+  await conflictMergeDialog.locator(".identity-candidate")
+    .filter({ hasText: "merge conflict beta" }).first().click();
+  await conflictMergeDialog.getByRole("alert").waitFor();
+  assert.match(
+    await conflictMergeDialog.getByRole("alert").innerText(),
+    /different Anki notes|different Anki destination bindings/i,
+    "Two independent exported identities must block explicit merge.",
+  );
+  assert.equal(
+    await conflictMergeDialog.getByRole("button", { name: "Confirm merge" }).isDisabled(),
+    true,
+    "Conflict merge confirmation must remain disabled.",
+  );
+  const conflictMergeA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    conflictMergeA11y.violations.length,
+    0,
+    "Blocked merge accessibility violations:\n"
+      + JSON.stringify(conflictMergeA11y.violations, null, 2),
+  );
+  await conflictMergeDialog.getByRole("button", { name: "Cancel" }).click();
+  await conflictMergeDialog.waitFor({ state: "detached" });
+  assert.equal(
+    await conflictMergeButton.evaluate((element) => element === document.activeElement),
+    true,
+    "Canceling an identity dialog must restore focus to its More actions trigger.",
+  );
+  assert.equal(ankiRequests.length, 0, "Blocked merge preview must not call Anki.");
+  await ensureQueue(panel);
+  await (await queueRowForTerm(panel, "merge conflict alpha")).waitFor();
+  await (await queueRowForTerm(panel, "merge conflict beta")).waitFor();
+
+  markE2eStage("accp004-review-session-split");
+  await selectText(contentPage, "#review-split-next", "review split next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review split next")).waitFor();
+
+  await selectText(contentPage, "#review-split-a", "review split");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#review-split-b", "review split");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let reviewSplitRow = await queueRowForTerm(panel, "review split");
+  await reviewSplitRow.getByText(/2 occurrences/).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /^review split$/i,
+    "The two-occurrence split source must be the active review item.",
+  );
+  let splitReviewCard = panel.locator(".detail-card");
+  await splitReviewCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  await splitReviewCard.getByRole("button", { name: "Split occurrences…" }).click();
+  let reviewSplitDialog = panel.getByRole("dialog", { name: "Split occurrences" });
+  const reviewSplitChoices = reviewSplitDialog.locator(
+    '.identity-occurrence-choice input[type="checkbox"]',
+  );
+  assert.equal(await reviewSplitChoices.count(), 2);
+  await reviewSplitChoices.nth(1).check();
+  await reviewSplitDialog.getByRole("button", { name: "Review split" }).click();
+  await reviewSplitDialog.getByText("Split preview").waitFor();
+  await reviewSplitDialog.getByRole("button", { name: "Confirm split" }).click();
+  await reviewSplitDialog.waitFor({ state: "detached" });
+  assert.equal(ankiRequests.length, 0, "Split during review must not call Anki.");
+  await panel.locator(".detail-card .term", { hasText: /^review split$/i }).waitFor();
+
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /review split next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /review split next/i,
+    "The new split child must not be inserted into the active review-session snapshot.",
+  );
+  await panel.keyboard.press("b");
+  await ensureQueue(panel);
+  const splitRowsAfterReview = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^review split$/ }),
+  });
+  assert.equal(await splitRowsAfterReview.count(), 2);
+  assert.equal(
+    await splitRowsAfterReview.locator(".pill").filter({ hasText: "ready" }).count(),
+    1,
+    "Original split source should be the reviewed Ready unit.",
+  );
+  assert.equal(
+    await splitRowsAfterReview.locator(".pill").filter({ hasText: "inbox" }).count(),
+    1,
+    "New split identity should remain Inbox for a later review session.",
+  );
 
   markE2eStage("accp012-ready-recapture-returns-to-inbox");
   await selectText(contentPage, "#recapture-approval", "recapture approval");
