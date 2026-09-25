@@ -29,6 +29,7 @@ assert.ok(
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
 let ankiAvailable = true;
+let delayNextVersionMs = 0;
 let delayNextDeckNamesAndIdsMs = 0;
 const ankiNotes = new Map();
 
@@ -84,6 +85,11 @@ const ankiServer = createServer(async (request, response) => {
 
   switch (action) {
     case "version":
+      if (delayNextVersionMs > 0) {
+        const delayMs = delayNextVersionMs;
+        delayNextVersionMs = 0;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      }
       if (ankiAvailable) result = 6;
       else error = "Anki unavailable fixture";
       break;
@@ -365,6 +371,13 @@ const server = createServer((request, response) => {
           <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
           <p id="mapped-context">Mapped context-menu phrase demonstrates profile-driven capture language.</p>
           <p id="mapped-sr">Serbian mapped export phrase demonstrates a second existing Anki note type.</p>
+          <p id="review-survivor">review survivor appears in a controlled sentence.</p>
+          <p id="review-current">review current appears in a controlled sentence.</p>
+          <p id="review-next">review next appears in a controlled sentence.</p>
+          <p id="archive-survivor">archive survivor appears in a controlled sentence.</p>
+          <p id="archive-current">archive current appears in a controlled sentence.</p>
+          <p id="archive-next">archive next appears in a controlled sentence.</p>
+          <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
         </main>
       </body>
     </html>`);
@@ -1339,9 +1352,22 @@ try {
       + JSON.stringify(exportPreviewAccessibility.violations, null, 2),
   );
   await executeMixedExport.focus();
+  delayNextVersionMs = 500;
   await panel.keyboard.press("Enter");
   await mixedDestinationPreview.waitFor({ state: "detached" });
+  const focusedExportProgress = panel.locator("[data-export-progress-focus]");
+  await focusedExportProgress.waitFor();
+  assert.equal(
+    await focusedExportProgress.evaluate((element) => element === document.activeElement),
+    true,
+    "EXPORT_EXECUTION_RESTORES_FOCUS: export progress must own focus while export is active.",
+  );
   await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
+  assert.equal(
+    await exportReadyButton.evaluate((element) => element === document.activeElement),
+    true,
+    "EXPORT_EXECUTION_RESTORES_FOCUS: Export Ready must regain focus after success.",
+  );
 
   const addNotes = ankiRequests.filter((request) => request.action === "addNote");
   assert.equal(addNotes.length, 2, "Mixed Ready batch should create two routed Anki notes.");
@@ -1520,10 +1546,27 @@ try {
   markE2eStage("accp012-anki-offline-export");
   await ensureQueue(panel);
   const offlineCorpusCount = await termCount(panel);
-  await exportReady(panel);
+  const offlinePreview = await openExportPreview(panel);
+  const offlineExecute = offlinePreview.getByRole("button", { name: /^Export \d+ items?$/ });
+  await offlineExecute.focus();
+  await panel.keyboard.press("Enter");
+  await offlinePreview.waitFor({ state: "detached" });
+  const offlineProgress = panel.locator("[data-export-progress-focus]");
+  await offlineProgress.waitFor();
+  assert.equal(
+    await offlineProgress.evaluate((element) => element === document.activeElement),
+    true,
+    "Offline export must move focus to the visible progress status.",
+  );
   await panel.locator(".notice.error", {
     hasText: "Anki isn't available. Open Anki Desktop",
   }).waitFor();
+  const offlineExportReady = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  assert.equal(
+    await offlineExportReady.evaluate((element) => element === document.activeElement),
+    true,
+    "Export Ready must regain focus after offline failure.",
+  );
   assert.equal(await termCount(panel), offlineCorpusCount, "Offline export must not remove local study material.");
   const afterOfflineExportSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   assert.deepEqual(
@@ -1541,6 +1584,15 @@ try {
 
   // Same-name deck replacement must fail closed and never rewrite the pinned ID.
   ankiDecks.set("Hebrew RU", 22);
+  await ensureQueue(panel);
+  const replacedDeckPreview = await openExportPreview(panel);
+  assert.match(
+    await replacedDeckPreview.innerText(),
+    /changed in live Anki|revalidate/i,
+    "PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: live identity drift must be blocked before execution.",
+  );
+  await replacedDeckPreview.getByRole("button", { name: "Cancel" }).click();
+  await openSettings(panel);
   await hebrewGuidedProfile.getByRole("button", { name: "Revalidate" }).click();
   await hebrewGuidedProfile.getByText(/Same-name deck replacement rejected/).waitFor();
   let revalidatedStored = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
@@ -2757,6 +2809,102 @@ try {
     await termCount(panel),
     countBeforeCanonicalPair + 1,
     "Successful canonical consolidation should reduce two compatible units to one.",
+  );
+
+  markE2eStage("accp012-review-canonicalization-identity-reconciliation");
+  await setCaptureLanguage(panel, "es");
+
+  await selectText(contentPage, "#review-survivor", "review survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let remediationCard = await cardForTerm(panel, "review survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#review-next", "review next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review next")).waitFor();
+
+  await selectText(contentPage, "#review-current", "review current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review current")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(await panel.locator(".detail-card .term").innerText(), /review current/i);
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("review survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  assert.match(await panel.locator(".detail-card .term").innerText(), /review survivor/i);
+  await panel.keyboard.press("r");
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /review next/i,
+    "REVIEW_CANONICALIZATION_IDENTITY_RECONCILIATION: Ready must mutate the visible survivor.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "review survivor")).locator(".pill", { hasText: "ready" }).waitFor();
+  await (await queueRowForTerm(panel, "review next")).locator(".pill", { hasText: "inbox" }).waitFor();
+
+  await selectText(contentPage, "#archive-survivor", "archive survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  remediationCard = await cardForTerm(panel, "archive survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#archive-next", "archive next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "archive next")).waitFor();
+  await selectText(contentPage, "#archive-current", "archive current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "archive current")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(await panel.locator(".detail-card .term").innerText(), /archive current/i);
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("archive survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.keyboard.press("a");
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /archive next/i,
+    "Archive must mutate the visible survivor and leave the next item untouched.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "archive survivor")).locator(".pill", { hasText: "archived" }).waitFor();
+  await (await queueRowForTerm(panel, "archive next")).locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp012-ready-recapture-returns-to-inbox");
+  await selectText(contentPage, "#recapture-approval", "recapture approval");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#recapture-approval", "recapture approval");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.equal(
+    await remediationCard.getByRole("button", { name: "Ready" }).count(),
+    1,
+    "READY_RECAPTURE_RETURNS_TO_INBOX: new evidence must require explicit approval again.",
   );
 
   markE2eStage("complete");

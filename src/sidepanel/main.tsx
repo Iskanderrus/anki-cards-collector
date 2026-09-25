@@ -57,7 +57,11 @@ import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
 import { Onboarding } from "./onboarding";
 import { ExportPreviewDialog } from "./export-preview-dialog";
-import { buildExportPreview, friendlyExportFailure } from "./export-preview";
+import {
+  buildExportPreview,
+  friendlyExportFailure,
+  type ExportPreview,
+} from "./export-preview";
 import { GuidedProfileSetup } from "./profile-setup";
 import {
   StagedReview,
@@ -307,6 +311,22 @@ function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
 }
 
+function reconcileReviewSessionIds(
+  ids: string[],
+  oldId: string,
+  survivingId: string,
+): string[] {
+  const oldIndex = ids.indexOf(oldId);
+  if (oldIndex < 0 || oldId === survivingId) return ids;
+  const withoutEither = ids.filter((id) => id !== oldId && id !== survivingId);
+  const insertionIndex = Math.min(oldIndex, withoutEither.length);
+  return [
+    ...withoutEither.slice(0, insertionIndex),
+    survivingId,
+    ...withoutEither.slice(insertionIndex),
+  ];
+}
+
 function sourceLabel(occurrence: Occurrence | undefined): string {
   const source = occurrence?.source;
   if (!source) return "unknown source";
@@ -330,6 +350,7 @@ function App(): React.ReactElement {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [reviewSessionIds, setReviewSessionIds] = useState<string[]>([]);
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
   const [exportTechnicalError, setExportTechnicalError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -500,11 +521,6 @@ function App(): React.ReactElement {
     [activeId, items],
   );
 
-  const exportPreview = useMemo(
-    () => buildExportPreview(items, settings, exportBindings),
-    [exportBindings, items, settings],
-  );
-
   const reviewSessionItems = useMemo(
     () => reviewSessionIds
       .map((id) => items.find((item) => item.lexicalUnit.id === id))
@@ -657,6 +673,31 @@ function App(): React.ReactElement {
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>("[data-export-ready]")?.focus({ preventScroll: true });
     });
+  }
+
+  async function openExportPreview(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setExportTechnicalError("");
+    try {
+      const nextPreview = await buildExportPreview(
+        items,
+        settings,
+        exportBindings,
+        new AnkiClient(),
+      );
+      setExportPreview(nextPreview);
+      setExportPreviewOpen(true);
+    } catch (previewError) {
+      const detail = previewError instanceof Error
+        ? previewError.message
+        : "Could not check the current Anki destinations.";
+      setExportTechnicalError(detail);
+      setError(friendlyExportFailure(detail));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function startInboxReview(): void {
@@ -1131,6 +1172,11 @@ function App(): React.ReactElement {
       }
 
       const updated = await repository.update(id, editDraft);
+      if (updated.lexicalUnit.id !== id) {
+        setReviewSessionIds((current) =>
+          reconcileReviewSessionIds(current, id, updated.lexicalUnit.id)
+        );
+      }
       const proposal = proposeLearningCard(updated);
       if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
         await repository.setStatus(updated.lexicalUnit.id, "inbox");
@@ -1153,25 +1199,35 @@ function App(): React.ReactElement {
   }
 
   async function exportToAnki(): Promise<void> {
-    const exportableIds = new Set(exportPreview.exportableIds);
-    const exportable = items.filter((item) => exportableIds.has(item.lexicalUnit.id));
+    const preview = exportPreview;
+    if (!preview) return;
+
+    const exportableIds = new Set(preview.exportableIds);
+    const exportable = items.filter(
+      (item) => item.lexicalUnit.status === "ready" && exportableIds.has(item.lexicalUnit.id),
+    );
 
     if (exportable.length === 0) {
       setError(
-        exportPreview.totalReady === 0
+        preview.totalReady === 0
           ? "Nothing is Ready for export yet. Review Inbox items and explicitly mark the ones you want to study as Ready."
-          : "Ready items are blocked. Review the destination/profile guidance before retrying.",
+          : "Ready items changed or are blocked. Reopen Export and review the current destination/profile guidance.",
       );
       return;
     }
 
-    closeExportPreview();
+    closeExportPreview(false);
     setBusy(true);
     setError("");
     setNotice("");
     setExportTechnicalError("");
     setExportOutcomes({});
     setExportProgress({ completed: 0, total: exportable.length });
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
+        preventScroll: true,
+      });
+    });
 
     try {
       const report = await exportBatch(
@@ -1188,7 +1244,7 @@ function App(): React.ReactElement {
       ));
 
       const parts = [String(report.exported) + " exported"];
-      if (exportPreview.blocked > 0) parts.push(String(exportPreview.blocked) + " blocked");
+      if (preview.blocked > 0) parts.push(String(preview.blocked) + " blocked");
       if (report.failed > 0) parts.push(String(report.failed) + " failed");
       if (report.warnings > 0) parts.push(String(report.warnings) + " local warning" + (report.warnings === 1 ? "" : "s"));
 
@@ -1207,6 +1263,11 @@ function App(): React.ReactElement {
     } finally {
       setExportProgress(null);
       setBusy(false);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
+          preventScroll: true,
+        });
+      });
     }
   }
 
@@ -1665,12 +1726,14 @@ function App(): React.ReactElement {
       }
       if (view === "settings" || view === "staged") return;
 
-      const navigableItems = reviewSessionItems.length > 0 ? reviewSessionItems : items;
+      const inReviewSession = reviewSessionIds.length > 0;
+      const navigableItems = inReviewSession ? reviewSessionItems : items;
       if (navigableItems.length === 0) return;
-      const currentIndex = Math.max(
-        0,
-        navigableItems.findIndex((item) => item.lexicalUnit.id === activeId),
+      const foundIndex = navigableItems.findIndex(
+        (item) => item.lexicalUnit.id === activeId,
       );
+      if (inReviewSession && foundIndex < 0) return;
+      const currentIndex = foundIndex < 0 ? 0 : foundIndex;
 
       if (key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
@@ -1723,6 +1786,7 @@ function App(): React.ReactElement {
     exportPreviewOpen,
     items,
     onboardingOpen,
+    reviewSessionIds,
     reviewSessionItems,
     view,
   ]);
@@ -1738,7 +1802,7 @@ function App(): React.ReactElement {
         <Onboarding onDismiss={() => void dismissIntroduction()} />
       )}
 
-      {exportPreviewOpen && (
+      {exportPreviewOpen && exportPreview && (
         <ExportPreviewDialog
           preview={exportPreview}
           busy={busy}
@@ -1758,7 +1822,7 @@ function App(): React.ReactElement {
           <button
             data-export-ready
             disabled={busy || counts.ready === 0}
-            onClick={() => setExportPreviewOpen(true)}
+            onClick={() => void openExportPreview()}
           >
             Export Ready{counts.ready > 0 ? " (" + counts.ready + ")" : ""}
           </button>
@@ -1909,7 +1973,13 @@ function App(): React.ReactElement {
       )}
 
       {exportProgress && (
-        <div className="export-progress" role="status" aria-live="polite">
+        <div
+          className="export-progress"
+          role="status"
+          aria-live="polite"
+          tabIndex={-1}
+          data-export-progress-focus
+        >
           <div>
             Exporting {exportProgress.completed}/{exportProgress.total}
             {exportProgress.currentText ? " · " + exportProgress.currentText : ""}

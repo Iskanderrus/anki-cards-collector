@@ -50,6 +50,30 @@ describe("CaptureRepository", () => {
     ]);
   });
 
+  it("READY_RECAPTURE_RETURNS_TO_INBOX for Ready and Archived items", async () => {
+    const ready = await repository.capture(
+      draft("aunque", "Aunque llueva, voy a caminar porque quiero practicar."),
+    );
+    await repository.setStatus(ready.lexicalUnit.id, "ready");
+    const readyRecaptured = await repository.capture(
+      draft("aunque", "Aunque llueva mucho, todavía voy a caminar por el centro."),
+    );
+    expect(readyRecaptured.lexicalUnit.id).toBe(ready.lexicalUnit.id);
+    expect(readyRecaptured.lexicalUnit.status).toBe("inbox");
+    expect(readyRecaptured.occurrences).toHaveLength(2);
+
+    const archived = await repository.capture(
+      draft("sin embargo", "Sin embargo, seguimos estudiando cada día."),
+    );
+    await repository.setStatus(archived.lexicalUnit.id, "archived");
+    const archivedRecaptured = await repository.capture(
+      draft("sin embargo", "Sin embargo, hoy tenemos un contexto bastante mejor."),
+    );
+    expect(archivedRecaptured.lexicalUnit.id).toBe(archived.lexicalUnit.id);
+    expect(archivedRecaptured.lexicalUnit.status).toBe("inbox");
+    expect(archivedRecaptured.occurrences).toHaveLength(2);
+  });
+
   it("keeps the observed form when the lexical unit is canonicalized", async () => {
     const captured = await repository.capture(
       draft("tengo ganas de", "Hoy tengo ganas de salir a caminar."),

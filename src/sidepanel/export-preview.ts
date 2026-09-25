@@ -2,6 +2,7 @@ import type {
   CollectedItem,
   CollectorSettings,
   ExportBinding,
+  ExportProfile,
 } from "../core/types";
 import { proposeLearningCard } from "../learning/policy";
 import {
@@ -33,6 +34,21 @@ export interface ExportPreview {
   blockedItems: ExportPreviewBlockedItem[];
 }
 
+export interface ExportPreviewValidationClient {
+  validateProfileLive(profile: ExportProfile): Promise<void>;
+}
+
+function destinationKey(profile: ExportProfile): string {
+  return JSON.stringify([
+    profile.id,
+    profile.deckName,
+    profile.deckId ?? "",
+    profile.modelName,
+    profile.modelId ?? "",
+    profile.mode,
+  ]);
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "This item cannot be exported yet.";
 }
@@ -51,11 +67,26 @@ function blockedReason(item: CollectedItem, error: unknown): string {
   }
 
   if (
+    lower.includes("failed to fetch")
+    || lower.includes("network")
+    || lower.includes("ankiconnect")
+    || lower.includes("connect")
+  ) {
+    return "Anki isn't available. Open Anki Desktop, make sure AnkiConnect is running, then reopen Export.";
+  }
+
+  if (lower.includes("identity") || lower.includes("refresh and re-confirm")) {
+    return "This Anki profile changed in live Anki. Open Settings → Anki profiles and revalidate it before exporting.";
+  }
+
+  if (
     lower.includes("mapping")
     || lower.includes("field")
     || lower.includes("note type")
     || lower.includes("note-type")
     || lower.includes("model")
+    || lower.includes("template")
+    || lower.includes("cloze")
   ) {
     return "This Anki profile needs attention. Open Settings → Anki profiles and revalidate its note type and field mapping.";
   }
@@ -63,15 +94,17 @@ function blockedReason(item: CollectedItem, error: unknown): string {
   return "Review this item's Anki destination before exporting.";
 }
 
-export function buildExportPreview(
+export async function buildExportPreview(
   items: CollectedItem[],
   settings: CollectorSettings,
   bindings: Record<string, ExportBinding>,
-): ExportPreview {
+  client: ExportPreviewValidationClient,
+): Promise<ExportPreview> {
   const ready = items.filter((item) => item.lexicalUnit.status === "ready");
   const exportableIds: string[] = [];
   const blockedItems: ExportPreviewBlockedItem[] = [];
   const grouped = new Map<string, ExportPreviewGroup>();
+  const liveValidations = new Map<string, Promise<void>>();
 
   for (const item of ready) {
     const proposal = proposeLearningCard(item);
@@ -91,13 +124,18 @@ export function buildExportPreview(
         bindings[item.lexicalUnit.id] ?? null,
       );
       validateProfileForCurrentExport(route.profile);
-      exportableIds.push(item.lexicalUnit.id);
+      const key = destinationKey(route.profile);
 
-      const key = JSON.stringify([
-        route.profile.id,
-        route.profile.deckName,
-        route.profile.modelName,
-      ]);
+      if (route.profile.mode === "mapped-user-model") {
+        let validation = liveValidations.get(key);
+        if (!validation) {
+          validation = client.validateProfileLive(route.profile);
+          liveValidations.set(key, validation);
+        }
+        await validation;
+      }
+
+      exportableIds.push(item.lexicalUnit.id);
       const current = grouped.get(key);
       if (current) {
         current.count += 1;

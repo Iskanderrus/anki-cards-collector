@@ -336,6 +336,55 @@ describe("AnkiClient", () => {
     ].includes(action))).toBe(false);
   });
 
+  it("live-validates a mapped profile with read-only calls and rejects same-name identity replacement", async () => {
+    const actions: string[] = [];
+    let liveDeckId = 2;
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        action: string;
+        params: Record<string, unknown>;
+      };
+      actions.push(request.action);
+      const resultByAction: Record<string, unknown> = {
+        deckNamesAndIds: { "Hebrew RU": liveDeckId },
+        modelNamesAndIds: { "Hebrew Existing": 11 },
+        modelFieldNames: ["Hebrew", "Russian", "Lemma", "Example"],
+        modelFieldsOnTemplates: { Recognition: [["Hebrew"], ["Hebrew", "Russian"]] },
+        modelTemplates: {
+          Recognition: {
+            Front: "{{Hebrew}}",
+            Back: "{{FrontSide}}<hr>{{Russian}}",
+          },
+        },
+      };
+      return new Response(JSON.stringify({
+        result: resultByAction[request.action] ?? null,
+        error: null,
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const client = new AnkiClient("http://127.0.0.1:8765", fetcher);
+    await expect(client.validateProfileLive(mappedProfile())).resolves.toBeUndefined();
+    expect(actions).toEqual([
+      "deckNamesAndIds",
+      "modelNamesAndIds",
+      "modelFieldNames",
+      "modelFieldsOnTemplates",
+      "modelTemplates",
+    ]);
+    expect(actions.some((action) => [
+      "createDeck", "createModel", "modelFieldAdd", "updateModelTemplates",
+      "updateModelStyling", "addNote", "updateNoteFields",
+    ].includes(action))).toBe(false);
+
+    actions.length = 0;
+    liveDeckId = 22;
+    await expect(client.validateProfileLive(mappedProfile())).rejects.toThrow(
+      "no longer matches the live deck",
+    );
+    expect(actions).toEqual(["deckNamesAndIds", "modelNamesAndIds"]);
+  });
+
   it("exports fields from the same best occurrence used by the proposal", async () => {
     const value = item();
     value.occurrences.push({
