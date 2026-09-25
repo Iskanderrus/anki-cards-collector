@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
@@ -529,22 +529,18 @@ function App(): React.ReactElement {
     [items, reviewSessionIds],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (exportProgress) {
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
-          preventScroll: true,
-        });
+      document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
+        preventScroll: true,
       });
       return;
     }
 
     if (!busy && restoreExportFocusRef.current) {
       restoreExportFocusRef.current = false;
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
-          preventScroll: true,
-        });
+      document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
+        preventScroll: true,
       });
     }
   }, [busy, exportProgress]);
