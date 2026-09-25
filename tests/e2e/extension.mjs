@@ -1555,6 +1555,7 @@ try {
   const offlinePreview = await openExportPreview(panel);
   const offlineExecute = offlinePreview.getByRole("button", { name: /^Export \d+ items?$/ });
   await offlineExecute.focus();
+  delayNextVersionMs = 500;
   await panel.keyboard.press("Enter");
   await offlinePreview.waitFor({ state: "detached" });
   const offlineProgress = panel.locator("[data-export-progress-focus]");
