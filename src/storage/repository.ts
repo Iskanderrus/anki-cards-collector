@@ -8,6 +8,7 @@ import type {
   ReviewStatus,
 } from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
+import { selectBestOccurrence } from "../learning/occurrence-selection";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
@@ -38,11 +39,7 @@ export interface ObservedFormGroup {
   occurrences: Occurrence[];
 }
 
-export type CanonicalizationPreviewKind =
-  | "unchanged"
-  | "rename"
-  | "consolidate"
-  | "conflict";
+export type CanonicalizationPreviewKind = "unchanged" | "rename";
 
 export interface CanonicalizationTargetSummary {
   id: string;
@@ -60,11 +57,59 @@ export interface CanonicalizationPreview {
   requestedLanguage: string;
   currentOccurrenceCount: number;
   willReturnToInbox: boolean;
-  target?: CanonicalizationTargetSummary;
-  survivingLexicalUnitId?: string;
-  resultingOccurrenceCount?: number;
-  preservedAnkiNoteId?: number;
+  sameCanonicalCandidates: CanonicalizationTargetSummary[];
+}
+
+export interface LexicalIdentitySummary {
+  lexicalUnit: LexicalUnit;
+  occurrences: Occurrence[];
+  selectedOccurrenceId?: string;
+  exportBinding?: ExportBinding;
+}
+
+export interface MergePreview {
+  source: LexicalIdentitySummary;
+  target: LexicalIdentitySummary;
+  survivingLexicalUnitId: string;
+  resultingOccurrenceCount: number;
+  blocked: boolean;
   conflictReason?: string;
+  snapshotToken: string;
+}
+
+export interface MergeLexicalUnitsInput {
+  sourceId: string;
+  targetId: string;
+  expectedSnapshotToken: string;
+  canonicalText: string;
+  note: string;
+}
+
+export interface MergeLexicalUnitsResult {
+  item: CollectedItem;
+  survivingLexicalUnitId: string;
+  removedLexicalUnitId: string;
+}
+
+export interface SplitPreview {
+  source: LexicalIdentitySummary;
+  selectedOccurrenceIds: string[];
+  remainingOccurrenceCount: number;
+  newOccurrenceCount: number;
+  snapshotToken: string;
+}
+
+export interface SplitLexicalUnitInput {
+  sourceId: string;
+  selectedOccurrenceIds: string[];
+  expectedSnapshotToken: string;
+  canonicalText: string;
+  note: string;
+}
+
+export interface SplitLexicalUnitResult {
+  source: CollectedItem;
+  created: CollectedItem;
 }
 
 export interface RestorePreview {
@@ -105,14 +150,6 @@ function sameOccurrence(left: Occurrence, right: Occurrence): boolean {
   return occurrenceFingerprint(left) === occurrenceFingerprint(right);
 }
 
-function combineNotes(primary: string, secondary: string): string {
-  const first = primary.trim();
-  const second = secondary.trim();
-  if (!first) return second.slice(0, 2000);
-  if (!second || first === second) return first.slice(0, 2000);
-  return `${first}\n\n${second}`.slice(0, 2000);
-}
-
 function buildRestorePlan(
   backup: BackupDocument,
   localUnits: LexicalUnit[],
@@ -137,28 +174,17 @@ function buildRestorePlan(
   const exportBindingsToAdd: ExportBinding[] = [];
 
   const unitsById = new Map(localUnits.map((unit) => [unit.id, unit]));
-  const unitsByContentKey = new Map(localUnits.map((unit) => [unit.contentKey, unit]));
   const updatedUnitIds = new Set<string>();
   const conflictedUnitIds = new Set<string>();
 
   for (const item of backup.items) {
     const incoming = item.lexicalUnit;
     const current = unitsById.get(incoming.id);
-    const contentOwner = unitsByContentKey.get(incoming.contentKey);
-
-    if (contentOwner && contentOwner.id !== incoming.id) {
-      preview.conflicts.push(
-        `Canonical-form conflict: "${incoming.canonicalText}" (${incoming.language}) is already stored under another Collector ID.`,
-      );
-      conflictedUnitIds.add(incoming.id);
-      continue;
-    }
 
     if (!current) {
       lexicalUnitsToAdd.push(incoming);
       preview.lexicalUnitsAdded += 1;
       unitsById.set(incoming.id, incoming);
-      unitsByContentKey.set(incoming.contentKey, incoming);
       updatedUnitIds.add(incoming.id);
       continue;
     }
@@ -166,11 +192,7 @@ function buildRestorePlan(
     if (incoming.updatedAt > current.updatedAt) {
       lexicalUnitsToUpdate.push(incoming);
       preview.lexicalUnitsUpdated += 1;
-      if (current.contentKey !== incoming.contentKey) {
-        unitsByContentKey.delete(current.contentKey);
-      }
       unitsById.set(incoming.id, incoming);
-      unitsByContentKey.set(incoming.contentKey, incoming);
       updatedUnitIds.add(incoming.id);
     } else {
       preview.lexicalUnitsSkipped += 1;
@@ -263,86 +285,105 @@ function buildRestorePlan(
   };
 }
 
-function consolidationConflictReason(
+function effectiveAnkiNoteId(
+  unit: LexicalUnit,
+  binding: ExportBinding | undefined,
+): number | undefined {
+  return binding?.ankiNoteId ?? unit.ankiNoteId;
+}
+
+function sameBindingIdentity(
+  left: ExportBinding,
+  right: ExportBinding,
+): boolean {
+  return (
+    left.profileId === right.profileId
+    && left.state === right.state
+    && left.ankiNoteId === right.ankiNoteId
+    && left.deckName === right.deckName
+    && left.deckId === right.deckId
+    && left.modelName === right.modelName
+    && left.modelId === right.modelId
+  );
+}
+
+function mergeConflictReason(
   leftUnit: LexicalUnit,
   rightUnit: LexicalUnit,
   leftBinding: ExportBinding | undefined,
   rightBinding: ExportBinding | undefined,
 ): string | undefined {
   if (leftBinding?.state === "reserved" || rightBinding?.state === "reserved") {
-    return "Cannot consolidate these forms while an Anki export is awaiting reconciliation.";
+    return "Cannot merge while an Anki export identity is reserved and awaiting reconciliation.";
+  }
+
+  const leftNoteId = effectiveAnkiNoteId(leftUnit, leftBinding);
+  const rightNoteId = effectiveAnkiNoteId(rightUnit, rightBinding);
+
+  if (leftNoteId !== undefined && rightNoteId !== undefined && leftNoteId !== rightNoteId) {
+    return "Cannot merge these units because they are linked to different Anki notes.";
+  }
+
+  if (leftBinding && rightBinding && !sameBindingIdentity(leftBinding, rightBinding)) {
+    return "Cannot merge these units because they have different Anki destination bindings.";
   }
 
   if (
-    leftBinding?.ankiNoteId !== undefined
-    && rightBinding?.ankiNoteId !== undefined
-    && leftBinding.ankiNoteId !== rightBinding.ankiNoteId
+    leftNoteId !== undefined
+    && rightNoteId !== undefined
+    && leftNoteId === rightNoteId
+    && leftBinding
+    && rightBinding
+    && (
+      leftBinding.profileId !== rightBinding.profileId
+      || leftBinding.deckId !== rightBinding.deckId
+      || leftBinding.modelId !== rightBinding.modelId
+    )
   ) {
-    return "Cannot consolidate these forms because both are linked to different Anki notes.";
-  }
-
-  if (leftBinding && rightBinding) {
-    if (leftBinding.profileId !== rightBinding.profileId) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.deckName
-      && rightBinding.deckName
-      && leftBinding.deckName !== rightBinding.deckName
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.deckId
-      && rightBinding.deckId
-      && leftBinding.deckId !== rightBinding.deckId
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.modelName
-      && rightBinding.modelName
-      && leftBinding.modelName !== rightBinding.modelName
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.modelId
-      && rightBinding.modelId
-      && leftBinding.modelId !== rightBinding.modelId
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-  }
-
-  if (
-    leftUnit.ankiNoteId !== undefined
-    && rightUnit.ankiNoteId !== undefined
-    && leftUnit.ankiNoteId !== rightUnit.ankiNoteId
-  ) {
-    return "Cannot consolidate these forms because both are linked to different Anki notes.";
+    return "Cannot merge these units because the same Anki note is recorded under incompatible destinations.";
   }
 
   return undefined;
 }
 
-function bindingPriority(binding: ExportBinding | undefined): number {
-  if (!binding) return -1;
-  if (binding.state === "exported") return 3;
-  if (binding.state === "reserved") return 2;
-  return 1;
+function identityPriority(
+  unit: LexicalUnit,
+  binding: ExportBinding | undefined,
+): number {
+  if (binding?.state === "exported" || effectiveAnkiNoteId(unit, binding) !== undefined) return 3;
+  if (binding?.state === "reserved") return 2;
+  if (binding) return 1;
+  return 0;
 }
 
-function preferredBinding(
-  primary: ExportBinding | undefined,
-  secondary: ExportBinding | undefined,
-  lexicalUnitId: string,
-): ExportBinding | undefined {
-  const source =
-    bindingPriority(primary) >= bindingPriority(secondary)
-      ? primary ?? secondary
-      : secondary ?? primary;
-  return source ? { ...source, lexicalUnitId } : undefined;
+function identitySummary(
+  lexicalUnit: LexicalUnit,
+  occurrences: Occurrence[],
+  exportBinding: ExportBinding | undefined,
+): LexicalIdentitySummary {
+  const selected = selectBestOccurrence(occurrences);
+  return {
+    lexicalUnit,
+    occurrences: [...occurrences].sort((left, right) =>
+      left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id)
+    ),
+    ...(selected ? { selectedOccurrenceId: selected.occurrence.id } : {}),
+    ...(exportBinding ? { exportBinding } : {}),
+  };
+}
+
+function stableIdentitySnapshot(
+  units: LexicalUnit[],
+  occurrences: Occurrence[],
+  bindings: Array<ExportBinding | undefined>,
+): string {
+  return JSON.stringify({
+    units: [...units].sort((left, right) => left.id.localeCompare(right.id)),
+    occurrences: [...occurrences].sort((left, right) => left.id.localeCompare(right.id)),
+    bindings: bindings
+      .filter((value): value is ExportBinding => value !== undefined)
+      .sort((left, right) => left.lexicalUnitId.localeCompare(right.lexicalUnitId)),
+  });
 }
 
 export class CaptureRepository {
