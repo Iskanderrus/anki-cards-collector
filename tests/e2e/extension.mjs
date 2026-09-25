@@ -552,6 +552,21 @@ async function cardForTerm(panel, term) {
   return card;
 }
 
+async function openMergeDialog(panel, card, candidateTerm) {
+  const moreActions = card.locator(".more-actions");
+  if (!(await moreActions.evaluate((node) => node instanceof HTMLDetailsElement && node.open))) {
+    await moreActions.locator("> summary").click();
+  }
+  await card.getByRole("button", { name: "Merge with another unit…" }).click();
+  const dialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await dialog.waitFor();
+  await dialog.getByLabel("Find merge candidate").fill(candidateTerm);
+  const candidate = dialog.locator(".identity-candidate").filter({ hasText: candidateTerm }).first();
+  await candidate.click();
+  await dialog.getByText("Surviving Collector ID").waitFor();
+  return dialog;
+}
+
 async function stopExtensionServiceWorker(context, page, extensionId) {
   const cdp = await context.newCDPSession(page);
   try {
