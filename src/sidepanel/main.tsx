@@ -361,6 +361,7 @@ function App(): React.ReactElement {
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const loadRequestId = useRef(0);
+  const restoreExportFocusRef = useRef(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
@@ -527,6 +528,26 @@ function App(): React.ReactElement {
       .filter((item): item is CollectedItem => item !== undefined),
     [items, reviewSessionIds],
   );
+
+  useEffect(() => {
+    if (exportProgress) {
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
+          preventScroll: true,
+        });
+      });
+      return;
+    }
+
+    if (!busy && restoreExportFocusRef.current) {
+      restoreExportFocusRef.current = false;
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
+          preventScroll: true,
+        });
+      });
+    }
+  }, [busy, exportProgress]);
 
   const exportProgressDestination = useMemo(() => {
     if (!exportProgress?.currentId) return null;
@@ -1217,17 +1238,13 @@ function App(): React.ReactElement {
     }
 
     closeExportPreview(false);
+    restoreExportFocusRef.current = true;
     setBusy(true);
     setError("");
     setNotice("");
     setExportTechnicalError("");
     setExportOutcomes({});
     setExportProgress({ completed: 0, total: exportable.length });
-    requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
-        preventScroll: true,
-      });
-    });
 
     try {
       const report = await exportBatch(
@@ -1263,11 +1280,6 @@ function App(): React.ReactElement {
     } finally {
       setExportProgress(null);
       setBusy(false);
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
-          preventScroll: true,
-        });
-      });
     }
   }
 
