@@ -2918,15 +2918,20 @@ try {
   // session and has already been reviewed before the current item consolidates
   // into it. Reconciliation must keep the current logical position rather than
   // appending the survivor after the next unreviewed item.
-  await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await selectText(contentPage, "#duplicate-ready-current", "duplicate ready current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
   await selectText(contentPage, "#duplicate-ready-next", "duplicate ready next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready next")).waitFor();
+
+  await selectText(contentPage, "#duplicate-ready-current", "duplicate ready current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready current")).waitFor();
+
+  await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready survivor")).waitFor();
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
@@ -2958,15 +2963,20 @@ try {
   await (await queueRowForTerm(panel, "duplicate ready next"))
     .locator(".pill", { hasText: "inbox" }).waitFor();
 
-  await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await selectText(contentPage, "#duplicate-archive-current", "duplicate archive current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
   await selectText(contentPage, "#duplicate-archive-next", "duplicate archive next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive next")).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-current", "duplicate archive current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive current")).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive survivor")).waitFor();
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
