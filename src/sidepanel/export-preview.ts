@@ -75,12 +75,9 @@ function blockedReason(item: CollectedItem, error: unknown): string {
     return "Anki isn't available. Open Anki Desktop, make sure AnkiConnect is running, then reopen Export.";
   }
 
-  if (lower.includes("identity") || lower.includes("refresh and re-confirm")) {
-    return "This Anki profile changed in live Anki. Open Settings → Anki profiles and revalidate it before exporting.";
-  }
-
   if (
     lower.includes("mapping")
+    || lower.includes("mapped")
     || lower.includes("field")
     || lower.includes("note type")
     || lower.includes("note-type")
@@ -89,6 +86,10 @@ function blockedReason(item: CollectedItem, error: unknown): string {
     || lower.includes("cloze")
   ) {
     return "This Anki profile needs attention. Open Settings → Anki profiles and revalidate its note type and field mapping.";
+  }
+
+  if (lower.includes("identity") || lower.includes("refresh and re-confirm")) {
+    return "This Anki profile changed in live Anki. Open Settings → Anki profiles and revalidate it before exporting.";
   }
 
   return "Review this item's Anki destination before exporting.";
