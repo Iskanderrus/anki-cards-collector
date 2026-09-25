@@ -794,4 +794,247 @@ describe("CaptureRepository", () => {
     expect(mergePreview.conflictReason).toContain("different Anki notes");
   });
 
+
+  it("merges two unexported units explicitly and keeps the source id deterministically", async () => {
+    const first = await repository.capture(draft("banco", "El banco está abierto."));
+    const second = await repository.capture(draft("orilla", "Caminamos por la orilla."));
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+
+    expect(preview.blocked).toBe(false);
+    expect(preview.survivingLexicalUnitId).toBe(first.lexicalUnit.id);
+
+    const result = await repository.mergeLexicalUnits({
+      sourceId: first.lexicalUnit.id,
+      targetId: second.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    });
+
+    expect(result.survivingLexicalUnitId).toBe(first.lexicalUnit.id);
+    expect(result.item.lexicalUnit.status).toBe("inbox");
+    expect(result.item.occurrences).toHaveLength(2);
+    expect(await database.lexicalUnits.get(second.lexicalUnit.id)).toBeUndefined();
+  });
+
+  it("allows merge only when two exported bindings prove the same effective identity", async () => {
+    const first = await repository.capture(draft("banco", "El banco está abierto."));
+    const second = await repository.capture(draft("orilla", "Caminamos por la orilla."));
+    const common = {
+      profileId: "profile-a",
+      state: "exported" as const,
+      ankiNoteId: 5050,
+      deckName: "Spanish RU",
+      deckId: "2",
+      modelName: "Collector Basic",
+      modelId: "10",
+    };
+    await repository.setExportBinding({ lexicalUnitId: first.lexicalUnit.id, ...common });
+    await repository.setExportBinding({ lexicalUnitId: second.lexicalUnit.id, ...common });
+
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    expect(preview.blocked).toBe(false);
+    expect(preview.survivingLexicalUnitId).toBe(first.lexicalUnit.id);
+
+    const result = await repository.mergeLexicalUnits({
+      sourceId: first.lexicalUnit.id,
+      targetId: second.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    });
+    expect(await repository.getExportBinding(result.survivingLexicalUnitId)).toMatchObject(common);
+    expect(await repository.listExportBindings()).toHaveLength(1);
+  });
+
+  it("rejects stale merge confirmation and leaves repository state unchanged", async () => {
+    const first = await repository.capture(draft("banco", "El banco está abierto."));
+    const second = await repository.capture(draft("orilla", "Caminamos por la orilla."));
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    await repository.setStatus(second.lexicalUnit.id, "archived");
+
+    await expect(repository.mergeLexicalUnits({
+      sourceId: first.lexicalUnit.id,
+      targetId: second.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    })).rejects.toThrow("preview is stale");
+
+    expect(await repository.list()).toHaveLength(2);
+  });
+
+  it("rolls back merge atomically when a required persistence step fails", async () => {
+    const first = await repository.capture(draft("banco", "El banco está abierto."));
+    const second = await repository.capture(draft("orilla", "Caminamos por la orilla."));
+    const preview = await repository.previewMerge(first.lexicalUnit.id, second.lexicalUnit.id);
+    const occurrenceIds = (await repository.list())
+      .flatMap((item) => item.occurrences.map((occurrence) => occurrence.id))
+      .sort();
+
+    const deleteSpy = vi.spyOn(database.lexicalUnits, "delete")
+      .mockRejectedValueOnce(new Error("Injected merge failure."));
+
+    await expect(repository.mergeLexicalUnits({
+      sourceId: first.lexicalUnit.id,
+      targetId: second.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    })).rejects.toThrow("Injected merge failure.");
+    deleteSpy.mockRestore();
+
+    const items = await repository.list();
+    expect(items).toHaveLength(2);
+    expect(items.flatMap((item) => item.occurrences.map((occurrence) => occurrence.id)).sort())
+      .toEqual(occurrenceIds);
+  });
+
+  it("splits a subset into a new same-canonical identity without copying Anki identity", async () => {
+    const first = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
+    const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
+    await repository.setExportBinding({
+      lexicalUnitId: first.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 8080,
+      deckName: "Spanish RU",
+      modelName: "Collector Basic",
+    });
+    await repository.setStatus(first.lexicalUnit.id, "ready");
+
+    const movedId = withSecond.occurrences[1]!.id;
+    const originalId = first.lexicalUnit.id;
+    const preview = await repository.previewSplit(originalId, [movedId]);
+    const result = await repository.splitLexicalUnit({
+      sourceId: originalId,
+      selectedOccurrenceIds: [movedId],
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "river-bank sense",
+    });
+
+    expect(result.source.lexicalUnit.id).toBe(originalId);
+    expect(result.created.lexicalUnit.id).not.toBe(originalId);
+    expect(result.source.lexicalUnit.canonicalText).toBe("banco");
+    expect(result.created.lexicalUnit.canonicalText).toBe("banco");
+    expect(result.source.lexicalUnit.status).toBe("inbox");
+    expect(result.created.lexicalUnit.status).toBe("inbox");
+    expect(result.source.occurrences).toHaveLength(1);
+    expect(result.created.occurrences.map((occurrence) => occurrence.id)).toEqual([movedId]);
+    expect(await repository.getExportBinding(originalId)).toMatchObject({
+      state: "exported",
+      ankiNoteId: 8080,
+    });
+    expect(await repository.getExportBinding(result.created.lexicalUnit.id)).toBeNull();
+    expect(result.created.lexicalUnit.ankiNoteId).toBeUndefined();
+  });
+
+  it("rejects zero-selection, all-occurrence, and stale split ownership", async () => {
+    const source = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
+    const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
+
+    await expect(repository.previewSplit(source.lexicalUnit.id, []))
+      .rejects.toThrow("Select at least one occurrence");
+    await expect(repository.previewSplit(
+      source.lexicalUnit.id,
+      withSecond.occurrences.map((occurrence) => occurrence.id),
+    )).rejects.toThrow("leave at least one occurrence");
+    await expect(repository.previewSplit(source.lexicalUnit.id, ["missing-occurrence"]))
+      .rejects.toThrow("no longer belongs");
+  });
+
+  it("rolls back split atomically on an injected occurrence move failure", async () => {
+    const source = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
+    const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
+    const movedId = withSecond.occurrences[1]!.id;
+    const preview = await repository.previewSplit(source.lexicalUnit.id, [movedId]);
+
+    const bulkPutSpy = vi.spyOn(database.occurrences, "bulkPut")
+      .mockRejectedValueOnce(new Error("Injected split failure."));
+
+    await expect(repository.splitLexicalUnit({
+      sourceId: source.lexicalUnit.id,
+      selectedOccurrenceIds: [movedId],
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    })).rejects.toThrow("Injected split failure.");
+    bulkPutSpy.mockRestore();
+
+    const items = await repository.list();
+    expect(items).toHaveLength(1);
+    expect(items[0]?.lexicalUnit.id).toBe(source.lexicalUnit.id);
+    expect(items[0]?.occurrences.map((occurrence) => occurrence.id).sort()).toEqual(
+      withSecond.occurrences.map((occurrence) => occurrence.id).sort(),
+    );
+  });
+
+  it("treats same-canonical owners as ambiguous while exact existing evidence remains uniquely owned", async () => {
+    const source = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
+    const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
+    const movedOccurrence = withSecond.occurrences[1]!;
+    const splitPreview = await repository.previewSplit(source.lexicalUnit.id, [movedOccurrence.id]);
+    const split = await repository.splitLexicalUnit({
+      sourceId: source.lexicalUnit.id,
+      selectedOccurrenceIds: [movedOccurrence.id],
+      expectedSnapshotToken: splitPreview.snapshotToken,
+      canonicalText: "banco",
+      note: "river sense",
+    });
+
+    await expect(repository.capture(draft("banco", "Un banco puede tener varios sentidos.")))
+      .rejects.toThrow("ambiguous between multiple lexical units");
+
+    const exact = await repository.capture(draft("banco", movedOccurrence.context));
+    expect(exact.lexicalUnit.id).toBe(split.created.lexicalUnit.id);
+    expect(exact.occurrences).toHaveLength(1);
+  });
+
+  it("restores two same-canonical lexical ids without consolidation", async () => {
+    const backup: BackupDocument = {
+      version: 4,
+      exportedAt: "2026-09-26T00:00:00.000Z",
+      settings: DEFAULT_SETTINGS,
+      exportBindings: [],
+      items: ["unit-a", "unit-b"].map((id, index) => ({
+        lexicalUnit: {
+          id,
+          contentKey: "es::banco",
+          canonicalText: "banco",
+          normalizedCanonicalText: "banco",
+          language: "es",
+          note: index === 0 ? "financial" : "river",
+          status: "inbox" as const,
+          createdAt: `2026-09-25T00:0${index}:00.000Z`,
+          updatedAt: `2026-09-25T00:0${index}:00.000Z`,
+        },
+        occurrences: [{
+          id: `occ-${id}`,
+          lexicalUnitId: id,
+          surfaceText: "banco",
+          normalizedSurfaceText: "banco",
+          context: index === 0 ? "El banco aprobó el préstamo." : "El banco está junto al río.",
+          source: {
+            kind: "web" as const,
+            adapter: "generic-web",
+            url: "https://example.com",
+            title: "Example",
+          },
+          capturedAt: `2026-09-25T00:0${index}:00.000Z`,
+        }],
+      })),
+    };
+
+    const preview = await repository.previewRestore(backup);
+    expect(preview.conflicts).toEqual([]);
+    expect(preview.lexicalUnitsAdded).toBe(2);
+    await repository.restoreBackup(backup);
+
+    const items = await repository.list();
+    expect(items).toHaveLength(2);
+    expect(new Set(items.map((item) => item.lexicalUnit.contentKey))).toEqual(new Set(["es::banco"]));
+    expect(new Set(items.map((item) => item.lexicalUnit.id))).toEqual(new Set(["unit-a", "unit-b"]));
+  });
+
 });
