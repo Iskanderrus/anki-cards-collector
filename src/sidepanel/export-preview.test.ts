@@ -103,6 +103,28 @@ describe("export preview", () => {
     ]);
   });
 
+  it("blocks a collector-managed destination when its live deck is unavailable", async () => {
+    const unavailable: ExportPreviewValidationClient = {
+      validateProfileLive: async () => {
+        throw new Error('Anki deck "Hebrew RU" is not available.');
+      },
+    };
+
+    const preview = await buildExportPreview(
+      [item("1", "שלום", "he")],
+      settings,
+      {},
+      unavailable,
+    );
+
+    expect(preview).toMatchObject({
+      totalReady: 1,
+      exportable: 0,
+      blocked: 1,
+    });
+    expect(preview.blockedItems[0]?.reason).toMatch(/destination/i);
+  });
+
   it("honors a pinned per-item profile binding instead of recalculating its destination", async () => {
     const binding: ExportBinding = {
       lexicalUnitId: "1",

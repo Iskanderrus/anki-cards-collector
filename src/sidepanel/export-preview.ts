@@ -127,14 +127,12 @@ export async function buildExportPreview(
       validateProfileForCurrentExport(route.profile);
       const key = destinationKey(route.profile);
 
-      if (route.profile.mode === "mapped-user-model") {
-        let validation = liveValidations.get(key);
-        if (!validation) {
-          validation = client.validateProfileLive(route.profile);
-          liveValidations.set(key, validation);
-        }
-        await validation;
+      let validation = liveValidations.get(key);
+      if (!validation) {
+        validation = client.validateProfileLive(route.profile);
+        liveValidations.set(key, validation);
       }
+      await validation;
 
       exportableIds.push(item.lexicalUnit.id);
       const current = grouped.get(key);
