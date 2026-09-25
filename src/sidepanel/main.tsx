@@ -369,12 +369,15 @@ function App(): React.ReactElement {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
   const [observedFormsState, setObservedFormsState] = useState<ObservedFormsUiState>({ kind: "idle" });
+  const [mergeDialog, setMergeDialog] = useState<MergeDialogState | null>(null);
+  const [splitDialog, setSplitDialog] = useState<SplitDialogState | null>(null);
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const loadRequestId = useRef(0);
   const restoreExportFocusRef = useRef(false);
+  const identityActionFocusRef = useRef<HTMLElement | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
@@ -1200,40 +1203,228 @@ function App(): React.ReactElement {
         : undefined;
       setCanonicalizationState({ kind: "live", preview: latestPreview });
 
-      if (latestPreview.kind === "conflict") {
-        setError(latestPreview.conflictReason ?? "This canonical change cannot be applied safely.");
-        return;
-      }
-
       if (!shownPreview || !sameCanonicalizationPreview(shownPreview, latestPreview)) {
         setError(
-          "Canonical identity changed while you were editing. Review the updated preview, then save again.",
+          "Canonical lookup changed while you were editing. Review the updated preview, then save again.",
         );
         return;
       }
 
       const updated = await repository.update(id, editDraft);
-      if (updated.lexicalUnit.id !== id) {
-        commitReviewSessionIds((current) =>
-          reconcileReviewSessionIds(current, id, updated.lexicalUnit.id)
+      if (updated.lexicalUnit.status === "inbox") {
+        setNotice(
+          latestPreview.sameCanonicalCandidates.length > 0
+            ? "Changes saved. Same-canonical lexical units remain separate; use Merge explicitly if they represent one learning unit."
+            : "Changes saved. Review the updated learning target before marking it ready again.",
         );
-      }
-      const proposal = proposeLearningCard(updated);
-      if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
-        await repository.setStatus(updated.lexicalUnit.id, "inbox");
-        setNotice("Changes saved. This item returned to the inbox because its learning target needs review.");
-      } else if (updated.lexicalUnit.id !== id) {
-        setNotice("Changes saved. Matching observed forms were consolidated under one canonical unit; review it before export.");
-      } else if (updated.lexicalUnit.status === "inbox") {
-        setNotice("Changes saved. Review the updated learning target before marking it ready again.");
       } else {
-        setNotice("Changes saved. The next Anki export will update the same Collector note.");
+        setNotice("Changes saved. The Collector identity is unchanged.");
       }
       selectActiveId(updated.lexicalUnit.id);
       cancelEdit();
       await load(updated.lexicalUnit.id);
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Could not save changes.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function restoreIdentityActionFocus(): void {
+    const opener = identityActionFocusRef.current;
+    identityActionFocusRef.current = null;
+    requestAnimationFrame(() => opener?.focus({ preventScroll: true }));
+  }
+
+  function closeMergeDialog(): void {
+    setMergeDialog(null);
+    restoreIdentityActionFocus();
+  }
+
+  function closeSplitDialog(): void {
+    setSplitDialog(null);
+    restoreIdentityActionFocus();
+  }
+
+  function beginMerge(item: CollectedItem, opener: HTMLElement): void {
+    identityActionFocusRef.current = opener;
+    setSplitDialog(null);
+    setMergeDialog({
+      sourceId: item.lexicalUnit.id,
+      preview: null,
+      canonicalText: item.lexicalUnit.canonicalText,
+      note: item.lexicalUnit.note,
+      error: "",
+    });
+  }
+
+  async function chooseMergeCandidate(targetId: string): Promise<void> {
+    if (!mergeDialog) return;
+    setBusy(true);
+    setMergeDialog((current) => current ? { ...current, error: "" } : current);
+    try {
+      const preview = await repository.previewMerge(mergeDialog.sourceId, targetId);
+      const survivor = preview.survivingLexicalUnitId === preview.source.lexicalUnit.id
+        ? preview.source
+        : preview.target;
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview,
+        canonicalText: survivor.lexicalUnit.canonicalText,
+        note: survivor.lexicalUnit.note,
+        error: "",
+      } : current);
+    } catch (mergeError) {
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview: null,
+        error: mergeError instanceof Error ? mergeError.message : "Could not preview this merge.",
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmMerge(): Promise<void> {
+    const state = mergeDialog;
+    const preview = state?.preview;
+    if (!state || !preview) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await repository.mergeLexicalUnits({
+        sourceId: state.sourceId,
+        targetId: preview.target.lexicalUnit.id,
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: state.canonicalText,
+        note: state.note,
+      });
+      commitReviewSessionIds((current) =>
+        reconcileReviewSessionMerge(
+          current,
+          state.sourceId,
+          preview.target.lexicalUnit.id,
+          result.survivingLexicalUnitId,
+        )
+      );
+      identityActionFocusRef.current = null;
+      setMergeDialog(null);
+      selectActiveId(result.survivingLexicalUnitId);
+      await load(result.survivingLexicalUnitId);
+      setView("detail");
+      setNotice("Merge complete. The surviving lexical unit is back in Inbox for explicit review; Anki was not changed.");
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+      });
+    } catch (mergeError) {
+      const message = mergeError instanceof Error ? mergeError.message : "Could not merge these lexical units.";
+      let refreshed: MergePreview | null = preview;
+      try {
+        refreshed = await repository.previewMerge(state.sourceId, preview.target.lexicalUnit.id);
+      } catch {
+        refreshed = null;
+      }
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview: refreshed,
+        error: message,
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function beginSplit(item: CollectedItem, opener: HTMLElement): void {
+    identityActionFocusRef.current = opener;
+    setMergeDialog(null);
+    setSplitDialog({
+      sourceId: item.lexicalUnit.id,
+      selectedOccurrenceIds: [],
+      canonicalText: item.lexicalUnit.canonicalText,
+      note: "",
+      preview: null,
+      error: "",
+    });
+  }
+
+  function toggleSplitOccurrence(id: string, selected: boolean): void {
+    setSplitDialog((current) => {
+      if (!current) return current;
+      const ids = new Set(current.selectedOccurrenceIds);
+      if (selected) ids.add(id);
+      else ids.delete(id);
+      return {
+        ...current,
+        selectedOccurrenceIds: [...ids],
+        preview: null,
+        error: "",
+      };
+    });
+  }
+
+  async function reviewSplit(): Promise<void> {
+    if (!splitDialog) return;
+    setBusy(true);
+    setSplitDialog((current) => current ? { ...current, error: "", preview: null } : current);
+    try {
+      const preview = await repository.previewSplit(
+        splitDialog.sourceId,
+        splitDialog.selectedOccurrenceIds,
+      );
+      setSplitDialog((current) => current ? { ...current, preview, error: "" } : current);
+    } catch (splitError) {
+      setSplitDialog((current) => current ? {
+        ...current,
+        preview: null,
+        error: splitError instanceof Error ? splitError.message : "Could not preview this split.",
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSplit(): Promise<void> {
+    const state = splitDialog;
+    const preview = state?.preview;
+    if (!state || !preview) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await repository.splitLexicalUnit({
+        sourceId: state.sourceId,
+        selectedOccurrenceIds: state.selectedOccurrenceIds,
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: state.canonicalText,
+        note: state.note,
+      });
+      identityActionFocusRef.current = null;
+      setSplitDialog(null);
+      selectActiveId(result.source.lexicalUnit.id);
+      await load(result.source.lexicalUnit.id);
+      setView("detail");
+      setNotice(
+        `Split complete. “${result.created.lexicalUnit.canonicalText}” is a new Inbox identity with no Anki binding. The current review-session snapshot was not expanded.`,
+      );
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+      });
+    } catch (splitError) {
+      const message = splitError instanceof Error ? splitError.message : "Could not split this lexical unit.";
+      let refreshed: SplitPreview | null = preview;
+      try {
+        refreshed = await repository.previewSplit(state.sourceId, state.selectedOccurrenceIds);
+      } catch {
+        refreshed = null;
+      }
+      setSplitDialog((current) => current ? {
+        ...current,
+        preview: refreshed,
+        error: message,
+      } : current);
     } finally {
       setBusy(false);
     }
