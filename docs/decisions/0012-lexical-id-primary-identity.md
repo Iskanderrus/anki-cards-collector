@@ -29,6 +29,8 @@ Merge is an explicit identity-management operation with preview and confirmation
 
 Split is an explicit operation that moves a non-empty proper subset of occurrences to a new lexical-unit ID. Occurrence IDs are preserved. The original keeps its external Anki identity; the new unit starts unbound and in Inbox. The new unit may deliberately use the same canonical text as the source.
 
+Review-session behavior is snapshot-based. If an active unit is split, the original lexical ID remains at its current snapshot position and the newly created lexical ID is **not** inserted into that already-started review session. The new Inbox unit appears in the corpus and is picked up by a later review session. Merge reconciliation replaces all involved snapshot IDs with the single survivor exactly once.
+
 Ordinary capture and staged classification may use canonical/observed indexes for discovery, but multiple plausible owners are ambiguity. Collector must require explicit ownership resolution or fail closed rather than select the first owner or auto-merge.
 
 Collector external identity continues to follow lexical-unit ID, not human-readable canonical text. Merge/split do not mutate Anki directly; normal Inbox → Ready → export flow performs any later synchronization.
