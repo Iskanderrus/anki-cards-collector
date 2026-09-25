@@ -1037,4 +1037,74 @@ describe("CaptureRepository", () => {
     expect(new Set(items.map((item) => item.lexicalUnit.id))).toEqual(new Set(["unit-a", "unit-b"]));
   });
 
+
+  it("preserves an exported source identity when merging an unexported target", async () => {
+    const exported = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const unexported = await repository.capture(draft("tener", "Quiero tener tiempo."));
+    await repository.setExportBinding({
+      lexicalUnitId: exported.lexicalUnit.id,
+      profileId: "profile-a",
+      state: "exported",
+      ankiNoteId: 9090,
+      deckName: "Spanish RU",
+      deckId: "2",
+      modelName: "Collector Basic",
+      modelId: "10",
+    });
+
+    const preview = await repository.previewMerge(exported.lexicalUnit.id, unexported.lexicalUnit.id);
+    expect(preview.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+
+    const result = await repository.mergeLexicalUnits({
+      sourceId: exported.lexicalUnit.id,
+      targetId: unexported.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "tener",
+      note: "",
+    });
+
+    expect(result.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+    expect(result.item.lexicalUnit.id).toBe(exported.lexicalUnit.id);
+    expect(await repository.getExportBinding(exported.lexicalUnit.id)).toMatchObject({
+      state: "exported",
+      ankiNoteId: 9090,
+      deckId: "2",
+      modelId: "10",
+    });
+    expect(await repository.getExportBinding(unexported.lexicalUnit.id)).toBeNull();
+  });
+
+  it("reselects valid best evidence on both sides when the previously selected occurrence is split", async () => {
+    const first = await repository.capture(
+      draft("banco", "banco"),
+    );
+    const withSecond = await repository.capture(
+      draft(
+        "banco",
+        "Ayer fuimos al banco del centro para hablar con una asesora sobre el préstamo.",
+      ),
+    );
+
+    const sourcePreview = await repository.previewSplit(
+      first.lexicalUnit.id,
+      [withSecond.occurrences[1]!.id],
+    );
+    expect(sourcePreview.source.selectedOccurrenceId).toBe(withSecond.occurrences[1]!.id);
+
+    const result = await repository.splitLexicalUnit({
+      sourceId: first.lexicalUnit.id,
+      selectedOccurrenceIds: [withSecond.occurrences[1]!.id],
+      expectedSnapshotToken: sourcePreview.snapshotToken,
+      canonicalText: "banco",
+      note: "separate sense",
+    });
+
+    const remainingPreview = await repository.previewMerge(
+      result.source.lexicalUnit.id,
+      result.created.lexicalUnit.id,
+    );
+    expect(remainingPreview.source.selectedOccurrenceId).toBe(result.source.occurrences[0]!.id);
+    expect(remainingPreview.target.selectedOccurrenceId).toBe(result.created.occurrences[0]!.id);
+  });
+
 });
