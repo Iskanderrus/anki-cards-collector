@@ -350,8 +350,9 @@ function identityPriority(
   unit: LexicalUnit,
   binding: ExportBinding | undefined,
 ): number {
-  if (binding?.state === "exported" || effectiveAnkiNoteId(unit, binding) !== undefined) return 3;
-  if (binding?.state === "reserved") return 2;
+  if (binding?.state === "exported") return 5;
+  if (binding?.state === "reserved") return 4;
+  if (effectiveAnkiNoteId(unit, binding) !== undefined) return 3;
   if (binding) return 1;
   return 0;
 }
@@ -777,122 +778,55 @@ export class CaptureRepository {
     }
 
     const now = new Date().toISOString();
-    let lexicalUnit!: LexicalUnit;
-    let resultId = id;
 
     await this.database.transaction(
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
-      this.database.exportBindings,
       async () => {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
 
-        const collision = await this.database.lexicalUnits
-          .where("contentKey")
-          .equals(contentKey)
-          .first();
-
-        if (collision && collision.id !== id) {
-          const [currentBinding, collisionBinding] = await Promise.all([
-            this.database.exportBindings.get(current.id),
-            this.database.exportBindings.get(collision.id),
-          ]);
-
-          const conflictReason = consolidationConflictReason(
-            current,
-            collision,
-            currentBinding,
-            collisionBinding,
-          );
-          if (conflictReason) throw new Error(conflictReason);
-
-          const currentHasIdentity =
-            currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
-          const collisionHasIdentity =
-            collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
-
-          const keepCurrent = currentHasIdentity && !collisionHasIdentity;
-          const mergedNote = combineNotes(requestedNote, collision.note);
-          const createdAt = current.createdAt < collision.createdAt
-            ? current.createdAt
-            : collision.createdAt;
-
-          if (keepCurrent) {
-            await this.database.occurrences
-              .where("lexicalUnitId")
-              .equals(collision.id)
-              .modify({ lexicalUnitId: current.id });
-            await this.database.lexicalUnits.delete(collision.id);
-            const binding = preferredBinding(currentBinding, collisionBinding, current.id);
-            await this.database.exportBindings.delete(collision.id);
-            if (binding) await this.database.exportBindings.put(binding);
-
-            lexicalUnit = {
-              ...current,
-              contentKey,
-              canonicalText,
-              normalizedCanonicalText,
-              language,
-              note: mergedNote,
-              status: "inbox",
-              createdAt,
-              updatedAt: now,
-            };
-            await this.database.lexicalUnits.put(lexicalUnit);
-            resultId = current.id;
-          } else {
-            await this.database.occurrences
-              .where("lexicalUnitId")
-              .equals(current.id)
-              .modify({ lexicalUnitId: collision.id });
-            await this.database.lexicalUnits.delete(current.id);
-            const binding = preferredBinding(collisionBinding, currentBinding, collision.id);
-            await this.database.exportBindings.delete(current.id);
-            if (binding) await this.database.exportBindings.put(binding);
-
-            lexicalUnit = {
-              ...collision,
-              contentKey,
-              canonicalText,
-              normalizedCanonicalText,
-              language,
-              note: mergedNote,
-              status: "inbox",
-              createdAt,
-              updatedAt: now,
-            };
-            await this.database.lexicalUnits.put(lexicalUnit);
-            resultId = collision.id;
-          }
-        } else {
-          lexicalUnit = {
-            ...current,
-            contentKey,
-            canonicalText,
-            normalizedCanonicalText,
-            language,
-            note: requestedNote,
-            status: current.status === "ready" ? "inbox" : current.status,
-            updatedAt: now,
-          };
-          await this.database.lexicalUnits.put(lexicalUnit);
-        }
-
+        let occurrence: Occurrence | undefined;
+        let nextContext: string | undefined;
+        let occurrenceChanged = false;
         if (
-          changes.occurrenceId !== undefined &&
-          (changes.context !== undefined || requestedSurface !== undefined)
+          changes.occurrenceId !== undefined
+          && (changes.context !== undefined || requestedSurface !== undefined)
         ) {
-          const occurrence = await this.database.occurrences.get(changes.occurrenceId);
-          if (!occurrence || occurrence.lexicalUnitId !== resultId) {
+          occurrence = await this.database.occurrences.get(changes.occurrenceId);
+          if (!occurrence || occurrence.lexicalUnitId !== id) {
             throw new Error("The selected occurrence no longer belongs to this item.");
           }
+          nextContext = changes.context === undefined
+            ? undefined
+            : normalizeText(changes.context).slice(0, 800);
+          occurrenceChanged =
+            (nextContext !== undefined && nextContext !== occurrence.context)
+            || (requestedSurface !== undefined && requestedSurface !== occurrence.surfaceText);
+        }
 
+        const lexicalContentChanged =
+          current.contentKey !== contentKey
+          || current.canonicalText !== canonicalText
+          || normalizeLanguage(current.language) !== language
+          || current.note !== requestedNote;
+        const requiresReview = lexicalContentChanged || occurrenceChanged;
+
+        await this.database.lexicalUnits.put({
+          ...current,
+          contentKey,
+          canonicalText,
+          normalizedCanonicalText,
+          language,
+          note: requestedNote,
+          status: requiresReview ? "inbox" : current.status,
+          updatedAt: requiresReview ? now : current.updatedAt,
+        });
+
+        if (occurrence && occurrenceChanged) {
           await this.database.occurrences.update(occurrence.id, {
-            ...(changes.context === undefined
-              ? {}
-              : { context: normalizeText(changes.context).slice(0, 800) }),
+            ...(nextContext === undefined ? {} : { context: nextContext }),
             ...(requestedSurface === undefined
               ? {}
               : {
@@ -904,12 +838,238 @@ export class CaptureRepository {
       },
     );
 
-    const occurrences = await this.database.occurrences
-      .where("lexicalUnitId")
-      .equals(resultId)
-      .sortBy("capturedAt");
+    return this.collectedItem(id);
+  }
 
-    return { lexicalUnit, occurrences };
+  async previewMerge(sourceId: string, targetId: string): Promise<MergePreview> {
+    if (sourceId === targetId) throw new Error("Choose a different lexical unit to merge.");
+
+    const [sourceUnit, targetUnit] = await Promise.all([
+      this.database.lexicalUnits.get(sourceId),
+      this.database.lexicalUnits.get(targetId),
+    ]);
+    if (!sourceUnit || !targetUnit) {
+      throw new Error("One of the lexical units no longer exists.");
+    }
+    if (normalizeLanguage(sourceUnit.language) !== normalizeLanguage(targetUnit.language)) {
+      throw new Error("Only lexical units in the same language can be merged.");
+    }
+
+    const [sourceOccurrences, targetOccurrences, sourceBinding, targetBinding] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(sourceId).toArray(),
+      this.database.occurrences.where("lexicalUnitId").equals(targetId).toArray(),
+      this.database.exportBindings.get(sourceId),
+      this.database.exportBindings.get(targetId),
+    ]);
+
+    const conflictReason = mergeConflictReason(
+      sourceUnit,
+      targetUnit,
+      sourceBinding,
+      targetBinding,
+    );
+    const sourcePriority = identityPriority(sourceUnit, sourceBinding);
+    const targetPriority = identityPriority(targetUnit, targetBinding);
+    const survivingLexicalUnitId = targetPriority > sourcePriority ? targetId : sourceId;
+
+    return {
+      source: identitySummary(sourceUnit, sourceOccurrences, sourceBinding),
+      target: identitySummary(targetUnit, targetOccurrences, targetBinding),
+      survivingLexicalUnitId,
+      resultingOccurrenceCount: sourceOccurrences.length + targetOccurrences.length,
+      blocked: conflictReason !== undefined,
+      ...(conflictReason ? { conflictReason } : {}),
+      snapshotToken: stableIdentitySnapshot(
+        [sourceUnit, targetUnit],
+        [...sourceOccurrences, ...targetOccurrences],
+        [sourceBinding, targetBinding],
+      ),
+    };
+  }
+
+  async mergeLexicalUnits(input: MergeLexicalUnitsInput): Promise<MergeLexicalUnitsResult> {
+    const canonicalText = normalizeText(input.canonicalText);
+    if (!canonicalText) throw new Error("Merged canonical form cannot be empty.");
+    const note = input.note.trim().slice(0, 2000);
+    let survivingLexicalUnitId = "";
+    let removedLexicalUnitId = "";
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      this.database.exportBindings,
+      async () => {
+        const preview = await this.previewMerge(input.sourceId, input.targetId);
+        if (preview.snapshotToken !== input.expectedSnapshotToken) {
+          throw new Error(
+            "Merge preview is stale because the lexical units changed. Review the refreshed preview before confirming.",
+          );
+        }
+        if (preview.blocked) {
+          throw new Error(preview.conflictReason ?? "These lexical units cannot be merged safely.");
+        }
+
+        survivingLexicalUnitId = preview.survivingLexicalUnitId;
+        removedLexicalUnitId = survivingLexicalUnitId === input.sourceId
+          ? input.targetId
+          : input.sourceId;
+
+        const survivor = survivingLexicalUnitId === input.sourceId
+          ? preview.source
+          : preview.target;
+        const removed = survivingLexicalUnitId === input.sourceId
+          ? preview.target
+          : preview.source;
+        const language = normalizeLanguage(survivor.lexicalUnit.language);
+        const now = new Date().toISOString();
+        const survivingNoteId =
+          effectiveAnkiNoteId(survivor.lexicalUnit, survivor.exportBinding)
+          ?? effectiveAnkiNoteId(removed.lexicalUnit, removed.exportBinding);
+        const bindingToKeep = survivor.exportBinding
+          ?? (removed.exportBinding
+            ? { ...removed.exportBinding, lexicalUnitId: survivingLexicalUnitId }
+            : undefined);
+
+        const mergedUnit: LexicalUnit = {
+          ...survivor.lexicalUnit,
+          contentKey: makeContentKey(canonicalText, language),
+          canonicalText,
+          normalizedCanonicalText: normalizeIdentityText(canonicalText),
+          language,
+          note,
+          status: "inbox",
+          createdAt: survivor.lexicalUnit.createdAt < removed.lexicalUnit.createdAt
+            ? survivor.lexicalUnit.createdAt
+            : removed.lexicalUnit.createdAt,
+          updatedAt: now,
+          ...(survivingNoteId === undefined
+            ? { ankiNoteId: undefined }
+            : { ankiNoteId: survivingNoteId }),
+        };
+
+        await this.database.occurrences
+          .where("lexicalUnitId")
+          .equals(removedLexicalUnitId)
+          .modify({ lexicalUnitId: survivingLexicalUnitId });
+        await this.database.exportBindings.delete(removedLexicalUnitId);
+        if (bindingToKeep) {
+          await this.database.exportBindings.put({
+            ...bindingToKeep,
+            lexicalUnitId: survivingLexicalUnitId,
+            updatedAt: now,
+          });
+        }
+        await this.database.lexicalUnits.put(mergedUnit);
+        await this.database.lexicalUnits.delete(removedLexicalUnitId);
+      },
+    );
+
+    return {
+      item: await this.collectedItem(survivingLexicalUnitId),
+      survivingLexicalUnitId,
+      removedLexicalUnitId,
+    };
+  }
+
+  async previewSplit(
+    sourceId: string,
+    selectedOccurrenceIds: readonly string[],
+  ): Promise<SplitPreview> {
+    const selectedIds = [...new Set(selectedOccurrenceIds)].sort();
+    if (selectedIds.length === 0) {
+      throw new Error("Select at least one occurrence to split.");
+    }
+
+    const sourceUnit = await this.database.lexicalUnits.get(sourceId);
+    if (!sourceUnit) throw new Error("Collected item no longer exists.");
+
+    const [occurrences, binding] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(sourceId).toArray(),
+      this.database.exportBindings.get(sourceId),
+    ]);
+    const ownedIds = new Set(occurrences.map((occurrence) => occurrence.id));
+    for (const occurrenceId of selectedIds) {
+      if (!ownedIds.has(occurrenceId)) {
+        throw new Error("A selected occurrence no longer belongs to this lexical unit.");
+      }
+    }
+    if (selectedIds.length >= occurrences.length) {
+      throw new Error("A split must leave at least one occurrence on the original lexical unit.");
+    }
+
+    return {
+      source: identitySummary(sourceUnit, occurrences, binding),
+      selectedOccurrenceIds: selectedIds,
+      remainingOccurrenceCount: occurrences.length - selectedIds.length,
+      newOccurrenceCount: selectedIds.length,
+      snapshotToken: stableIdentitySnapshot([sourceUnit], occurrences, [binding]),
+    };
+  }
+
+  async splitLexicalUnit(input: SplitLexicalUnitInput): Promise<SplitLexicalUnitResult> {
+    const canonicalText = normalizeText(input.canonicalText);
+    if (!canonicalText) throw new Error("New canonical form cannot be empty.");
+    const note = input.note.trim().slice(0, 2000);
+    let createdId = "";
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      this.database.exportBindings,
+      async () => {
+        const preview = await this.previewSplit(input.sourceId, input.selectedOccurrenceIds);
+        if (preview.snapshotToken !== input.expectedSnapshotToken) {
+          throw new Error(
+            "Split preview is stale because occurrence ownership changed. Review the refreshed preview before confirming.",
+          );
+        }
+
+        const selectedIds = new Set(preview.selectedOccurrenceIds);
+        const selectedOccurrences = preview.source.occurrences.filter(
+          (occurrence) => selectedIds.has(occurrence.id),
+        );
+        if (selectedOccurrences.length !== selectedIds.size) {
+          throw new Error("Selected occurrence ownership changed before the split.");
+        }
+
+        const now = new Date().toISOString();
+        const language = normalizeLanguage(preview.source.lexicalUnit.language);
+        createdId = crypto.randomUUID();
+        const newUnit: LexicalUnit = {
+          id: createdId,
+          contentKey: makeContentKey(canonicalText, language),
+          canonicalText,
+          normalizedCanonicalText: normalizeIdentityText(canonicalText),
+          language,
+          note,
+          status: "inbox",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const sourceUnit: LexicalUnit = {
+          ...preview.source.lexicalUnit,
+          status: "inbox",
+          updatedAt: now,
+        };
+
+        await this.database.lexicalUnits.add(newUnit);
+        await this.database.lexicalUnits.put(sourceUnit);
+        await this.database.occurrences.bulkPut(
+          selectedOccurrences.map((occurrence) => ({
+            ...occurrence,
+            lexicalUnitId: createdId,
+          })),
+        );
+      },
+    );
+
+    const [source, created] = await Promise.all([
+      this.collectedItem(input.sourceId),
+      this.collectedItem(createdId),
+    ]);
+    return { source, created };
   }
 
   async previewRestore(backup: BackupDocument): Promise<RestorePreview> {
