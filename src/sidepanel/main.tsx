@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
@@ -53,7 +53,15 @@ import {
 import { downloadText, toTsv } from "../anki/export";
 import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
+import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
+import { Onboarding } from "./onboarding";
+import { ExportPreviewDialog } from "./export-preview-dialog";
+import {
+  buildExportPreview,
+  friendlyExportFailure,
+  type ExportPreview,
+} from "./export-preview";
 import { GuidedProfileSetup } from "./profile-setup";
 import {
   StagedReview,
@@ -303,6 +311,31 @@ function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
 }
 
+function reconcileReviewSessionIds(
+  ids: string[],
+  oldId: string,
+  survivingId: string,
+): string[] {
+  const oldIndex = ids.indexOf(oldId);
+  if (oldIndex < 0 || oldId === survivingId) return ids;
+
+  const survivorIndex = ids.indexOf(survivingId);
+  const withoutEither = ids.filter((id) => id !== oldId && id !== survivingId);
+  const logicalCurrentIndex = oldIndex - (
+    survivorIndex >= 0 && survivorIndex < oldIndex ? 1 : 0
+  );
+  const insertionIndex = Math.min(
+    Math.max(0, logicalCurrentIndex),
+    withoutEither.length,
+  );
+
+  return [
+    ...withoutEither.slice(0, insertionIndex),
+    survivingId,
+    ...withoutEither.slice(insertionIndex),
+  ];
+}
+
 function sourceLabel(occurrence: Occurrence | undefined): string {
   const source = occurrence?.source;
   if (!source) return "unknown source";
@@ -323,6 +356,12 @@ function App(): React.ReactElement {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [reviewSessionIds, setReviewSessionIds] = useState<string[]>([]);
+  const reviewSessionIdsRef = useRef<string[]>([]);
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
+  const [exportTechnicalError, setExportTechnicalError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
@@ -332,6 +371,7 @@ function App(): React.ReactElement {
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const loadRequestId = useRef(0);
+  const restoreExportFocusRef = useRef(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
@@ -458,6 +498,21 @@ function App(): React.ReactElement {
   }, [load]);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadOnboardingState().then(
+      (state) => {
+        if (!cancelled) setOnboardingOpen(!state.dismissed);
+      },
+      () => {
+        if (!cancelled) setOnboardingOpen(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!backfill.status.active) return undefined;
 
     const timer = window.setInterval(() => {
@@ -476,6 +531,44 @@ function App(): React.ReactElement {
     () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
     [activeId, items],
   );
+
+  const reviewSessionItems = useMemo(
+    () => reviewSessionIds
+      .map((id) => items.find((item) => item.lexicalUnit.id === id))
+      .filter((item): item is CollectedItem => item !== undefined),
+    [items, reviewSessionIds],
+  );
+
+  useLayoutEffect(() => {
+    if (exportProgress) {
+      document.querySelector<HTMLElement>("[data-export-progress-focus]")?.focus({
+        preventScroll: true,
+      });
+      return;
+    }
+
+    if (!busy && restoreExportFocusRef.current) {
+      restoreExportFocusRef.current = false;
+      document.querySelector<HTMLElement>("[data-export-ready]")?.focus({
+        preventScroll: true,
+      });
+    }
+  }, [busy, exportProgress]);
+
+  const exportProgressDestination = useMemo(() => {
+    if (!exportProgress?.currentId) return null;
+    const item = items.find((candidate) => candidate.lexicalUnit.id === exportProgress.currentId);
+    if (!item) return null;
+    try {
+      return resolveExportRoute(
+        item,
+        settings,
+        exportBindings[item.lexicalUnit.id] ?? null,
+      ).profile;
+    } catch {
+      return null;
+    }
+  }, [exportBindings, exportProgress?.currentId, items, settings]);
 
   useEffect(() => {
     if (view !== "detail" || !activeId) {
@@ -543,6 +636,16 @@ function App(): React.ReactElement {
     setActiveId(id);
   }
 
+  function commitReviewSessionIds(
+    next: React.SetStateAction<string[]>,
+  ): void {
+    const resolved = typeof next === "function"
+      ? next(reviewSessionIdsRef.current)
+      : next;
+    reviewSessionIdsRef.current = resolved;
+    setReviewSessionIds(resolved);
+  }
+
   function openDetail(id: string): void {
     selectActiveId(id);
     setView("detail");
@@ -553,6 +656,8 @@ function App(): React.ReactElement {
 
   function showQueue(): void {
     cancelEdit();
+    commitReviewSessionIds([]);
+    closeExportPreview(false);
     setView("queue");
     requestAnimationFrame(() => {
       const currentActiveId = activeIdRef.current;
@@ -566,6 +671,8 @@ function App(): React.ReactElement {
 
   function showStaged(): void {
     cancelEdit();
+    commitReviewSessionIds([]);
+    closeExportPreview(false);
     setView("staged");
     void refreshStagedCandidates();
     requestAnimationFrame(() => {
@@ -577,23 +684,99 @@ function App(): React.ReactElement {
 
   function showSettings(): void {
     cancelEdit();
+    commitReviewSessionIds([]);
+    closeExportPreview();
     closeDeckAnalysis();
     setView("settings");
+  }
+
+  async function dismissIntroduction(): Promise<void> {
+    const returnSelector = view === "settings"
+      ? "[data-reopen-onboarding]"
+      : "[data-primary-collect]";
+    try {
+      await dismissOnboarding();
+    } finally {
+      setOnboardingOpen(false);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(returnSelector)?.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  function closeExportPreview(restoreFocus = true): void {
+    setExportPreviewOpen(false);
+    if (!restoreFocus) return;
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-export-ready]")?.focus({ preventScroll: true });
+    });
+  }
+
+  async function openExportPreview(): Promise<void> {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setExportTechnicalError("");
+    try {
+      const nextPreview = await buildExportPreview(
+        items,
+        settings,
+        exportBindings,
+        new AnkiClient(),
+      );
+      setExportPreview(nextPreview);
+      setExportPreviewOpen(true);
+    } catch (previewError) {
+      const detail = previewError instanceof Error
+        ? previewError.message
+        : "Could not check the current Anki destinations.";
+      setExportTechnicalError(detail);
+      setError(friendlyExportFailure(detail));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startInboxReview(): void {
+    const inboxIds = items
+      .filter((item) => item.lexicalUnit.status === "inbox")
+      .map((item) => item.lexicalUnit.id);
+    if (inboxIds.length === 0) {
+      setNotice("Inbox is clear. Collect useful language while reading, or review Staged material.");
+      return;
+    }
+
+    commitReviewSessionIds(inboxIds);
+    selectActiveId(inboxIds[0]!);
+    setView("detail");
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+    });
   }
 
   async function capture(): Promise<void> {
     setBusy(true);
     setError("");
     setNotice("");
+    setExportTechnicalError("");
 
     try {
       const response = await chrome.runtime.sendMessage({
         type: "COLLECT_ACTIVE_SELECTION",
         language: captureLanguageForSettings(settings),
-      }) as { ok: boolean; error?: string };
+      }) as {
+        ok: boolean;
+        error?: string;
+        captureKind?: "new" | "occurrence";
+        canonicalText?: string;
+      };
 
       if (!response.ok) throw new Error(response.error ?? "Capture failed.");
-      setNotice("Collected. Review it before exporting.");
+      setNotice(
+        response.captureKind === "occurrence"
+          ? "Added another occurrence to “" + (response.canonicalText ?? "this item") + "”. Keep reading; review it later."
+          : "Collected to Inbox. Keep reading; review it later.",
+      );
       await load();
     } catch (captureError) {
       setError(captureError instanceof Error ? captureError.message : "Capture failed.");
@@ -945,7 +1128,7 @@ function App(): React.ReactElement {
       if (item) {
         const proposal = proposeLearningCard(item);
         if (!proposal.recommended) {
-          setError(proposal.warning ?? "Review this item before marking it ready.");
+          setError(proposal.warning ?? "Review this item before marking it Ready.");
           return;
         }
       }
@@ -954,6 +1137,23 @@ function App(): React.ReactElement {
     setError("");
     await repository.setStatus(id, status);
     await load(id);
+
+    const sessionIds = reviewSessionIdsRef.current;
+    if (sessionIds.includes(id) && (status === "ready" || status === "archived")) {
+      const currentIndex = sessionIds.indexOf(id);
+      const nextId = sessionIds[currentIndex + 1];
+      if (nextId) {
+        selectActiveId(nextId);
+        setView("detail");
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+        });
+      } else {
+        commitReviewSessionIds([]);
+        setView("queue");
+        setNotice("Inbox reviewed. You can export Ready items now or collect more language.");
+      }
+    }
   }
 
   function beginEdit(item: CollectedItem): void {
@@ -1010,6 +1210,11 @@ function App(): React.ReactElement {
       }
 
       const updated = await repository.update(id, editDraft);
+      if (updated.lexicalUnit.id !== id) {
+        commitReviewSessionIds((current) =>
+          reconcileReviewSessionIds(current, id, updated.lexicalUnit.id)
+        );
+      }
       const proposal = proposeLearningCard(updated);
       if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
         await repository.setStatus(updated.lexicalUnit.id, "inbox");
@@ -1032,42 +1237,29 @@ function App(): React.ReactElement {
   }
 
   async function exportToAnki(): Promise<void> {
-    const ready = items.filter((item) => item.lexicalUnit.status === "ready");
-    if (!ready.length) {
-      setError("Mark at least one item as ready first.");
-      return;
-    }
+    const preview = exportPreview;
+    if (!preview) return;
 
-    const blocked = ready.filter((item) => !proposeLearningCard(item).recommended);
-    if (blocked.length > 0) {
-      setError(`${blocked.length} ready item${blocked.length === 1 ? "" : "s"} need review before export.`);
-      return;
-    }
-
-    const legacyCustom = ready.filter((item) => {
-      const binding = exportBindings[item.lexicalUnit.id];
-      const profile = binding
-        ? settings.exportProfiles.find((candidate) => candidate.id === binding.profileId)
-        : undefined;
-      return profile?.mode === "mapped-user-model"
-        && !mappedProfileIsConfigured(profile);
-    });
-    const exportable = ready.filter((item) => !legacyCustom.includes(item));
+    const exportableIds = new Set(preview.exportableIds);
+    const exportable = items.filter(
+      (item) => item.lexicalUnit.status === "ready" && exportableIds.has(item.lexicalUnit.id),
+    );
 
     if (exportable.length === 0) {
-      if (legacyCustom.length > 0) {
-        setNotice(
-          `${legacyCustom.length} existing Anki card${legacyCustom.length === 1 ? "" : "s"} use custom note types and were left unchanged.`,
-        );
-      } else {
-        setError("No Ready cards can be exported.");
-      }
+      setError(
+        preview.totalReady === 0
+          ? "Nothing is Ready for export yet. Review Inbox items and explicitly mark the ones you want to study as Ready."
+          : "Ready items changed or are blocked. Reopen Export and review the current destination/profile guidance.",
+      );
       return;
     }
 
+    closeExportPreview(false);
+    restoreExportFocusRef.current = true;
     setBusy(true);
     setError("");
     setNotice("");
+    setExportTechnicalError("");
     setExportOutcomes({});
     setExportProgress({ completed: 0, total: exportable.length });
 
@@ -1085,25 +1277,23 @@ function App(): React.ReactElement {
         report.results.map((result) => [result.id, result]),
       ));
 
-      const parts = [`${report.exported} exported`];
-      if (legacyCustom.length > 0) {
-        parts.push(`${legacyCustom.length} existing custom-card${legacyCustom.length === 1 ? "" : "s"} skipped`);
-      }
-      if (report.failed > 0) parts.push(`${report.failed} failed`);
-      if (report.warnings > 0) parts.push(`${report.warnings} local warning${report.warnings === 1 ? "" : "s"}`);
+      const parts = [String(report.exported) + " exported"];
+      if (preview.blocked > 0) parts.push(String(preview.blocked) + " blocked");
+      if (report.failed > 0) parts.push(String(report.failed) + " failed");
+      if (report.warnings > 0) parts.push(String(report.warnings) + " local warning" + (report.warnings === 1 ? "" : "s"));
 
-      if (report.failed > 0 || report.warnings > 0) {
-        setError(`Anki export finished: ${parts.join(", ")}. See the affected cards below.`);
+      if (report.failed > 0) {
+        setError("Anki export finished with items that need attention: " + parts.join(", ") + ".");
+      } else if (report.warnings > 0) {
+        setNotice("Anki export finished with recoverable warnings: " + parts.join(", ") + ".");
       } else {
-        setNotice(`Anki export finished: ${parts.join(", ")}.`);
+        setNotice("Anki export finished: " + parts.join(", ") + ".");
       }
       await load();
     } catch (ankiError) {
-      setError(
-        ankiError instanceof Error
-          ? `${ankiError.message} Is Anki running with AnkiConnect enabled?`
-          : "Anki export failed.",
-      );
+      const detail = ankiError instanceof Error ? ankiError.message : "Anki export failed.";
+      setExportTechnicalError(detail);
+      setError(friendlyExportFailure(detail));
     } finally {
       setExportProgress(null);
       setBusy(false);
@@ -1174,7 +1364,7 @@ function App(): React.ReactElement {
       setError(
         reconcileError instanceof Error
           ? reconcileError.message
-          : "Retry Send ready to Anki before changing this deck.",
+          : "Retry Export Ready before changing this deck.",
       );
       return;
     }
@@ -1520,18 +1710,23 @@ function App(): React.ReactElement {
     }
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     function isTypingTarget(target: EventTarget | null): boolean {
       if (!(target instanceof HTMLElement)) return false;
       return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+    }
+
+    function isNativeActivationTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.closest("button, a[href], summary") !== null;
     }
 
     function focusItem(id: string): void {
       selectActiveId(id);
       requestAnimationFrame(() => {
         const selector = view === "queue"
-          ? `[data-queue-id="${CSS.escape(id)}"]`
-          : `[data-card-id="${CSS.escape(id)}"]`;
+          ? "[data-queue-id=\"" + CSS.escape(id) + "\"]"
+          : "[data-card-id=\"" + CSS.escape(id) + "\"]";
         const element = document.querySelector<HTMLElement>(selector);
         element?.focus({ preventScroll: true });
         element?.scrollIntoView({ block: "nearest" });
@@ -1539,7 +1734,18 @@ function App(): React.ReactElement {
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      if (busy || editingId !== null || isTypingTarget(event.target)) return;
+      if (
+        busy
+        || editingId !== null
+        || onboardingOpen
+        || exportPreviewOpen
+        || isTypingTarget(event.target)
+      ) return;
+
+      if (
+        (event.key === "Enter" || event.key === " ")
+        && isNativeActivationTarget(event.target)
+      ) return;
 
       const key = event.key.toLowerCase();
       if (view === "detail" && (event.key === "Escape" || key === "b")) {
@@ -1547,28 +1753,37 @@ function App(): React.ReactElement {
         showQueue();
         return;
       }
-      if (view === "settings" || view === "staged" || items.length === 0) return;
+      if (view === "settings" || view === "staged") return;
 
-      const currentIndex = Math.max(
-        0,
-        items.findIndex((item) => item.lexicalUnit.id === activeId),
+      const sessionIds = reviewSessionIdsRef.current;
+      const inReviewSession = sessionIds.length > 0;
+      const navigableItems = inReviewSession
+        ? sessionIds
+          .map((id) => items.find((item) => item.lexicalUnit.id === id))
+          .filter((item): item is CollectedItem => item !== undefined)
+        : items;
+      if (navigableItems.length === 0) return;
+      const foundIndex = navigableItems.findIndex(
+        (item) => item.lexicalUnit.id === activeId,
       );
+      if (inReviewSession && foundIndex < 0) return;
+      const currentIndex = foundIndex < 0 ? 0 : foundIndex;
 
       if (key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
-        const next = Math.min(items.length - 1, currentIndex + 1);
-        focusItem(items[next]!.lexicalUnit.id);
+        const next = Math.min(navigableItems.length - 1, currentIndex + 1);
+        focusItem(navigableItems[next]!.lexicalUnit.id);
         return;
       }
 
       if (key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         const previous = Math.max(0, currentIndex - 1);
-        focusItem(items[previous]!.lexicalUnit.id);
+        focusItem(navigableItems[previous]!.lexicalUnit.id);
         return;
       }
 
-      const currentItem = items[currentIndex];
+      const currentItem = navigableItems[currentIndex];
       if (!currentItem) return;
 
       if (view === "queue" && (event.key === "Enter" || key === "o")) {
@@ -1598,22 +1813,52 @@ function App(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeId, busy, editingId, items, view]);
+  }, [
+    activeId,
+    busy,
+    editingId,
+    exportPreviewOpen,
+    items,
+    onboardingOpen,
+    reviewSessionIds,
+    reviewSessionItems,
+    view,
+  ]);
 
   return (
     <main className="app">
       <header className="header">
         <h1>Anki Cards Collector</h1>
-        <p>Keep the language worth remembering. Leave the rest on the page.</p>
+        <p>Collect now. Review later. Export confidently.</p>
       </header>
 
+      {onboardingOpen && (
+        <Onboarding onDismiss={() => void dismissIntroduction()} />
+      )}
+
+      {exportPreviewOpen && exportPreview && (
+        <ExportPreviewDialog
+          preview={exportPreview}
+          busy={busy}
+          onClose={closeExportPreview}
+          onExport={() => void exportToAnki()}
+        />
+      )}
+
       {view !== "staged" && (
-        <div className="toolbar">
-          <button className="primary" disabled={busy} onClick={() => void capture()}>
-            Collect selection
+        <div className="toolbar primary-workflow">
+          <button data-primary-collect className="primary" disabled={busy} onClick={() => void capture()}>
+            Collect
           </button>
-          <button disabled={busy || counts.ready === 0} onClick={() => void exportToAnki()}>
-            Send ready to Anki
+          <button disabled={busy || counts.inbox === 0} onClick={startInboxReview}>
+            Review Inbox{counts.inbox > 0 ? " (" + counts.inbox + ")" : ""}
+          </button>
+          <button
+            data-export-ready
+            disabled={busy || counts.ready === 0}
+            onClick={() => void openExportPreview()}
+          >
+            Export Ready{counts.ready > 0 ? " (" + counts.ready + ")" : ""}
           </button>
         </div>
       )}
@@ -1624,14 +1869,14 @@ function App(): React.ReactElement {
           aria-current={view === "queue" ? "page" : undefined}
           onClick={showQueue}
         >
-          Queue
+          Inbox
         </button>
         <button
           type="button"
           aria-current={view === "staged" ? "page" : undefined}
           onClick={showStaged}
         >
-          Staged{stagedCandidates.length > 0 ? ` (${stagedCandidates.length})` : ""}
+          Staged{stagedCandidates.length > 0 ? " (" + stagedCandidates.length + ")" : ""}
         </button>
         <button
           type="button"
@@ -1735,6 +1980,12 @@ function App(): React.ReactElement {
 
       {notice && <div className="notice" role="status" aria-live="polite">{notice}</div>}
       {error && <div className="notice error" role="alert">{error}</div>}
+      {exportTechnicalError && (
+        <details className="technical-detail">
+          <summary>Technical detail</summary>
+          <code>{exportTechnicalError}</code>
+        </details>
+      )}
 
       {view === "staged" && (
         <StagedReview
@@ -1756,10 +2007,19 @@ function App(): React.ReactElement {
       )}
 
       {exportProgress && (
-        <div className="export-progress" role="status" aria-live="polite">
+        <div
+          className="export-progress"
+          role="status"
+          aria-live="polite"
+          tabIndex={-1}
+          data-export-progress-focus
+        >
           <div>
             Exporting {exportProgress.completed}/{exportProgress.total}
-            {exportProgress.currentText ? ` · ${exportProgress.currentText}` : ""}
+            {exportProgress.currentText ? " · " + exportProgress.currentText : ""}
+            {exportProgressDestination
+              ? " · " + exportProgressDestination.name + " → " + exportProgressDestination.deckName
+              : ""}
           </div>
           <progress
             value={exportProgress.completed}
@@ -1783,6 +2043,30 @@ function App(): React.ReactElement {
       )}
 
       {view === "queue" && (
+        <>
+          <div className="inbox-actions">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || counts.inbox === 0}
+              onClick={startInboxReview}
+            >
+              Review Inbox
+            </button>
+            <span className="setting-help">
+              Ready is explicit approval for export. Viewing an item never changes its state.
+            </span>
+          </div>
+          {counts.inbox === 0 && (
+            <div className="empty compact-empty">
+              Inbox is clear. Collect useful language while reading, or review Staged material.
+            </div>
+          )}
+          {counts.ready === 0 && items.length > 0 && (
+            <div className="empty compact-empty">
+              Nothing is Ready for export yet. Review Inbox items and mark the ones you want to study as Ready.
+            </div>
+          )}
         <ReviewQueue
           entries={items.map((item) => {
             const proposal = proposeLearningCard(item);
@@ -1803,15 +2087,23 @@ function App(): React.ReactElement {
           onActivate={selectActiveId}
           onOpen={openDetail}
         />
+        </>
       )}
 
       {view === "settings" && (
       <section className="settings settings-view" aria-labelledby="settings-title">
         <div className="settings-view-head">
-          <h2 id="settings-title">Settings & Anki</h2>
-          <button className="ghost" type="button" onClick={showQueue}>Back to queue</button>
+          <div>
+            <h2 id="settings-title">Settings</h2>
+            <div className="setting-help">Languages, Anki profiles, privacy, backup, and advanced controls.</div>
+          </div>
+          <div className="settings-head-actions">
+            <button data-reopen-onboarding className="ghost" type="button" onClick={() => setOnboardingOpen(true)}>View introduction</button>
+            <button className="ghost" type="button" onClick={showQueue}>Back to Inbox</button>
+          </div>
         </div>
         <div className="settings-grid">
+          <h3 className="settings-task-title">Anki connection & profiles</h3>
           <div className="anki-catalog">
             <div className="anki-catalog-head">
               <div>
@@ -1837,10 +2129,16 @@ function App(): React.ReactElement {
                 <>Connected · {catalogState.snapshot.decks.length} deck{catalogState.snapshot.decks.length === 1 ? "" : "s"}</>
               )}
               {catalogState.kind === "stale" && (
-                <>Showing the last loaded decks. Refresh failed: {catalogState.error}</>
+                <>
+                  Showing the last loaded decks. Anki isn't available right now; saved profiles are unchanged.
+                  Open Anki Desktop, make sure AnkiConnect is running, then Retry.
+                </>
               )}
               {catalogState.kind === "unavailable" && (
-                <>Could not connect to Anki: {catalogState.error}</>
+                <>
+                  Anki isn't available. Your local Inbox and saved profiles are still here.
+                  Open Anki Desktop, make sure AnkiConnect is running, then Refresh from Anki.
+                </>
               )}
             </div>
           </div>
@@ -1863,6 +2161,7 @@ function App(): React.ReactElement {
             onError={setError}
           />
 
+          <h3 className="settings-task-title">Languages & routing</h3>
           <div className="language-decks">
             <div className="anki-catalog-head">
               <div>
@@ -2110,118 +2409,131 @@ function App(): React.ReactElement {
             </section>
           )}
 
+          <section className="settings-task-group" aria-labelledby="privacy-title">
+            <h3 id="privacy-title" className="settings-task-title">Privacy & source retention</h3>
+            <p className="setting-help settings-privacy-summary">
+              Captures stay in Collector's local storage. Browsing is not continuously watched.
+              Duolingo collection is explicit, and direct export talks to local AnkiConnect.
+            </p>
+            <label>
+              Source URL retention
+              <select
+                value={settings.sourceUrlMode}
+                onChange={(event) => {
+                  const sourceUrlMode = event.target.value as SourceUrlMode;
+                  void persistSettings((current) => ({ ...current, sourceUrlMode }));
+                }}
+              >
+                <option value="sanitized">Origin + path only (default)</option>
+                <option value="query">Keep non-tracking query parameters</option>
+                <option value="none">Do not store source URL</option>
+              </select>
+              <span className="setting-help">
+                Credentials and fragments are never stored. Tracking parameters are removed in every retained mode.
+              </span>
+            </label>
+          </section>
+
+          <section className="settings-task-group" aria-labelledby="backup-title">
+            <h3 id="backup-title" className="settings-task-title">Backup & restore</h3>
+            <div className="toolbar">
+              <button className="ghost" disabled={busy} onClick={backupJson}>Backup JSON</button>
+            </div>
+            <label>
+              Restore JSON backup
+              <input
+                type="file"
+                accept=".json,application/json"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  void previewBackupFile(file);
+                }}
+              />
+            </label>
+
+            {restorePreview && (
+              <div className="restore-preview">
+                <strong>Restore preview</strong>
+                <div className="restore-stats">
+                  <span>{restorePreview.lexicalUnitsAdded} items to add</span>
+                  <span>{restorePreview.lexicalUnitsUpdated} items to update</span>
+                  <span>{restorePreview.lexicalUnitsSkipped} items unchanged</span>
+                  <span>{restorePreview.occurrencesAdded} occurrences to add</span>
+                  <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
+                  <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
+                  <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
+                  <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
+                </div>
+
+                {restorePreview.conflicts.length > 0 && (
+                  <ul className="conflict-list">
+                    {restorePreview.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
+                  </ul>
+                )}
+
+                <div className="toolbar">
+                  <button
+                    className="primary"
+                    disabled={busy || restorePreview.conflicts.length > 0}
+                    onClick={() => void restorePendingBackup()}
+                  >
+                    Restore backup
+                  </button>
+                  <button className="ghost" disabled={busy} onClick={clearRestorePreview}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </section>
+
           <details className="advanced-settings">
             <summary>Advanced</summary>
             <div className="advanced-settings-grid">
-          {modelState.kind !== "idle" && (
-            <div className="anki-model-inspector" aria-live="polite">
-              {modelState.kind === "loading" && <span>Inspecting note type…</span>}
-              {modelState.kind === "unavailable" && (
-                <span>Could not inspect this note type: {modelState.error}</span>
-              )}
-              {(modelState.kind === "live" || modelState.kind === "stale") && (
-                <>
-                  <strong>{modelState.detail.name}</strong>
-                  {modelState.kind === "stale" && (
-                    <span className="setting-help">Showing cached metadata: {modelState.error}</span>
+              {modelState.kind !== "idle" && (
+                <div className="anki-model-inspector" aria-live="polite">
+                  {modelState.kind === "loading" && <span>Inspecting note type…</span>}
+                  {modelState.kind === "unavailable" && (
+                    <span>Could not inspect this note type: {modelState.error}</span>
                   )}
-                  <span><strong>Fields:</strong> {modelState.detail.fields.join(", ") || "none"}</span>
-                  <span>
-                    <strong>Templates:</strong>{" "}
-                    {modelState.detail.templates.map((template) => template.name).join(", ") || "none"}
-                  </span>
-                  <span>
-                    <strong>Styling:</strong>{" "}
-                    {modelState.detail.css.length > 0
-                      ? `${modelState.detail.css.length} CSS characters detected`
-                      : "no CSS returned"}
-                  </span>
-                </>
+                  {(modelState.kind === "live" || modelState.kind === "stale") && (
+                    <>
+                      <strong>{modelState.detail.name}</strong>
+                      {modelState.kind === "stale" && (
+                        <span className="setting-help">Showing cached metadata: {modelState.error}</span>
+                      )}
+                      <span><strong>Fields:</strong> {modelState.detail.fields.join(", ") || "none"}</span>
+                      <span>
+                        <strong>Templates:</strong>{" "}
+                        {modelState.detail.templates.map((template) => template.name).join(", ") || "none"}
+                      </span>
+                      <span>
+                        <strong>Styling:</strong>{" "}
+                        {modelState.detail.css.length > 0
+                          ? String(modelState.detail.css.length) + " CSS characters detected"
+                          : "no CSS returned"}
+                      </span>
+                    </>
+                  )}
+                </div>
               )}
-            </div>
-          )}
-          <label>
-            Legacy capture language fallback
-            <input
-              value={settings.defaultLanguage}
-              placeholder="es, sr, he…"
-              onChange={(event) => {
-                const defaultLanguage = event.target.value || "und";
-                void persistSettings((current) => ({ ...current, defaultLanguage }));
-              }}
-            />
-            <span className="setting-help">
-              Preserved for older configuration. When an active export profile supplies a language, normal capture uses the profile language instead.
-            </span>
-          </label>
-          <label>
-            Source URL retention
-            <select
-              value={settings.sourceUrlMode}
-              onChange={(event) => {
-                const sourceUrlMode = event.target.value as SourceUrlMode;
-                void persistSettings((current) => ({ ...current, sourceUrlMode }));
-              }}
-            >
-              <option value="sanitized">Origin + path only (default)</option>
-              <option value="query">Keep non-tracking query parameters</option>
-              <option value="none">Do not store source URL</option>
-            </select>
-            <span className="setting-help">
-              Credentials and fragments are never stored. Tracking parameters are removed in every retained mode.
-            </span>
-          </label>
-          <div className="toolbar">
-            <button className="ghost" disabled={busy} onClick={exportTsv}>Download ready as TSV</button>
-            <button className="ghost" disabled={busy} onClick={backupJson}>Backup JSON</button>
-          </div>
-
-          <label>
-            Restore JSON backup
-            <input
-              type="file"
-              accept=".json,application/json"
-              disabled={busy}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                void previewBackupFile(file);
-              }}
-            />
-          </label>
-
-          {restorePreview && (
-            <div className="restore-preview">
-              <strong>Restore preview</strong>
-              <div className="restore-stats">
-                <span>{restorePreview.lexicalUnitsAdded} items to add</span>
-                <span>{restorePreview.lexicalUnitsUpdated} items to update</span>
-                <span>{restorePreview.lexicalUnitsSkipped} items unchanged</span>
-                <span>{restorePreview.occurrencesAdded} occurrences to add</span>
-                <span>{restorePreview.occurrencesUpdated} occurrences to update</span>
-                <span>{restorePreview.occurrencesSkipped} occurrences unchanged</span>
-                <span>{restorePreview.exportBindingsAdded} export bindings to add</span>
-                <span>{restorePreview.exportBindingsSkipped} export bindings unchanged</span>
-              </div>
-
-              {restorePreview.conflicts.length > 0 && (
-                <ul className="conflict-list">
-                  {restorePreview.conflicts.map((conflict) => <li key={conflict}>{conflict}</li>)}
-                </ul>
-              )}
-
+              <label>
+                Legacy capture language fallback
+                <input
+                  value={settings.defaultLanguage}
+                  placeholder="es, sr, he…"
+                  onChange={(event) => {
+                    const defaultLanguage = event.target.value || "und";
+                    void persistSettings((current) => ({ ...current, defaultLanguage }));
+                  }}
+                />
+                <span className="setting-help">
+                  Preserved for older configuration. When an active export profile supplies a language, normal capture uses the profile language instead.
+                </span>
+              </label>
               <div className="toolbar">
-                <button
-                  className="primary"
-                  disabled={busy || restorePreview.conflicts.length > 0}
-                  onClick={() => void restorePendingBackup()}
-                >
-                  Restore backup
-                </button>
-                <button className="ghost" disabled={busy} onClick={clearRestorePreview}>Cancel</button>
+                <button className="ghost" disabled={busy} onClick={exportTsv}>Download Ready as TSV</button>
               </div>
-            </div>
-          )}
             </div>
           </details>
         </div>
@@ -2231,17 +2543,21 @@ function App(): React.ReactElement {
       {view === "detail" && (
         <>
           <div className="detail-heading">
-            <button className="ghost" type="button" onClick={showQueue}>← Back to queue</button>
-            <span className="setting-help">
+            <button className="ghost" type="button" onClick={showQueue}>
+              {reviewSessionItems.length > 0 ? "Exit review" : "← Back to Inbox"}
+            </button>
+            <span className="setting-help" role="status" aria-live="polite">
               {activeItem
-                ? `${Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1)} of ${items.length}`
+                ? reviewSessionItems.length > 0
+                  ? "Inbox review " + Math.max(1, reviewSessionItems.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1) + " of " + reviewSessionItems.length
+                  : "Item " + Math.max(1, items.findIndex((item) => item.lexicalUnit.id === activeItem.lexicalUnit.id) + 1) + " of " + items.length
                 : "No item selected"}
             </span>
           </div>
       <section className="list detail-list" aria-label="Focused review detail">
         {!activeItem && (
           <div className="empty">
-            Choose an item from the queue to review it.
+            Choose an item from Inbox to review it.
           </div>
         )}
 
@@ -2419,7 +2735,7 @@ function App(): React.ReactElement {
                         {currentDeckName || "choose a deck in Settings"}
                       </span>
                       {binding?.ankiNoteId !== undefined && (
-                        <span className="setting-help">note {binding.ankiNoteId}</span>
+                        <span className="setting-help">Existing linked note · note {binding.ankiNoteId}</span>
                       )}
                     </div>
 
@@ -2522,17 +2838,28 @@ function App(): React.ReactElement {
 
                   {exportOutcome?.kind === "failed" && (
                     <div className="item-export-result error" role="alert">
-                      Anki export failed: {exportOutcome.error}
+                      <span>{friendlyExportFailure(exportOutcome.error)}</span>
+                      <details>
+                        <summary>Technical detail</summary>
+                        <code>{exportOutcome.error}</code>
+                      </details>
                     </div>
                   )}
                   {exportOutcome?.kind === "exported_untracked" && (
                     <div className="item-export-result warning" role="status">
-                      {exportOutcome.error}
+                      <span>
+                        Export succeeded, but Collector could not save the local Anki link.
+                        Refresh and Retry before changing this destination.
+                      </span>
+                      <details>
+                        <summary>Technical detail</summary>
+                        <code>{exportOutcome.error}</code>
+                      </details>
                     </div>
                   )}
                   {exportOutcome?.kind === "exported" && (
                     <div className="item-export-result success" role="status">
-                      Exported to {exportOutcome.deckName}, Anki note {exportOutcome.noteId}.
+                      Exported successfully to {exportOutcome.deckName}.
                     </div>
                   )}
 
@@ -2563,7 +2890,7 @@ function App(): React.ReactElement {
                         disabled={busy || reconciliationPending}
                         title={
                           reconciliationPending
-                            ? "Retry Send ready to Anki before deleting this item."
+                            ? "Retry Export Ready before deleting this item."
                             : undefined
                         }
                         onClick={() => void repository.remove(unit.id).then(async () => {

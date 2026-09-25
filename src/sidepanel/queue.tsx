@@ -24,10 +24,10 @@ export function ReviewQueue({
   onOpen,
 }: ReviewQueueProps): React.ReactElement {
   return (
-    <section className="queue" aria-label="Review queue">
+    <section className="queue" aria-label="Collected study items">
       {entries.length === 0 && (
         <div className="empty">
-          Select something useful on a page, then click <strong>Collect selection</strong>.
+          Collect useful language while reading. New captures appear in Inbox for later review.
         </div>
       )}
       {entries.map((entry) => (
@@ -52,7 +52,7 @@ export function ReviewQueue({
             <span className="queue-context" dir="auto">{entry.context}</span>
           )}
           <span className="queue-destination">
-            Anki: {entry.deckName || "choose a deck in Settings"}
+            Anki: {entry.deckName || "set up an Anki profile in Settings"}
           </span>
         </button>
       ))}

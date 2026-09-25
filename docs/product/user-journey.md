@@ -2,50 +2,34 @@
 
 ## Primary job
 
-Collector should let someone notice useful language while reading, save it with context, decide later whether it is worth studying, and send approved material to the correct Anki destination without breaking reading flow.
+Collector lets someone notice useful language while reading, save it with context, decide later whether it is worth studying, and send explicitly approved material to the correct Anki destination without breaking reading flow.
 
-The normal loop is:
+The shipped daily loop is:
 
 ```text
 capture now -> review later -> export confidently -> update safely
 ```
 
-ACCP-012 owns the onboarding and flow implementation.
+## First run
 
-## Current friction
+On a fresh installation, Collector opens a short four-step introduction. It explains:
 
-The current extension works, but the user has to understand too much implementation detail:
+1. Select useful language on a page and choose **Collect**.
+2. Captures are stored locally and enter **Inbox** for later review.
+3. **Ready** means the user explicitly approved the study item for export.
+4. Different languages can use different Anki profiles, decks, and note types.
+5. Direct export requires Anki Desktop with AnkiConnect.
+6. Collector remains usable for capture and review while Anki is closed.
+7. Visible Duolingo/backfill collection is explicit and goes through **Staged** first.
+8. Collector does not continuously watch browsing in the background.
 
-- capture and review are visually mixed;
-- settings dominate the side panel;
-- every item is expanded;
-- destination is global and easy to forget;
-- export configuration is expressed as raw deck/model text;
-- error messages can be technically correct without explaining the next user action.
+The introduction can be skipped, does not reappear after skip/finish, and can be reopened from **Settings -> View introduction** without changing profiles, routes, corpus state, or review state.
 
-That is workable for a developer test but not comfortable daily use.
-
-## First-run journey
-
-A first-time user should be able to understand the product in under a minute.
-
-First-run should explain:
-
-1. Select text on a page.
-2. Collect it locally.
-3. Review the Inbox later.
-4. Ready means approved for export.
-5. Collector can route different languages to different Anki profiles.
-6. Anki Desktop + AnkiConnect are required for direct export.
-7. Browsing is not collected in the background.
-
-First-run should be skippable and reopenable.
+The first-run preference is stored separately from the corpus/settings schema.
 
 ## Capture journey
 
-Capture should interrupt reading as little as possible.
-
-Target flow:
+The normal capture path is deliberately small:
 
 ```text
 select text
@@ -54,96 +38,133 @@ select text
   -> continue reading
 ```
 
-The user should not be forced into editing after every capture.
+A new study item confirms that it was collected to Inbox. If the same study item already exists, the confirmation explains that another occurrence was added. Capture does not force detail/edit mode and never silently marks new material Ready.
 
-If a capture matches an existing lexical unit, the confirmation may mention that a new occurrence was added, but the user should still be able to continue immediately.
+## Inbox review
 
-## Review journey
+Review is an intentional activity separate from capture.
 
-Review is a separate intentional activity.
-
-Target flow:
+**Review Inbox** starts a sequential session over the Inbox items that existed when the session began:
 
 ```text
-open Inbox
-  -> compact queue
-  -> open item
-  -> inspect selected occurrence + proposal
-  -> Ready / Edit / Archive
-  -> next item
+Inbox
+  -> Review Inbox
+  -> inspect context + proposed study card
+  -> Edit / Ready / Archive
+  -> next Inbox item
+  -> Inbox reviewed
 ```
 
-A dedicated review-session mode may streamline this sequence, but it must not hide the underlying state.
+The session is only a presentation over existing item state:
 
-## Export journey
+- there is no review-session database state;
+- simply viewing an item does not promote it;
+- **Ready** and **Archive** keep their existing meanings;
+- leaving the session does not discard edits;
+- J/K or arrow-key navigation, E, R, I, A, B/Escape reuse the established keyboard behavior;
+- shortcuts do not fire while focus is in an input, textarea, select, or editable element.
 
-The user needs confidence before export.
+Ready remains the explicit approval boundary for Anki export.
 
-Before exporting, Collector should make clear:
+## Staged material
 
-- how many items are Ready;
-- where they are going;
-- whether several destinations are involved;
-- whether an existing note will be updated or a new one created;
-- which items are blocked.
+Staged is separate from Inbox.
 
-During export, progress is batch-level with per-item isolation.
-
-After export, the result should distinguish:
-
-- exported/updated successfully;
-- recovered successfully after a stale Anki note;
-- local persistence warning;
-- hard failure requiring user action.
-
-## Multilingual journey
-
-A multilingual user should not have to change a global deck before each batch.
-
-Example:
+The visible progression is:
 
 ```text
-שלום       he -> Hebrew profile  -> Hebrew RU
-dolaziti   sr -> Serbian profile -> Serbian RU
-aunque     es -> Spanish profile -> Spanish RU — Uruguay
+explicit visible scan/session
+  -> Staged
+  -> select/accept evidence
+  -> Inbox
+  -> normal review
+  -> Ready
+  -> export
 ```
 
-The destination should be derived from routing rules and remain visible in review.
+Importing Staged evidence never sends it to Anki and never marks it Ready. Staged refresh only reclassifies the saved staged snapshot against current corpus state.
 
-A per-item override should exist for deliberate exceptions.
+## Export confidence
 
-## Existing Anki workflow
+Choosing **Export Ready** opens a preview before any Anki write.
 
-Collector should adapt to an existing Anki setup rather than forcing the user to rebuild it around Collector.
+The preview is built from the same routing/profile validation used by export and shows:
 
-The preferred journey is:
+- total Ready items;
+- how many are exportable now;
+- how many are blocked;
+- profile and deck grouping for the actual resolved destinations;
+- note type for each group;
+- actionable reasons for blocked items.
+
+Per-item bindings and language routes remain authoritative; the UI does not infer a second destination model.
+
+During a non-trivial batch, Collector announces completed/total progress and, where available, the current profile and deck.
+
+After export, item-level results distinguish:
+
+- **success** — export/update completed;
+- **recoverable warning** — Anki succeeded but the local link could not be persisted;
+- **failure** — the item did not complete.
+
+Technical error details remain expandable rather than serving as the primary recovery message.
+
+## Anki unavailable
+
+Anki being closed is a normal recoverable condition.
+
+Collector keeps:
+
+- the local corpus;
+- Inbox/review;
+- saved profiles and routes;
+- Staged material;
+- capture behavior.
+
+Connection/export messages instruct the user to open Anki Desktop, make sure AnkiConnect is running, and Retry. A failed export does not erase corpus or profile configuration.
+
+## Multilingual routing
+
+Collector does not require a global destination switch before each batch. Each item resolves through the existing ACCP-013 routing contract:
 
 ```text
-connect Anki
-  -> choose existing deck/note type
-  -> map Collector fields once
-  -> save export profile
-  -> reuse profile automatically
+שלום       -> Hebrew profile  -> Hebrew RU
+dolaziti   -> Serbian profile -> Serbian RU
+aunque     -> Spanish profile -> Spanish RU — Uruguay
 ```
 
-Collector Basic remains a safe default for users who do not have an existing model they want to reuse.
+Deliberate per-item overrides stay pinned. Existing exported cards are not silently moved when language routing changes.
 
-## Recovery journey
+## Settings and help
 
-Failures should not strand study material.
+Settings is organized around normal tasks before rare implementation controls:
 
-Examples:
+- **Anki connection & profiles**
+- **Languages & routing**
+- **Privacy & source retention**
+- **Backup & restore**
+- **Advanced**
+- **View introduction**
 
-- Anki not running -> explain how to retry.
-- Stored note was deleted -> recover by stable Collector identity and create/update safely.
-- Destination changed -> ask whether to move/retarget.
-- Model mapping invalid -> block before batch export, not midway through it.
+Guided profile setup, live Anki inspection/revalidation, source URL retention, JSON backup/restore, TSV export, and advanced compatibility controls remain available.
+
+## Local-first/privacy boundary
+
+The normal product copy states only the guarantees the extension architecture supports:
+
+- captures live in Collector local storage;
+- Collector does not continuously watch browsing;
+- Duolingo/backfill scanning is explicit;
+- direct export talks to local AnkiConnect;
+- normal use does not require a remote Collector account/service for study material.
 
 ## Non-goals
 
-The journey does not include:
+This journey does not include:
 
 - background scraping;
 - automatic page-wide collection;
-- silently deciding that ambiguous language material is correct;
-- silently moving existing Anki cards between decks.
+- silent Ready promotion;
+- silent Staged-to-Anki export;
+- silent movement of existing Anki cards between decks;
+- merge/split, card-policy v2, morphology assistance, or learning-value decisions owned by later tickets.

@@ -111,7 +111,7 @@ export class AnkiClient {
     return this.invoke<unknown[]>("cardsInfo", { cards });
   }
 
-  async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
+  async validateProfileLive(profile: ExportProfile): Promise<void> {
     if (
       profile.mode === "collector-managed"
       && profile.modelName !== COLLECTOR_MANAGED_MODEL_NAME
@@ -123,7 +123,6 @@ export class AnkiClient {
 
     if (profile.mode === "mapped-user-model") {
       validateMappedProfile(profile);
-
       const [decks, models] = await Promise.all([
         this.deckNamesAndIds(),
         this.modelNamesAndIds(),
@@ -152,22 +151,17 @@ export class AnkiClient {
         );
       }
 
-      const fields = await this.invoke<string[]>("modelFieldNames", {
-        modelName: profile.modelName,
-      });
+      const fields = await this.modelFieldNames(profile.modelName);
       validateMappedProfile(profile, fields);
-
-      const fieldsOnTemplates = await this.invoke<RawAnkiFieldsOnTemplates>(
-        "modelFieldsOnTemplates",
-        { modelName: profile.modelName },
-      );
+      const fieldsOnTemplates = await this.modelFieldsOnTemplates(profile.modelName);
       validateMappedQuestionFields(profile, fieldsOnTemplates);
-
-      const templates = await this.invoke<AnkiTemplates>("modelTemplates", {
-        modelName: profile.modelName,
-      });
+      const templates = await this.modelTemplates(profile.modelName);
       validateMappedTemplates(profile, templates);
       return;
+    }
+
+    if (profile.mode !== "collector-managed") {
+      throw new Error("This Anki destination has an unsupported ownership mode.");
     }
 
     const decks = await this.invoke<string[]>("deckNames");
@@ -176,6 +170,11 @@ export class AnkiClient {
         `Anki deck "${profile.deckName}" is not available. Refresh the live catalog, choose an existing deck, or create this saved deck explicitly.`,
       );
     }
+  }
+
+  async ensureDeckAndModel(profile: ExportProfile): Promise<void> {
+    await this.validateProfileLive(profile);
+    if (profile.mode === "mapped-user-model") return;
 
     const models = await this.invoke<string[]>("modelNames");
     if (!models.includes(profile.modelName)) {

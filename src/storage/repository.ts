@@ -387,7 +387,7 @@ export class CaptureRepository {
         throw new Error("Target lexical unit uses a different language.");
       }
 
-      lexicalUnit = { ...target, updatedAt: now };
+      lexicalUnit = { ...target, status: "inbox", updatedAt: now };
       await this.database.lexicalUnits.put(lexicalUnit);
     } else {
       const direct = await this.database.lexicalUnits
@@ -400,7 +400,7 @@ export class CaptureRepository {
       const existing = direct ?? observedOwner;
 
       if (existing) {
-        lexicalUnit = { ...existing, updatedAt: now };
+        lexicalUnit = { ...existing, status: "inbox", updatedAt: now };
         await this.database.lexicalUnits.put(lexicalUnit);
       } else {
         lexicalUnit = {

@@ -23,7 +23,8 @@ The following work is already part of the current baseline:
 - **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation;
 - **ACCP-014** — mapped export through existing user-owned Anki note types with fail-closed validation;
 - **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
-- **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics.
+- **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics;
+- **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
 
 ---
 
@@ -63,13 +64,13 @@ Guided language/profile routing, live deck/model identity, mapped-only writes, a
 
 ACCP-021 is now baseline behavior. It builds the staged-candidate UI, commits selected evidence into the normal corpus, retains unselected staged evidence, and preserves the irreversible corpus-success boundary when a later staged reclassification read fails.
 
-### ACCP-022 — staged refresh/reclassification recovery — current merge gate
+### ACCP-022 — staged refresh/reclassification recovery — completed
 
-Small post-ACCP-021 correctness/UX follow-up. An explicit Staged refresh reclassifies the active staged batch against current corpus state without rebuilding source evidence, retrying corpus mutation, promoting items to Ready, or invoking Anki.
+Explicit Staged refresh/reclassification, durable staged identity, worker reconstruction, and stale-snapshot recovery are baseline behavior.
 
-### ACCP-012 — onboarding and user journey
+### ACCP-012 — onboarding and user journey — current merge gate
 
-Land after guided profile setup and backfill review are stable so onboarding teaches the final workflows rather than temporary configuration.
+Build the coherent daily product journey on top of the completed profile and staged workflows.
 
 ---
 
@@ -105,14 +106,13 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-022 — staged refresh/reclassification recovery
-2. ACCP-012 — onboarding/user journey
-3. ACCP-004 — explicit merge/split
-4. ACCP-005 — learning-card policy v2
-5. ACCP-006 — morphology assistance
-6. ACCP-007 — learning-value decision
+1. ACCP-012 — onboarding/user journey
+2. ACCP-004 — explicit merge/split
+3. ACCP-005 — learning-card policy v2
+4. ACCP-006 — morphology assistance
+5. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, and ACCP-021 are now baseline work. ACCP-022 is the immediate small post-ACCP-021 correctness/UX recovery gate; ACCP-012 remains the next planned product/user-journey gate after it.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, and ACCP-022 are now baseline work. ACCP-012 is the current product/user-journey merge gate.
 
 ---
 

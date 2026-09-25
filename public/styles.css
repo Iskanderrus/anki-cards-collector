@@ -1055,3 +1055,167 @@ summary:focus-visible {
     max-height: 48vh;
   }
 }
+
+
+/* ACCP-012 — daily product journey */
+.primary-workflow,
+.inbox-actions,
+.settings-head-actions,
+.dialog-actions,
+.dialog-actions-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.inbox-actions {
+  justify-content: space-between;
+  margin: 8px 0;
+}
+
+.compact-empty {
+  margin: 7px 0;
+  padding: 9px 10px;
+}
+
+.settings-task-title {
+  margin: 8px 0 2px;
+  font-size: 13px;
+}
+
+.settings-task-group {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-privacy-summary {
+  margin: 0;
+}
+
+.settings-view-head {
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, Canvas 72%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.product-dialog {
+  width: min(100%, 520px);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 12px;
+  padding: 16px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 14px 40px color-mix(in srgb, CanvasText 20%, transparent);
+}
+
+.product-dialog h2,
+.product-dialog p {
+  margin: 0;
+}
+
+.product-dialog h2:focus {
+  outline: none;
+}
+
+.dialog-progress,
+.export-preview-counts {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 66%, transparent);
+}
+
+.onboarding-points {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-inline-start: 20px;
+  line-height: 1.45;
+}
+
+.dialog-actions {
+  justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  padding-top: 10px;
+}
+
+.export-preview-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+}
+
+.export-preview-groups {
+  display: grid;
+  gap: 7px;
+}
+
+.export-preview-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 9px;
+  padding: 9px;
+}
+
+.export-preview-group > div,
+.export-preview-route {
+  display: grid;
+  gap: 3px;
+}
+
+.export-preview-route {
+  text-align: end;
+}
+
+.export-preview-blocked ul {
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 20px;
+}
+
+.export-preview-blocked li {
+  display: grid;
+  gap: 2px;
+}
+
+.technical-detail {
+  margin: 6px 0;
+  font-size: 11px;
+}
+
+.technical-detail code,
+.item-export-result code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (max-width: 420px) {
+  .dialog-backdrop {
+    padding: 8px;
+  }
+  .product-dialog {
+    max-height: calc(100vh - 16px);
+    padding: 12px;
+  }
+  .export-preview-group {
+    grid-template-columns: 1fr;
+  }
+  .export-preview-route {
+    text-align: start;
+  }
+}

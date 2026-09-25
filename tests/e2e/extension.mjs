@@ -29,6 +29,7 @@ assert.ok(
 const ankiRequests = [];
 let nextAnkiNoteId = 9000;
 let ankiAvailable = true;
+let delayNextVersionMs = 0;
 let delayNextDeckNamesAndIdsMs = 0;
 const ankiNotes = new Map();
 
@@ -84,6 +85,11 @@ const ankiServer = createServer(async (request, response) => {
 
   switch (action) {
     case "version":
+      if (delayNextVersionMs > 0) {
+        const delayMs = delayNextVersionMs;
+        delayNextVersionMs = 0;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+      }
       if (ankiAvailable) result = 6;
       else error = "Anki unavailable fixture";
       break;
@@ -365,6 +371,19 @@ const server = createServer((request, response) => {
           <p id="mapped">Mapped export phrase demonstrates an existing Anki note type.</p>
           <p id="mapped-context">Mapped context-menu phrase demonstrates profile-driven capture language.</p>
           <p id="mapped-sr">Serbian mapped export phrase demonstrates a second existing Anki note type.</p>
+          <p id="review-survivor">review survivor appears in a controlled sentence.</p>
+          <p id="review-current">review current appears in a controlled sentence.</p>
+          <p id="review-next">review next appears in a controlled sentence.</p>
+          <p id="archive-survivor">archive survivor appears in a controlled sentence.</p>
+          <p id="archive-current">archive current appears in a controlled sentence.</p>
+          <p id="archive-next">archive next appears in a controlled sentence.</p>
+          <p id="duplicate-ready-survivor">duplicate ready survivor appears in a controlled sentence.</p>
+          <p id="duplicate-ready-current">duplicate ready current appears in a controlled sentence.</p>
+          <p id="duplicate-ready-next">duplicate ready next appears in a controlled sentence.</p>
+          <p id="duplicate-archive-survivor">duplicate archive survivor appears in a controlled sentence.</p>
+          <p id="duplicate-archive-current">duplicate archive current appears in a controlled sentence.</p>
+          <p id="duplicate-archive-next">duplicate archive next appears in a controlled sentence.</p>
+          <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
         </main>
       </body>
     </html>`);
@@ -385,7 +404,7 @@ let e2eStage = "launch";
 const e2eWatchdog = setTimeout(() => {
   console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
   process.exit(1);
-}, 240000);
+}, 360000);
 e2eWatchdog.unref();
 
 function markE2eStage(stage) {
@@ -421,6 +440,22 @@ async function clickPanelButton(panel, name) {
     }
     button.click();
   }, name);
+}
+
+async function openExportPreview(panel) {
+  const button = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  await button.click();
+  const dialog = panel.getByRole("dialog", { name: "Export Ready items" });
+  await dialog.waitFor();
+  return dialog;
+}
+
+async function exportReady(panel) {
+  const dialog = await openExportPreview(panel);
+  const execute = dialog.getByRole("button", { name: /^Export \d+ items?$/ });
+  assert.equal(await execute.isDisabled(), false, "At least one Ready item should be exportable.");
+  await execute.click();
+  await dialog.waitFor({ state: "detached" });
 }
 
 async function sendPanelMessage(panel, message, label, timeoutMs = 10000) {
@@ -463,7 +498,7 @@ async function waitForPanelMessage(panel, message, label, predicate, timeoutMs =
 
 async function ensureQueue(panel) {
   if (await panel.locator(".queue").count() === 0) {
-    await panel.getByRole("button", { name: "Queue", exact: true }).click();
+    await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   }
   await panel.locator(".queue").waitFor();
 }
@@ -551,6 +586,53 @@ try {
   const panel = await context.newPage();
   await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await panel.locator("h1").waitFor();
+
+  markE2eStage("accp012-first-run-onboarding");
+  let onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
+  await onboarding.waitFor();
+  assert.match(await onboarding.innerText(), /Collector does not continuously watch your browsing/);
+  onboarding = panel.locator(".onboarding-dialog");
+  const onboardingAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    onboardingAccessibility.violations.length,
+    0,
+    "First-run onboarding accessibility violations:\n"
+      + JSON.stringify(onboardingAccessibility.violations, null, 2),
+  );
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await onboarding.getByRole("button", { name: "Next" }).evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the onboarding heading must stay inside the modal.",
+  );
+  const skipIntroduction = onboarding.getByRole("button", { name: "Skip introduction" });
+  await skipIntroduction.focus();
+  await panel.keyboard.press("Enter");
+  await onboarding.waitFor({ state: "detached" });
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await panel.waitForTimeout(150);
+  assert.equal(
+    await panel.getByRole("dialog").count(),
+    0,
+    "Skipped onboarding must not reappear on the next side-panel load.",
+  );
+
+  await openSettings(panel);
+  await panel.getByRole("button", { name: "View introduction" }).click();
+  onboarding = panel.getByRole("dialog", { name: "Collect without breaking your reading" });
+  await onboarding.waitFor();
+  onboarding = panel.locator(".onboarding-dialog");
+  for (let step = 0; step < 3; step += 1) {
+    await onboarding.getByRole("button", { name: "Next" }).click();
+  }
+  await onboarding.getByText(/Staged material has not entered your normal collection yet/).waitFor();
+  await onboarding.getByRole("button", { name: "Finish" }).click();
+  await onboarding.waitFor({ state: "detached" });
+  await ensureQueue(panel);
   assert.equal(await termCount(panel), 0);
 
   // ACCP-021 starts with a dedicated empty staged surface. Staged review has no
@@ -558,18 +640,19 @@ try {
   await panel.getByRole("button", { name: "Staged", exact: true }).click();
   await panel.getByText("No staged evidence.").waitFor();
   assert.equal(
-    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    await panel.getByRole("button", { name: /^Export Ready/ }).count(),
     0,
     "Staged review must not expose a direct staged-to-Anki action.",
   );
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
 
   // Explicit selection capture through the same runtime message used by the side-panel button.
   await selectText(contentPage, "#first", "Aunque llueva");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
 
   await panel.locator(".queue-row .term", { hasText: "Aunque llueva" }).waitFor();
+  await panel.locator(".notice", { hasText: "Collected to Inbox" }).waitFor();
   assert.equal(await termCount(panel), 1, "Explicit capture should add one lexical unit.");
   const firstQueueRowAfterCapture = await queueRowForTerm(panel, "Aunque llueva");
   assert.match(
@@ -594,7 +677,7 @@ try {
   // Empty selection should fail usefully and must not write another item.
   await contentPage.evaluate(() => window.getSelection()?.removeAllRanges());
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await panel.locator(".notice.error").filter({ hasText: "Select a word, phrase, or sentence first." }).waitFor();
   assert.equal(await panel.locator(".notice.error").getAttribute("role"), "alert");
   assert.equal(await termCount(panel), 1, "Empty selection must not add data.");
@@ -617,6 +700,30 @@ try {
   assert.equal(contextMenuResult?.ok, true, contextMenuResult?.error);
   await panel.locator(".queue-row .term", { hasText: "Context menu phrase" }).waitFor();
   assert.equal(await termCount(panel), 2, "Context-menu handler should add a second lexical unit.");
+
+  markE2eStage("accp012-sequential-inbox-review");
+  const reviewInboxButton = panel.getByRole("button", { name: /^Review Inbox/ }).first();
+  await reviewInboxButton.focus();
+  await panel.keyboard.press("Enter");
+  await panel.locator(".detail-heading", { hasText: "Inbox review 1 of 2" }).waitFor();
+  const firstReviewedTerm = await panel.locator(".detail-card .term").innerText();
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-heading", { hasText: "Inbox review 2 of 2" }).waitFor();
+  const secondReviewedTerm = await panel.locator(".detail-card .term").innerText();
+  assert.notEqual(secondReviewedTerm, firstReviewedTerm, "Ready should advance to the next Inbox item.");
+  await panel.keyboard.press("a");
+  await panel.locator(".notice", { hasText: "Inbox reviewed." }).waitFor();
+  await panel.locator(".queue").waitFor();
+
+  // Restore the two baseline fixtures to Inbox so the established keyboard
+  // regression below keeps its original state transitions.
+  for (const term of ["Aunque llueva", "Context menu phrase"]) {
+    const card = await cardForTerm(panel, term);
+    const backToInbox = card.getByRole("button", { name: "Back to inbox" });
+    if (await backToInbox.count()) await backToInbox.click();
+    await card.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+    await ensureQueue(panel);
+  }
 
   // Keyboard review: the first captured item remains active even though the newer item sorts above it.
   await panel.bringToFront();
@@ -661,7 +768,8 @@ try {
   // The newer occurrence is deliberately weak so the older, stronger context should remain selected.
   await selectText(contentPage, "#repeat", "Aunque llueva");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: "Added another occurrence" }).waitFor();
   assert.equal(await termCount(panel), 2, "Repeated capture must not create a duplicate lexical unit.");
   const firstCard = await cardForTerm(panel, "Aunque llueva");
   await firstCard.locator(".meta", { hasText: "2 occurrences" }).waitFor();
@@ -718,7 +826,7 @@ try {
     3,
     "Staged Duolingo evidence should be inspectable in the dedicated review surface without entering the corpus.",
   );
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const initialStagedBatch = await sendPanelMessage(
     panel,
     { type: "GET_STAGED_BATCH" },
@@ -1225,8 +1333,47 @@ try {
   );
 
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  const exportReadyButton = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  await exportReadyButton.focus();
+  await panel.keyboard.press("Enter");
+  const mixedDestinationPreview = panel.getByRole("dialog", { name: "Export Ready items" });
+  await mixedDestinationPreview.waitFor();
+  assert.match(await mixedDestinationPreview.innerText(), /Hebrew RU/);
+  assert.match(await mixedDestinationPreview.innerText(), /Serbian RU/);
+  assert.match(await mixedDestinationPreview.innerText(), /2 Ready/);
+  const executeMixedExport = mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ });
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await executeMixedExport.evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the export-preview heading must stay inside the modal.",
+  );
+  const exportPreviewAccessibility = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    exportPreviewAccessibility.violations.length,
+    0,
+    "Export-preview accessibility violations:\n"
+      + JSON.stringify(exportPreviewAccessibility.violations, null, 2),
+  );
+  await executeMixedExport.focus();
+  delayNextVersionMs = 500;
+  await panel.keyboard.press("Enter");
+  await mixedDestinationPreview.waitFor({ state: "detached" });
+  const focusedExportProgress = panel.locator("[data-export-progress-focus]");
+  await focusedExportProgress.waitFor();
+  assert.equal(
+    await focusedExportProgress.evaluate((element) => element === document.activeElement),
+    true,
+    "EXPORT_EXECUTION_RESTORES_FOCUS: export progress must own focus while export is active.",
+  );
   await panel.locator(".notice", { hasText: "2 exported" }).waitFor();
+  assert.equal(
+    await exportReadyButton.evaluate((element) => element === document.activeElement),
+    true,
+    "EXPORT_EXECUTION_RESTORES_FOCUS: Export Ready must regain focus after success.",
+  );
 
   const addNotes = ankiRequests.filter((request) => request.action === "addNote");
   assert.equal(addNotes.length, 2, "Mixed Ready batch should create two routed Anki notes.");
@@ -1392,7 +1539,7 @@ try {
   const beforeOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   ankiAvailable = false;
   await clickPanelButton(panel, "Refresh from Anki");
-  await panel.locator(".anki-catalog-status", { hasText: /Showing the last loaded decks|Could not connect to Anki/ }).waitFor();
+  await panel.locator(".anki-catalog-status", { hasText: /Showing the last loaded decks|Anki isn't available/ }).waitFor();
   await hebrewGuidedProfile.waitFor();
   assert.equal(
     await guidedProfiles.getByRole("button", { name: "New profile" }).isDisabled(),
@@ -1401,6 +1548,40 @@ try {
   );
   const afterOfflineSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
   assert.deepEqual(afterOfflineSettings, beforeOfflineSettings, "Offline discovery must not rewrite saved profile configuration.");
+
+  markE2eStage("accp012-anki-offline-export");
+  await ensureQueue(panel);
+  const offlineCorpusCount = await termCount(panel);
+  const offlinePreview = await openExportPreview(panel);
+  const offlineExecute = offlinePreview.getByRole("button", { name: /^Export \d+ items?$/ });
+  await offlineExecute.focus();
+  delayNextVersionMs = 500;
+  await panel.keyboard.press("Enter");
+  await offlinePreview.waitFor({ state: "detached" });
+  const offlineProgress = panel.locator("[data-export-progress-focus]");
+  await offlineProgress.waitFor();
+  assert.equal(
+    await offlineProgress.evaluate((element) => element === document.activeElement),
+    true,
+    "Offline export must move focus to the visible progress status.",
+  );
+  await panel.locator(".notice.error", {
+    hasText: "Anki isn't available. Open Anki Desktop",
+  }).waitFor();
+  const offlineExportReady = panel.getByRole("button", { name: /^Export Ready/ }).first();
+  assert.equal(
+    await offlineExportReady.evaluate((element) => element === document.activeElement),
+    true,
+    "Export Ready must regain focus after offline failure.",
+  );
+  assert.equal(await termCount(panel), offlineCorpusCount, "Offline export must not remove local study material.");
+  const afterOfflineExportSettings = await panel.evaluate(async () => (await chrome.storage.local.get("collectorSettings")).collectorSettings);
+  assert.deepEqual(
+    afterOfflineExportSettings,
+    beforeOfflineSettings,
+    "Offline export must not erase or rewrite saved profile configuration.",
+  );
+  await openSettings(panel);
 
   ankiAvailable = true;
   await clickPanelButton(panel, "Refresh from Anki");
@@ -1489,7 +1670,7 @@ try {
 
   await selectText(contentPage, "#mapped", "Mapped export phrase");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const mappedCard = await cardForTerm(panel, "Mapped export phrase");
   assert.match(await mappedCard.locator(".meta").first().innerText(), /^he\s+·/);
   const mappedReady = mappedCard.getByRole("button", { name: "Ready" });
@@ -1497,8 +1678,24 @@ try {
   await mappedCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assert.match(await mappedCard.locator(".export-destination").innerText(), /Anki:\s*Hebrew RU/);
 
+  // PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: this Ready item resolves through
+  // the mapped profile and has no export binding yet, so a same-name live deck
+  // replacement must be visible as blocked before any write is attempted.
+  ankiDecks.set("Hebrew RU", 22);
+  const mappedReplacementPreview = await openExportPreview(panel);
+  const mappedReplacementText = await mappedReplacementPreview.innerText();
+  assert.match(mappedReplacementText, /Mapped export phrase/);
+  assert.match(
+    mappedReplacementText,
+    /changed in live Anki|revalidate/i,
+    "PREVIEW_BLOCKS_LIVE_PROFILE_REVALIDATION: mapped live identity drift must be blocked before execution.",
+  );
+  assert.match(mappedReplacementText, /blocked/i);
+  ankiDecks.set("Hebrew RU", 2);
+  await mappedReplacementPreview.getByRole("button", { name: "Cancel" }).click();
+
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   const mappedAdds = ankiRequests.filter(
     (request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing",
@@ -1521,7 +1718,7 @@ try {
 
   // Repeat send updates the same mapped note rather than creating a duplicate.
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   assert.equal(
     ankiRequests.filter((request) => request.action === "addNote" && request.params?.note?.modelName === "Hebrew Existing").length,
@@ -1636,7 +1833,7 @@ try {
   await setCaptureLanguage(panel, "he");
   await selectText(contentPage, "#mapped-sr", "Serbian mapped export phrase");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const serbianMappedCard = await cardForTerm(panel, "Serbian mapped export phrase");
   assert.match(await serbianMappedCard.locator(".meta").first().innerText(), /^sr\s+·/);
   const serbianReady = serbianMappedCard.getByRole("button", { name: "Ready" });
@@ -1648,7 +1845,7 @@ try {
     "The Serbian guided card should resolve to the saved Serbian route before export.",
   );
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   const serbianAdds = ankiRequests.filter(
     (request) => request.action === "addNote" && request.params?.note?.modelName === "Serbian Existing",
@@ -1726,7 +1923,7 @@ try {
   const stagedReview = panel.locator(".staged-review");
   await stagedReview.waitFor();
   assert.equal(
-    await panel.getByRole("button", { name: "Send ready to Anki" }).count(),
+    await panel.getByRole("button", { name: /^Export Ready/ }).count(),
     0,
     "The staged surface must not expose the Anki export action.",
   );
@@ -1744,7 +1941,7 @@ try {
     "Committing staged evidence to the corpus must not call Anki.",
   );
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const importedHebrewRow = await queueRowForTerm(panel, "מרק");
   await importedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
   assert.equal(
@@ -1771,7 +1968,7 @@ try {
   assert.ok(importedHebrewId);
   const importedIdentityTag = collectorIdentityTagForE2e(importedHebrewId);
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
 
   const importedAdd = ankiRequests.find(
@@ -1802,7 +1999,7 @@ try {
   const importedNoteId = Number(importedNoteIdMatch[1]);
 
   ankiRequests.length = 0;
-  await clickPanelButton(panel, "Send ready to Anki");
+  await exportReady(panel);
   await panel.locator(".notice", { hasText: "exported" }).waitFor();
   assert.equal(
     ankiRequests.some(
@@ -2064,7 +2261,7 @@ try {
   await stagedReview.locator(".staged-import-result", { hasText: "1 occurrence added to existing units" }).waitFor();
   assert.equal(await editedRow.count(), 0, "Successful retry should consume the committed candidate.");
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const enrichedHebrewRow = await queueRowForTerm(panel, "מרק");
   await enrichedHebrewRow.locator(".pill", { hasText: "inbox" }).waitFor();
   await panel.getByRole("button", { name: /^Staged/ }).click();
@@ -2092,7 +2289,7 @@ try {
   await discardRow.waitFor({ state: "detached" });
 
   markE2eStage("accp021-late-ambiguity-recovery");
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
 
   const lateSurface = "צורת-בעלות-מאוחרת";
   const firstLateOwner = await sendPanelMessage(
@@ -2208,7 +2405,7 @@ try {
   const committedCandidateId = postCommitBatch.batch.candidates[0].id;
   const remainingCandidateId = postCommitBatch.batch.candidates[1].id;
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   await panel.getByRole("button", { name: /^Staged/ }).click();
   const committedBeforeRefreshRow = stagedReview.locator(".staged-review-row").filter({
     hasText: "first staged item committed before refresh failure",
@@ -2353,7 +2550,7 @@ try {
   }).waitFor();
   await remainingAfterRefreshRow.waitFor({ state: "detached" });
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const refreshedCorpusRow = await queueRowForTerm(panel, postCommitSurface);
   await refreshedCorpusRow.getByText("inbox", { exact: true }).waitFor();
   await refreshedCorpusRow.getByText(/2 occurrences/).waitFor();
@@ -2455,7 +2652,7 @@ try {
   assert.equal(journalReadback.batch.candidates[0].id, journalRemainingId);
   assert.equal(journalReadback.batch.candidates[0].disposition, "repeated-evidence");
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const journalCorpusRowBeforeSecondImport = await queueRowForTerm(panel, journalSurface);
   await journalCorpusRowBeforeSecondImport.getByText(/1 occurrence/).waitFor();
   assert.equal(
@@ -2469,7 +2666,7 @@ try {
   await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
   await journalRemainingRow.waitFor({ state: "detached" });
 
-  await panel.getByRole("button", { name: "Queue", exact: true }).click();
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
   const journalCorpusRowAfterSecondImport = await queueRowForTerm(panel, journalSurface);
   await journalCorpusRowAfterSecondImport.getByText(/2 occurrences/).waitFor();
   assert.equal(
@@ -2532,7 +2729,7 @@ try {
   const restrictedPage = await context.newPage();
   await restrictedPage.goto("chrome://version/");
   await restrictedPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
 
   await panel.waitForFunction(() => {
     const node = document.querySelector(".notice.error");
@@ -2555,7 +2752,7 @@ try {
   const longTarget = "Esta frase deliberadamente larga contiene muchas palabras útiles para comprobar que una fila compacta sigue siendo fácil de escanear";
   await selectText(contentPage, "#long", longTarget);
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   const longRow = await queueRowForTerm(panel, longTarget);
   await longRow.waitFor();
   const longTermStyle = await longRow.locator(".term").evaluate((node) => {
@@ -2580,12 +2777,12 @@ try {
 
   await selectText(contentPage, "#canonical-base", "tener");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await (await queueRowForTerm(panel, "tener")).waitFor();
 
   await selectText(contentPage, "#canonical-observed", "Tengo");
   await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect selection");
+  await clickPanelButton(panel, "Collect");
   await (await queueRowForTerm(panel, "Tengo")).waitFor();
   assert.equal(
     await termCount(panel),
@@ -2626,6 +2823,210 @@ try {
     await termCount(panel),
     countBeforeCanonicalPair + 1,
     "Successful canonical consolidation should reduce two compatible units to one.",
+  );
+
+  markE2eStage("accp012-review-canonicalization-identity-reconciliation");
+  await setCaptureLanguage(panel, "es");
+
+  await selectText(contentPage, "#review-survivor", "review survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let remediationCard = await cardForTerm(panel, "review survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#review-next", "review next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review next")).waitFor();
+
+  await selectText(contentPage, "#review-current", "review current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review current")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(await panel.locator(".detail-card .term").innerText(), /review current/i);
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("review survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  assert.match(await panel.locator(".detail-card .term").innerText(), /review survivor/i);
+  await panel.waitForFunction(() => {
+    const ready = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Ready");
+    return ready instanceof HTMLButtonElement && !ready.disabled;
+  });
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /review next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /review next/i,
+    "REVIEW_CANONICALIZATION_IDENTITY_RECONCILIATION: Ready must mutate the visible survivor.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "review survivor")).locator(".pill", { hasText: "ready" }).waitFor();
+  await (await queueRowForTerm(panel, "review next")).locator(".pill", { hasText: "inbox" }).waitFor();
+
+  await selectText(contentPage, "#archive-survivor", "archive survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  remediationCard = await cardForTerm(panel, "archive survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#archive-next", "archive next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "archive next")).waitFor();
+  await selectText(contentPage, "#archive-current", "archive current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "archive current")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(await panel.locator(".detail-card .term").innerText(), /archive current/i);
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("archive survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const archive = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Archive");
+    return archive instanceof HTMLButtonElement && !archive.disabled;
+  });
+  await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /archive next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /archive next/i,
+    "Archive must mutate the visible survivor and leave the next item untouched.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "archive survivor")).locator(".pill", { hasText: "archived" }).waitFor();
+  await (await queueRowForTerm(panel, "archive next")).locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp012-review-duplicate-survivor-ordering");
+
+  // Duplicate-survivor regression: the survivor is part of the original Inbox
+  // session and has already been reviewed before the current item consolidates
+  // into it. Reconciliation must keep the current logical position rather than
+  // appending the survivor after the next unreviewed item.
+  await selectText(contentPage, "#duplicate-ready-next", "duplicate ready next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready next")).waitFor();
+
+  await selectText(contentPage, "#duplicate-ready-current", "duplicate ready current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready current")).waitFor();
+
+  await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate ready survivor")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate ready survivor/i,
+    "Duplicate-survivor Ready fixture must begin with B in [B,A,C].",
+  );
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready current/i }).waitFor();
+
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate ready survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready survivor/i }).waitFor();
+
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /duplicate ready next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate ready next/i,
+    "Duplicate survivor Ready must advance to C instead of ending the review session.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "duplicate ready survivor"))
+    .locator(".pill", { hasText: "ready" }).waitFor();
+  await (await queueRowForTerm(panel, "duplicate ready next"))
+    .locator(".pill", { hasText: "inbox" }).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-next", "duplicate archive next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive next")).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-current", "duplicate archive current");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive current")).waitFor();
+
+  await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "duplicate archive survivor")).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate archive survivor/i,
+    "Duplicate-survivor Archive fixture must begin with B in [B,A,C].",
+  );
+  await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive current/i }).waitFor();
+
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Edit" }).click();
+  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate archive survivor");
+  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
+  await remediationCard.getByRole("button", { name: "Save" }).click();
+  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive survivor/i }).waitFor();
+
+  await panel.keyboard.press("a");
+  await panel.locator(".detail-card .term", { hasText: /duplicate archive next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /duplicate archive next/i,
+    "Duplicate survivor Archive must advance to C instead of ending the review session.",
+  );
+  await panel.keyboard.press("b");
+  await (await queueRowForTerm(panel, "duplicate archive survivor"))
+    .locator(".pill", { hasText: "archived" }).waitFor();
+  await (await queueRowForTerm(panel, "duplicate archive next"))
+    .locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp012-ready-recapture-returns-to-inbox");
+  await selectText(contentPage, "#recapture-approval", "recapture approval");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#recapture-approval", "recapture approval");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.equal(
+    await remediationCard.getByRole("button", { name: "Ready" }).count(),
+    1,
+    "READY_RECAPTURE_RETURNS_TO_INBOX: new evidence must require explicit approval again.",
   );
 
   markE2eStage("complete");
