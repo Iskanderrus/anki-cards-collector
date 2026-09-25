@@ -111,6 +111,8 @@ A new capture either creates a lexical unit or attaches another occurrence to on
 
 ACCP-004 identity operations live behind `CaptureRepository`. Explicit merge previews both units and their Anki state, preserves occurrence IDs, chooses one surviving lexical ID, and blocks reserved or incompatible external identities. Explicit split moves a proper subset of occurrence IDs to a newly generated lexical ID; the original retains its binding and the new unit starts unbound. Both operations are one Dexie transaction, revalidate current state at confirmation time, return changed study content to Inbox, and never call Anki directly. Dexie v5 makes `contentKey` non-unique without rewriting IDs; backup v4 permits the same content key on several distinct lexical units and restore matches identity by IDs rather than canonical text.
 
+An active Inbox review session remains a deterministic snapshot while these operations occur. Merge reconciliation substitutes the surviving ID once and removes stale/duplicate involved IDs. Split keeps the original ID in the current snapshot and does not auto-insert the newly created Inbox unit; that new identity enters a later review session.
+
 See [ADR 0012](decisions/0012-lexical-id-primary-identity.md).
 
 ### Learning-card policy
