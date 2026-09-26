@@ -3160,6 +3160,11 @@ try {
   );
   await conflictMergeDialog.getByRole("button", { name: "Cancel" }).click();
   await conflictMergeDialog.waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLButtonElement
+      && active.textContent?.trim() === "Merge with another unit…";
+  });
   assert.equal(
     await conflictMergeButton.evaluate((element) => element === document.activeElement),
     true,
