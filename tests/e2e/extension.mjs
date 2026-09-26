@@ -1987,10 +1987,36 @@ try {
     "A selected new staged candidate should enter the normal corpus exactly once.",
   );
 
-  // Normal review remains a separate explicit action after import.
+  // Normal review remains a separate explicit action after import. ACCP-005
+  // deliberately fails closed for isolated vocabulary with no learner note:
+  // the visible Duolingo matching pair is evidence available to the learner,
+  // but Collector does not silently manufacture/copy a semantic answer.
   let importedHebrewCard = await cardForTerm(panel, "מרק");
-  const importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
+  let importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
   assert.equal(await importedReady.count(), 1, "Imported staged evidence must arrive in Inbox.");
+  assert.equal(
+    await importedReady.isDisabled(),
+    true,
+    "An isolated imported word without a learner note must fail closed under ACCP-005.",
+  );
+  assert.match(
+    await importedHebrewCard.locator(".learning-proposal").innerText(),
+    /Add a learner note or capture this word in a clearer context/i,
+  );
+
+  await importedHebrewCard.getByRole("button", { name: "Edit" }).click();
+  const importedEditor = importedHebrewCard.locator(".editor");
+  await importedEditor.getByLabel("Learner note").fill("soup");
+  await importedEditor.getByRole("button", { name: "Save" }).click();
+  await importedEditor.waitFor({ state: "detached" });
+
+  importedHebrewCard = await cardForTerm(panel, "מרק");
+  importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
+  assert.equal(
+    await importedReady.isDisabled(),
+    false,
+    "Explicit learner evidence should make the isolated word reviewable.",
+  );
   await importedReady.click();
   await importedHebrewCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assert.match(
