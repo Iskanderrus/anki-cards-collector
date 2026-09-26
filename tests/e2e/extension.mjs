@@ -1999,10 +1999,11 @@ try {
     true,
     "An isolated imported word without a learner note must fail closed under ACCP-005.",
   );
-  assert.match(
-    await importedHebrewCard.locator(".learning-proposal").innerText(),
+  const importedExplanation = importedHebrewCard.locator(".proposal-explanation");
+  await importedExplanation.locator("summary").click();
+  await importedExplanation.locator(".proposal-warning").getByText(
     /Add a learner note or capture this word in a clearer context/i,
-  );
+  ).waitFor();
 
   await importedHebrewCard.getByRole("button", { name: "Edit" }).click();
   const importedEditor = importedHebrewCard.locator(".editor");
