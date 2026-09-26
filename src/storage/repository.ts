@@ -1003,7 +1003,10 @@ export class CaptureRepository {
       selectedOccurrenceIds: selectedIds,
       remainingOccurrenceCount: occurrences.length - selectedIds.length,
       newOccurrenceCount: selectedIds.length,
-      snapshotToken: stableIdentitySnapshot([sourceUnit], occurrences, [binding]),
+      snapshotToken: JSON.stringify({
+        identityState: stableIdentitySnapshot([sourceUnit], occurrences, [binding]),
+        selectedOccurrenceIds: selectedIds,
+      }),
     };
   }
 
