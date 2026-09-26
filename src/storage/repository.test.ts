@@ -50,7 +50,7 @@ describe("CaptureRepository", () => {
     ]);
   });
 
-  it("READY_RECAPTURE_RETURNS_TO_INBOX for Ready and Archived items", async () => {
+  it("invalidates Ready/Archived when recapture changes effective study content", async () => {
     const ready = await repository.capture(
       draft("aunque", "Aunque llueva, voy a caminar porque quiero practicar."),
     );

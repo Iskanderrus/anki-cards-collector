@@ -1196,15 +1196,13 @@ export class CaptureRepository {
           values.push(occurrence);
           localOccurrencesByUnit.set(occurrence.lexicalUnitId, values);
         }
-        const beforeByExistingId = new Map(
-          localUnits.map((unit) => [
-            unit.id,
-            {
-              lexicalUnit: unit,
-              occurrences: localOccurrencesByUnit.get(unit.id) ?? [],
-            } satisfies CollectedItem,
-          ]),
-        );
+        const beforeByExistingId = new Map<string, CollectedItem>();
+        for (const unit of localUnits) {
+          beforeByExistingId.set(unit.id, {
+            lexicalUnit: unit,
+            occurrences: localOccurrencesByUnit.get(unit.id) ?? [],
+          });
+        }
 
         for (const unit of plan.lexicalUnitsToAdd) {
           await this.database.lexicalUnits.add(unit);
