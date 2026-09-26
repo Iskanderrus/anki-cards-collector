@@ -3209,10 +3209,17 @@ try {
   await selectText(contentPage, "#review-split-a", "review split");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  let reviewSplitRow = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^review split$/ }),
+  });
+  await reviewSplitRow.getByText(/1 occurrence/).waitFor();
+
   await selectText(contentPage, "#review-split-b", "review split");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
-  let reviewSplitRow = await queueRowForTerm(panel, "review split");
+  reviewSplitRow = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^review split$/ }),
+  });
   await reviewSplitRow.getByText(/2 occurrences/).waitFor();
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
