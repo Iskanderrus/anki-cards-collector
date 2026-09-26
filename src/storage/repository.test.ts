@@ -1271,7 +1271,7 @@ describe("CaptureRepository", () => {
       expect(repeated.occurrences).toHaveLength(2);
     });
 
-    it("preserves Ready across merge when added evidence cannot change the selected study content", async () => {
+    it("keeps the ACCP-004 merge approval boundary even when selected study content stays equal", async () => {
       const survivor = await repository.capture({
         ...draft("tener ganas de", "Hoy tener ganas de salir a caminar por el centro es normal."),
         capturedAt: "2026-09-19T10:00:00Z",
@@ -1303,10 +1303,10 @@ describe("CaptureRepository", () => {
       });
 
       expect(merged.survivingLexicalUnitId).toBe(survivor.lexicalUnit.id);
-      expect(merged.item.lexicalUnit.status).toBe("ready");
+      expect(merged.item.lexicalUnit.status).toBe("inbox");
     });
 
-    it("preserves Ready on the split source when only non-selected evidence moves", async () => {
+    it("keeps the ACCP-004 split approval boundary when only non-selected evidence moves", async () => {
       const strong = await repository.capture({
         ...draft("banco", "Ayer fuimos al banco del centro para hablar sobre el préstamo."),
         capturedAt: "2026-09-19T10:00:00Z",
@@ -1331,7 +1331,7 @@ describe("CaptureRepository", () => {
         note: "",
       });
 
-      expect(split.source.lexicalUnit.status).toBe("ready");
+      expect(split.source.lexicalUnit.status).toBe("inbox");
       expect(split.created.lexicalUnit.status).toBe("inbox");
     });
 
