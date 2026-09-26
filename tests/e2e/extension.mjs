@@ -2843,7 +2843,8 @@ try {
   await observedCanonicalCard.waitFor();
   await observedCanonicalCard.locator(".more-actions > summary").click();
   ankiRequests.length = 0;
-  await observedCanonicalCard.getByRole("button", { name: "Merge with another unit…" }).click();
+  const mergeActionButton = observedCanonicalCard.getByRole("button", { name: "Merge with another unit…" });
+  await mergeActionButton.click();
   let mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
   await mergeDialog.waitFor();
   assert.equal(
@@ -2868,6 +2869,22 @@ try {
     true,
     "Shift+Tab from the merge heading must remain inside the dialog.",
   );
+  await panel.keyboard.press("Escape");
+  await mergeDialog.waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLButtonElement
+      && active.textContent?.trim() === "Merge with another unit…";
+  });
+  assert.equal(
+    await mergeActionButton.evaluate((element) => element === document.activeElement),
+    true,
+    "Escape must close the merge dialog and restore focus to its trigger.",
+  );
+  assert.equal(ankiRequests.length, 0, "Canceling merge with Escape must not call Anki.");
+  await mergeActionButton.click();
+  mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.waitFor();
   await mergeDialog.getByLabel("Find merge candidate").fill("tener");
   await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
   const mergeSurvivorPreview = mergeDialog.locator(".identity-survivor");
