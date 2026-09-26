@@ -8,6 +8,7 @@ import type {
   ReviewStatus,
 } from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
+import { selectBestOccurrence } from "../learning/occurrence-selection";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
@@ -38,11 +39,7 @@ export interface ObservedFormGroup {
   occurrences: Occurrence[];
 }
 
-export type CanonicalizationPreviewKind =
-  | "unchanged"
-  | "rename"
-  | "consolidate"
-  | "conflict";
+export type CanonicalizationPreviewKind = "unchanged" | "rename";
 
 export interface CanonicalizationTargetSummary {
   id: string;
@@ -60,11 +57,59 @@ export interface CanonicalizationPreview {
   requestedLanguage: string;
   currentOccurrenceCount: number;
   willReturnToInbox: boolean;
-  target?: CanonicalizationTargetSummary;
-  survivingLexicalUnitId?: string;
-  resultingOccurrenceCount?: number;
-  preservedAnkiNoteId?: number;
+  sameCanonicalCandidates: CanonicalizationTargetSummary[];
+}
+
+export interface LexicalIdentitySummary {
+  lexicalUnit: LexicalUnit;
+  occurrences: Occurrence[];
+  selectedOccurrenceId?: string;
+  exportBinding?: ExportBinding;
+}
+
+export interface MergePreview {
+  source: LexicalIdentitySummary;
+  target: LexicalIdentitySummary;
+  survivingLexicalUnitId: string;
+  resultingOccurrenceCount: number;
+  blocked: boolean;
   conflictReason?: string;
+  snapshotToken: string;
+}
+
+export interface MergeLexicalUnitsInput {
+  sourceId: string;
+  targetId: string;
+  expectedSnapshotToken: string;
+  canonicalText: string;
+  note: string;
+}
+
+export interface MergeLexicalUnitsResult {
+  item: CollectedItem;
+  survivingLexicalUnitId: string;
+  removedLexicalUnitId: string;
+}
+
+export interface SplitPreview {
+  source: LexicalIdentitySummary;
+  selectedOccurrenceIds: string[];
+  remainingOccurrenceCount: number;
+  newOccurrenceCount: number;
+  snapshotToken: string;
+}
+
+export interface SplitLexicalUnitInput {
+  sourceId: string;
+  selectedOccurrenceIds: string[];
+  expectedSnapshotToken: string;
+  canonicalText: string;
+  note: string;
+}
+
+export interface SplitLexicalUnitResult {
+  source: CollectedItem;
+  created: CollectedItem;
 }
 
 export interface RestorePreview {
@@ -105,14 +150,6 @@ function sameOccurrence(left: Occurrence, right: Occurrence): boolean {
   return occurrenceFingerprint(left) === occurrenceFingerprint(right);
 }
 
-function combineNotes(primary: string, secondary: string): string {
-  const first = primary.trim();
-  const second = secondary.trim();
-  if (!first) return second.slice(0, 2000);
-  if (!second || first === second) return first.slice(0, 2000);
-  return `${first}\n\n${second}`.slice(0, 2000);
-}
-
 function buildRestorePlan(
   backup: BackupDocument,
   localUnits: LexicalUnit[],
@@ -137,28 +174,17 @@ function buildRestorePlan(
   const exportBindingsToAdd: ExportBinding[] = [];
 
   const unitsById = new Map(localUnits.map((unit) => [unit.id, unit]));
-  const unitsByContentKey = new Map(localUnits.map((unit) => [unit.contentKey, unit]));
   const updatedUnitIds = new Set<string>();
   const conflictedUnitIds = new Set<string>();
 
   for (const item of backup.items) {
     const incoming = item.lexicalUnit;
     const current = unitsById.get(incoming.id);
-    const contentOwner = unitsByContentKey.get(incoming.contentKey);
-
-    if (contentOwner && contentOwner.id !== incoming.id) {
-      preview.conflicts.push(
-        `Canonical-form conflict: "${incoming.canonicalText}" (${incoming.language}) is already stored under another Collector ID.`,
-      );
-      conflictedUnitIds.add(incoming.id);
-      continue;
-    }
 
     if (!current) {
       lexicalUnitsToAdd.push(incoming);
       preview.lexicalUnitsAdded += 1;
       unitsById.set(incoming.id, incoming);
-      unitsByContentKey.set(incoming.contentKey, incoming);
       updatedUnitIds.add(incoming.id);
       continue;
     }
@@ -166,11 +192,7 @@ function buildRestorePlan(
     if (incoming.updatedAt > current.updatedAt) {
       lexicalUnitsToUpdate.push(incoming);
       preview.lexicalUnitsUpdated += 1;
-      if (current.contentKey !== incoming.contentKey) {
-        unitsByContentKey.delete(current.contentKey);
-      }
       unitsById.set(incoming.id, incoming);
-      unitsByContentKey.set(incoming.contentKey, incoming);
       updatedUnitIds.add(incoming.id);
     } else {
       preview.lexicalUnitsSkipped += 1;
@@ -263,108 +285,128 @@ function buildRestorePlan(
   };
 }
 
-function consolidationConflictReason(
+function effectiveAnkiNoteId(
+  unit: LexicalUnit,
+  binding: ExportBinding | undefined,
+): number | undefined {
+  return binding?.ankiNoteId ?? unit.ankiNoteId;
+}
+
+function sameBindingIdentity(
+  left: ExportBinding,
+  right: ExportBinding,
+): boolean {
+  return (
+    left.profileId === right.profileId
+    && left.state === right.state
+    && left.ankiNoteId === right.ankiNoteId
+    && left.deckName === right.deckName
+    && left.deckId === right.deckId
+    && left.modelName === right.modelName
+    && left.modelId === right.modelId
+  );
+}
+
+function mergeConflictReason(
   leftUnit: LexicalUnit,
   rightUnit: LexicalUnit,
   leftBinding: ExportBinding | undefined,
   rightBinding: ExportBinding | undefined,
 ): string | undefined {
   if (leftBinding?.state === "reserved" || rightBinding?.state === "reserved") {
-    return "Cannot consolidate these forms while an Anki export is awaiting reconciliation.";
+    return "Cannot merge while an Anki export identity is reserved and awaiting reconciliation.";
+  }
+
+  const leftNoteId = effectiveAnkiNoteId(leftUnit, leftBinding);
+  const rightNoteId = effectiveAnkiNoteId(rightUnit, rightBinding);
+
+  if (leftNoteId !== undefined && rightNoteId !== undefined && leftNoteId !== rightNoteId) {
+    return "Cannot merge these units because they are linked to different Anki notes.";
+  }
+
+  if (leftBinding && rightBinding && !sameBindingIdentity(leftBinding, rightBinding)) {
+    return "Cannot merge these units because they have different Anki destination bindings.";
   }
 
   if (
-    leftBinding?.ankiNoteId !== undefined
-    && rightBinding?.ankiNoteId !== undefined
-    && leftBinding.ankiNoteId !== rightBinding.ankiNoteId
+    leftNoteId !== undefined
+    && rightNoteId !== undefined
+    && leftNoteId === rightNoteId
+    && leftBinding
+    && rightBinding
+    && (
+      leftBinding.profileId !== rightBinding.profileId
+      || leftBinding.deckId !== rightBinding.deckId
+      || leftBinding.modelId !== rightBinding.modelId
+    )
   ) {
-    return "Cannot consolidate these forms because both are linked to different Anki notes.";
-  }
-
-  if (leftBinding && rightBinding) {
-    if (leftBinding.profileId !== rightBinding.profileId) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.deckName
-      && rightBinding.deckName
-      && leftBinding.deckName !== rightBinding.deckName
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.deckId
-      && rightBinding.deckId
-      && leftBinding.deckId !== rightBinding.deckId
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.modelName
-      && rightBinding.modelName
-      && leftBinding.modelName !== rightBinding.modelName
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-    if (
-      leftBinding.modelId
-      && rightBinding.modelId
-      && leftBinding.modelId !== rightBinding.modelId
-    ) {
-      return "Cannot consolidate these forms because they use different export destinations.";
-    }
-  }
-
-  if (
-    leftUnit.ankiNoteId !== undefined
-    && rightUnit.ankiNoteId !== undefined
-    && leftUnit.ankiNoteId !== rightUnit.ankiNoteId
-  ) {
-    return "Cannot consolidate these forms because both are linked to different Anki notes.";
+    return "Cannot merge these units because the same Anki note is recorded under incompatible destinations.";
   }
 
   return undefined;
 }
 
-function bindingPriority(binding: ExportBinding | undefined): number {
-  if (!binding) return -1;
-  if (binding.state === "exported") return 3;
-  if (binding.state === "reserved") return 2;
-  return 1;
+function identityPriority(
+  unit: LexicalUnit,
+  binding: ExportBinding | undefined,
+): number {
+  if (binding?.state === "exported") return 5;
+  if (binding?.state === "reserved") return 4;
+  if (effectiveAnkiNoteId(unit, binding) !== undefined) return 3;
+  if (binding) return 1;
+  return 0;
 }
 
-function preferredBinding(
-  primary: ExportBinding | undefined,
-  secondary: ExportBinding | undefined,
-  lexicalUnitId: string,
-): ExportBinding | undefined {
-  const source =
-    bindingPriority(primary) >= bindingPriority(secondary)
-      ? primary ?? secondary
-      : secondary ?? primary;
-  return source ? { ...source, lexicalUnitId } : undefined;
+function identitySummary(
+  lexicalUnit: LexicalUnit,
+  occurrences: Occurrence[],
+  exportBinding: ExportBinding | undefined,
+): LexicalIdentitySummary {
+  const selected = selectBestOccurrence(occurrences);
+  return {
+    lexicalUnit,
+    occurrences: [...occurrences].sort((left, right) =>
+      left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id)
+    ),
+    ...(selected ? { selectedOccurrenceId: selected.occurrence.id } : {}),
+    ...(exportBinding ? { exportBinding } : {}),
+  };
+}
+
+function stableIdentitySnapshot(
+  units: LexicalUnit[],
+  occurrences: Occurrence[],
+  bindings: Array<ExportBinding | undefined>,
+): string {
+  return JSON.stringify({
+    units: [...units].sort((left, right) => left.id.localeCompare(right.id)),
+    occurrences: [...occurrences].sort((left, right) => left.id.localeCompare(right.id)),
+    bindings: bindings
+      .filter((value): value is ExportBinding => value !== undefined)
+      .sort((left, right) => left.lexicalUnitId.localeCompare(right.lexicalUnitId)),
+  });
 }
 
 export class CaptureRepository {
   constructor(private readonly database: CollectorDatabase = defaultDb) {}
 
-  private async findUniqueUnitByObservedSurface(
+  private async findUnitsByObservedSurface(
     normalizedSurfaceText: string,
     language: string,
-  ): Promise<LexicalUnit | undefined> {
+  ): Promise<{ units: LexicalUnit[]; occurrences: Occurrence[] }> {
     const occurrences = await this.database.occurrences
       .where("normalizedSurfaceText")
       .equals(normalizedSurfaceText)
       .toArray();
 
     const ids = [...new Set(occurrences.map((occurrence) => occurrence.lexicalUnitId))];
-    if (ids.length === 0) return undefined;
+    if (ids.length === 0) return { units: [], occurrences };
 
     const units = (await this.database.lexicalUnits.bulkGet(ids))
       .filter((unit): unit is LexicalUnit => unit !== undefined)
       .filter((unit) => normalizeLanguage(unit.language) === normalizeLanguage(language));
 
-    return units.length === 1 ? units[0] : undefined;
+    return { units, occurrences };
   }
 
   private async captureWithinTransaction(
@@ -377,8 +419,10 @@ export class CaptureRepository {
     const normalizedSurfaceText = normalizeIdentityText(surfaceText);
     const language = normalizeLanguage(draft.language);
     const directContentKey = makeContentKey(surfaceText, language);
+    const context = normalizeText(draft.context).slice(0, 800);
     const now = draft.capturedAt || new Date().toISOString();
     let lexicalUnit: LexicalUnit;
+    let addOccurrence = true;
 
     if (targetLexicalUnitId) {
       const target = await this.database.lexicalUnits.get(targetLexicalUnitId);
@@ -390,16 +434,40 @@ export class CaptureRepository {
       lexicalUnit = { ...target, status: "inbox", updatedAt: now };
       await this.database.lexicalUnits.put(lexicalUnit);
     } else {
-      const direct = await this.database.lexicalUnits
-        .where("contentKey")
-        .equals(directContentKey)
-        .first();
-      const observedOwner = direct
-        ? undefined
-        : await this.findUniqueUnitByObservedSurface(normalizedSurfaceText, language);
-      const existing = direct ?? observedOwner;
+      const [directOwners, observed] = await Promise.all([
+        this.database.lexicalUnits.where("contentKey").equals(directContentKey).toArray(),
+        this.findUnitsByObservedSurface(normalizedSurfaceText, language),
+      ]);
+      const matchingOwners = new Map<string, LexicalUnit>();
+      for (const owner of directOwners) matchingOwners.set(owner.id, owner);
+      for (const owner of observed.units) matchingOwners.set(owner.id, owner);
 
-      if (existing) {
+      if (matchingOwners.size > 1) {
+        const exactOwnerIds = new Set<string>();
+        for (const occurrence of observed.occurrences) {
+          if (!matchingOwners.has(occurrence.lexicalUnitId)) continue;
+          if (normalizeText(occurrence.context) !== context) continue;
+          if (
+            occurrence.source.kind !== draft.source.kind
+            || occurrence.source.adapter !== draft.source.adapter
+            || occurrence.source.url !== draft.source.url
+            || occurrence.source.title !== draft.source.title
+          ) {
+            continue;
+          }
+          exactOwnerIds.add(occurrence.lexicalUnitId);
+        }
+
+        if (exactOwnerIds.size === 1) {
+          lexicalUnit = matchingOwners.get([...exactOwnerIds][0]!)!;
+          addOccurrence = false;
+        } else {
+          throw new Error(
+            "Capture is ambiguous between multiple lexical units. Resolve ownership in Staged review.",
+          );
+        }
+      } else if (matchingOwners.size === 1) {
+        const existing = [...matchingOwners.values()][0]!;
         lexicalUnit = { ...existing, status: "inbox", updatedAt: now };
         await this.database.lexicalUnits.put(lexicalUnit);
       } else {
@@ -418,15 +486,17 @@ export class CaptureRepository {
       }
     }
 
-    await this.database.occurrences.add({
-      id: crypto.randomUUID(),
-      lexicalUnitId: lexicalUnit.id,
-      surfaceText,
-      normalizedSurfaceText,
-      context: normalizeText(draft.context).slice(0, 800),
-      source: draft.source,
-      capturedAt: now,
-    });
+    if (addOccurrence) {
+      await this.database.occurrences.add({
+        id: crypto.randomUUID(),
+        lexicalUnitId: lexicalUnit.id,
+        surfaceText,
+        normalizedSurfaceText,
+        context,
+        source: draft.source,
+        capturedAt: now,
+      });
+    }
 
     return lexicalUnit;
   }
@@ -479,110 +549,42 @@ export class CaptureRepository {
     const current = await this.database.lexicalUnits.get(id);
     if (!current) throw new Error("Collected item no longer exists.");
 
-    const currentOccurrenceCount = await this.database.occurrences
-      .where("lexicalUnitId")
-      .equals(current.id)
-      .count();
+    const [currentOccurrenceCount, sameCanonicalUnits] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(current.id).count(),
+      this.database.lexicalUnits.where("contentKey").equals(contentKey).toArray(),
+    ]);
 
-    if (
+    const sameCanonicalCandidates = (
+      await Promise.all(
+        sameCanonicalUnits
+          .filter((unit) => unit.id !== current.id)
+          .map(async (unit): Promise<CanonicalizationTargetSummary> => ({
+            id: unit.id,
+            canonicalText: unit.canonicalText,
+            language: unit.language,
+            status: unit.status,
+            occurrenceCount: await this.database.occurrences
+              .where("lexicalUnitId")
+              .equals(unit.id)
+              .count(),
+          })),
+      )
+    ).sort((left, right) => left.id.localeCompare(right.id));
+
+    const unchanged =
       current.contentKey === contentKey
       && current.canonicalText === canonicalText
-      && normalizeLanguage(current.language) === language
-    ) {
-      return {
-        kind: "unchanged",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: false,
-        survivingLexicalUnitId: current.id,
-        resultingOccurrenceCount: currentOccurrenceCount,
-      };
-    }
-
-    const collision = current.contentKey === contentKey
-      ? undefined
-      : await this.database.lexicalUnits
-      .where("contentKey")
-      .equals(contentKey)
-      .first();
-
-    if (!collision || collision.id === current.id) {
-      return {
-        kind: "rename",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: current.status === "ready",
-        survivingLexicalUnitId: current.id,
-        resultingOccurrenceCount: currentOccurrenceCount,
-      };
-    }
-
-    const [currentBinding, collisionBinding, collisionOccurrenceCount] = await Promise.all([
-      this.database.exportBindings.get(current.id),
-      this.database.exportBindings.get(collision.id),
-      this.database.occurrences.where("lexicalUnitId").equals(collision.id).count(),
-    ]);
-    const target: CanonicalizationTargetSummary = {
-      id: collision.id,
-      canonicalText: collision.canonicalText,
-      language: collision.language,
-      status: collision.status,
-      occurrenceCount: collisionOccurrenceCount,
-    };
-    const conflictReason = consolidationConflictReason(
-      current,
-      collision,
-      currentBinding,
-      collisionBinding,
-    );
-
-    if (conflictReason) {
-      return {
-        kind: "conflict",
-        currentId: current.id,
-        currentCanonicalText: current.canonicalText,
-        requestedCanonicalText: canonicalText,
-        requestedLanguage: language,
-        currentOccurrenceCount,
-        willReturnToInbox: false,
-        target,
-        resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
-        conflictReason,
-      };
-    }
-
-    const currentHasIdentity =
-      currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
-    const collisionHasIdentity =
-      collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
-    const keepCurrent = currentHasIdentity && !collisionHasIdentity;
-    const survivingLexicalUnitId = keepCurrent ? current.id : collision.id;
-    const binding = preferredBinding(
-      keepCurrent ? currentBinding : collisionBinding,
-      keepCurrent ? collisionBinding : currentBinding,
-      survivingLexicalUnitId,
-    );
-    const preservedAnkiNoteId = binding?.ankiNoteId
-      ?? (keepCurrent ? current.ankiNoteId : collision.ankiNoteId);
+      && normalizeLanguage(current.language) === language;
 
     return {
-      kind: "consolidate",
+      kind: unchanged ? "unchanged" : "rename",
       currentId: current.id,
       currentCanonicalText: current.canonicalText,
       requestedCanonicalText: canonicalText,
       requestedLanguage: language,
       currentOccurrenceCount,
-      willReturnToInbox: true,
-      target,
-      survivingLexicalUnitId,
-      resultingOccurrenceCount: currentOccurrenceCount + collisionOccurrenceCount,
-      preservedAnkiNoteId,
+      willReturnToInbox: !unchanged && current.status !== "inbox",
+      sameCanonicalCandidates,
     };
   }
 
@@ -637,11 +639,13 @@ export class CaptureRepository {
       .filter((unit) => normalizeLanguage(unit.language) === language);
     const matchingOwners = new Map(observedUnits.map((unit) => [unit.id, unit]));
 
-    const directOwner = await this.database.lexicalUnits
+    const directOwners = await this.database.lexicalUnits
       .where("contentKey")
       .equals(directContentKey)
-      .first();
-    if (directOwner) matchingOwners.set(directOwner.id, directOwner);
+      .toArray();
+    for (const directOwner of directOwners) {
+      matchingOwners.set(directOwner.id, directOwner);
+    }
 
     const exactOwnerIds = new Set<string>();
     for (const occurrence of surfaceOccurrences) {
@@ -774,122 +778,55 @@ export class CaptureRepository {
     }
 
     const now = new Date().toISOString();
-    let lexicalUnit!: LexicalUnit;
-    let resultId = id;
 
     await this.database.transaction(
       "rw",
       this.database.lexicalUnits,
       this.database.occurrences,
-      this.database.exportBindings,
       async () => {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
 
-        const collision = await this.database.lexicalUnits
-          .where("contentKey")
-          .equals(contentKey)
-          .first();
-
-        if (collision && collision.id !== id) {
-          const [currentBinding, collisionBinding] = await Promise.all([
-            this.database.exportBindings.get(current.id),
-            this.database.exportBindings.get(collision.id),
-          ]);
-
-          const conflictReason = consolidationConflictReason(
-            current,
-            collision,
-            currentBinding,
-            collisionBinding,
-          );
-          if (conflictReason) throw new Error(conflictReason);
-
-          const currentHasIdentity =
-            currentBinding?.ankiNoteId !== undefined || current.ankiNoteId !== undefined;
-          const collisionHasIdentity =
-            collisionBinding?.ankiNoteId !== undefined || collision.ankiNoteId !== undefined;
-
-          const keepCurrent = currentHasIdentity && !collisionHasIdentity;
-          const mergedNote = combineNotes(requestedNote, collision.note);
-          const createdAt = current.createdAt < collision.createdAt
-            ? current.createdAt
-            : collision.createdAt;
-
-          if (keepCurrent) {
-            await this.database.occurrences
-              .where("lexicalUnitId")
-              .equals(collision.id)
-              .modify({ lexicalUnitId: current.id });
-            await this.database.lexicalUnits.delete(collision.id);
-            const binding = preferredBinding(currentBinding, collisionBinding, current.id);
-            await this.database.exportBindings.delete(collision.id);
-            if (binding) await this.database.exportBindings.put(binding);
-
-            lexicalUnit = {
-              ...current,
-              contentKey,
-              canonicalText,
-              normalizedCanonicalText,
-              language,
-              note: mergedNote,
-              status: "inbox",
-              createdAt,
-              updatedAt: now,
-            };
-            await this.database.lexicalUnits.put(lexicalUnit);
-            resultId = current.id;
-          } else {
-            await this.database.occurrences
-              .where("lexicalUnitId")
-              .equals(current.id)
-              .modify({ lexicalUnitId: collision.id });
-            await this.database.lexicalUnits.delete(current.id);
-            const binding = preferredBinding(collisionBinding, currentBinding, collision.id);
-            await this.database.exportBindings.delete(current.id);
-            if (binding) await this.database.exportBindings.put(binding);
-
-            lexicalUnit = {
-              ...collision,
-              contentKey,
-              canonicalText,
-              normalizedCanonicalText,
-              language,
-              note: mergedNote,
-              status: "inbox",
-              createdAt,
-              updatedAt: now,
-            };
-            await this.database.lexicalUnits.put(lexicalUnit);
-            resultId = collision.id;
-          }
-        } else {
-          lexicalUnit = {
-            ...current,
-            contentKey,
-            canonicalText,
-            normalizedCanonicalText,
-            language,
-            note: requestedNote,
-            status: current.status === "ready" ? "inbox" : current.status,
-            updatedAt: now,
-          };
-          await this.database.lexicalUnits.put(lexicalUnit);
-        }
-
+        let occurrence: Occurrence | undefined;
+        let nextContext: string | undefined;
+        let occurrenceChanged = false;
         if (
-          changes.occurrenceId !== undefined &&
-          (changes.context !== undefined || requestedSurface !== undefined)
+          changes.occurrenceId !== undefined
+          && (changes.context !== undefined || requestedSurface !== undefined)
         ) {
-          const occurrence = await this.database.occurrences.get(changes.occurrenceId);
-          if (!occurrence || occurrence.lexicalUnitId !== resultId) {
+          occurrence = await this.database.occurrences.get(changes.occurrenceId);
+          if (!occurrence || occurrence.lexicalUnitId !== id) {
             throw new Error("The selected occurrence no longer belongs to this item.");
           }
+          nextContext = changes.context === undefined
+            ? undefined
+            : normalizeText(changes.context).slice(0, 800);
+          occurrenceChanged =
+            (nextContext !== undefined && nextContext !== occurrence.context)
+            || (requestedSurface !== undefined && requestedSurface !== occurrence.surfaceText);
+        }
 
+        const lexicalContentChanged =
+          current.contentKey !== contentKey
+          || current.canonicalText !== canonicalText
+          || normalizeLanguage(current.language) !== language
+          || current.note !== requestedNote;
+        const requiresReview = lexicalContentChanged || occurrenceChanged;
+
+        await this.database.lexicalUnits.put({
+          ...current,
+          contentKey,
+          canonicalText,
+          normalizedCanonicalText,
+          language,
+          note: requestedNote,
+          status: requiresReview ? "inbox" : current.status,
+          updatedAt: requiresReview ? now : current.updatedAt,
+        });
+
+        if (occurrence && occurrenceChanged) {
           await this.database.occurrences.update(occurrence.id, {
-            ...(changes.context === undefined
-              ? {}
-              : { context: normalizeText(changes.context).slice(0, 800) }),
+            ...(nextContext === undefined ? {} : { context: nextContext }),
             ...(requestedSurface === undefined
               ? {}
               : {
@@ -901,12 +838,238 @@ export class CaptureRepository {
       },
     );
 
-    const occurrences = await this.database.occurrences
-      .where("lexicalUnitId")
-      .equals(resultId)
-      .sortBy("capturedAt");
+    return this.collectedItem(id);
+  }
 
-    return { lexicalUnit, occurrences };
+  async previewMerge(sourceId: string, targetId: string): Promise<MergePreview> {
+    if (sourceId === targetId) throw new Error("Choose a different lexical unit to merge.");
+
+    const [sourceUnit, targetUnit] = await Promise.all([
+      this.database.lexicalUnits.get(sourceId),
+      this.database.lexicalUnits.get(targetId),
+    ]);
+    if (!sourceUnit || !targetUnit) {
+      throw new Error("One of the lexical units no longer exists.");
+    }
+    if (normalizeLanguage(sourceUnit.language) !== normalizeLanguage(targetUnit.language)) {
+      throw new Error("Only lexical units in the same language can be merged.");
+    }
+
+    const [sourceOccurrences, targetOccurrences, sourceBinding, targetBinding] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(sourceId).toArray(),
+      this.database.occurrences.where("lexicalUnitId").equals(targetId).toArray(),
+      this.database.exportBindings.get(sourceId),
+      this.database.exportBindings.get(targetId),
+    ]);
+
+    const conflictReason = mergeConflictReason(
+      sourceUnit,
+      targetUnit,
+      sourceBinding,
+      targetBinding,
+    );
+    const sourcePriority = identityPriority(sourceUnit, sourceBinding);
+    const targetPriority = identityPriority(targetUnit, targetBinding);
+    const survivingLexicalUnitId = targetPriority > sourcePriority ? targetId : sourceId;
+
+    return {
+      source: identitySummary(sourceUnit, sourceOccurrences, sourceBinding),
+      target: identitySummary(targetUnit, targetOccurrences, targetBinding),
+      survivingLexicalUnitId,
+      resultingOccurrenceCount: sourceOccurrences.length + targetOccurrences.length,
+      blocked: conflictReason !== undefined,
+      ...(conflictReason ? { conflictReason } : {}),
+      snapshotToken: stableIdentitySnapshot(
+        [sourceUnit, targetUnit],
+        [...sourceOccurrences, ...targetOccurrences],
+        [sourceBinding, targetBinding],
+      ),
+    };
+  }
+
+  async mergeLexicalUnits(input: MergeLexicalUnitsInput): Promise<MergeLexicalUnitsResult> {
+    const canonicalText = normalizeText(input.canonicalText);
+    if (!canonicalText) throw new Error("Merged canonical form cannot be empty.");
+    const note = input.note.trim().slice(0, 2000);
+    let survivingLexicalUnitId = "";
+    let removedLexicalUnitId = "";
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      this.database.exportBindings,
+      async () => {
+        const preview = await this.previewMerge(input.sourceId, input.targetId);
+        if (preview.snapshotToken !== input.expectedSnapshotToken) {
+          throw new Error(
+            "Merge preview is stale because the lexical units changed. Review the refreshed preview before confirming.",
+          );
+        }
+        if (preview.blocked) {
+          throw new Error(preview.conflictReason ?? "These lexical units cannot be merged safely.");
+        }
+
+        survivingLexicalUnitId = preview.survivingLexicalUnitId;
+        removedLexicalUnitId = survivingLexicalUnitId === input.sourceId
+          ? input.targetId
+          : input.sourceId;
+
+        const survivor = survivingLexicalUnitId === input.sourceId
+          ? preview.source
+          : preview.target;
+        const removed = survivingLexicalUnitId === input.sourceId
+          ? preview.target
+          : preview.source;
+        const language = normalizeLanguage(survivor.lexicalUnit.language);
+        const now = new Date().toISOString();
+        const survivingNoteId =
+          effectiveAnkiNoteId(survivor.lexicalUnit, survivor.exportBinding)
+          ?? effectiveAnkiNoteId(removed.lexicalUnit, removed.exportBinding);
+        const bindingToKeep = survivor.exportBinding
+          ?? (removed.exportBinding
+            ? { ...removed.exportBinding, lexicalUnitId: survivingLexicalUnitId }
+            : undefined);
+
+        const mergedUnit: LexicalUnit = {
+          ...survivor.lexicalUnit,
+          contentKey: makeContentKey(canonicalText, language),
+          canonicalText,
+          normalizedCanonicalText: normalizeIdentityText(canonicalText),
+          language,
+          note,
+          status: "inbox",
+          createdAt: survivor.lexicalUnit.createdAt < removed.lexicalUnit.createdAt
+            ? survivor.lexicalUnit.createdAt
+            : removed.lexicalUnit.createdAt,
+          updatedAt: now,
+          ...(survivingNoteId === undefined
+            ? { ankiNoteId: undefined }
+            : { ankiNoteId: survivingNoteId }),
+        };
+
+        await this.database.occurrences
+          .where("lexicalUnitId")
+          .equals(removedLexicalUnitId)
+          .modify({ lexicalUnitId: survivingLexicalUnitId });
+        await this.database.exportBindings.delete(removedLexicalUnitId);
+        if (bindingToKeep) {
+          await this.database.exportBindings.put({
+            ...bindingToKeep,
+            lexicalUnitId: survivingLexicalUnitId,
+            updatedAt: now,
+          });
+        }
+        await this.database.lexicalUnits.put(mergedUnit);
+        await this.database.lexicalUnits.delete(removedLexicalUnitId);
+      },
+    );
+
+    return {
+      item: await this.collectedItem(survivingLexicalUnitId),
+      survivingLexicalUnitId,
+      removedLexicalUnitId,
+    };
+  }
+
+  async previewSplit(
+    sourceId: string,
+    selectedOccurrenceIds: readonly string[],
+  ): Promise<SplitPreview> {
+    const selectedIds = [...new Set(selectedOccurrenceIds)].sort();
+    if (selectedIds.length === 0) {
+      throw new Error("Select at least one occurrence to split.");
+    }
+
+    const sourceUnit = await this.database.lexicalUnits.get(sourceId);
+    if (!sourceUnit) throw new Error("Collected item no longer exists.");
+
+    const [occurrences, binding] = await Promise.all([
+      this.database.occurrences.where("lexicalUnitId").equals(sourceId).toArray(),
+      this.database.exportBindings.get(sourceId),
+    ]);
+    const ownedIds = new Set(occurrences.map((occurrence) => occurrence.id));
+    for (const occurrenceId of selectedIds) {
+      if (!ownedIds.has(occurrenceId)) {
+        throw new Error("A selected occurrence no longer belongs to this lexical unit.");
+      }
+    }
+    if (selectedIds.length >= occurrences.length) {
+      throw new Error("A split must leave at least one occurrence on the original lexical unit.");
+    }
+
+    return {
+      source: identitySummary(sourceUnit, occurrences, binding),
+      selectedOccurrenceIds: selectedIds,
+      remainingOccurrenceCount: occurrences.length - selectedIds.length,
+      newOccurrenceCount: selectedIds.length,
+      snapshotToken: stableIdentitySnapshot([sourceUnit], occurrences, [binding]),
+    };
+  }
+
+  async splitLexicalUnit(input: SplitLexicalUnitInput): Promise<SplitLexicalUnitResult> {
+    const canonicalText = normalizeText(input.canonicalText);
+    if (!canonicalText) throw new Error("New canonical form cannot be empty.");
+    const note = input.note.trim().slice(0, 2000);
+    let createdId = "";
+
+    await this.database.transaction(
+      "rw",
+      this.database.lexicalUnits,
+      this.database.occurrences,
+      this.database.exportBindings,
+      async () => {
+        const preview = await this.previewSplit(input.sourceId, input.selectedOccurrenceIds);
+        if (preview.snapshotToken !== input.expectedSnapshotToken) {
+          throw new Error(
+            "Split preview is stale because occurrence ownership changed. Review the refreshed preview before confirming.",
+          );
+        }
+
+        const selectedIds = new Set(preview.selectedOccurrenceIds);
+        const selectedOccurrences = preview.source.occurrences.filter(
+          (occurrence) => selectedIds.has(occurrence.id),
+        );
+        if (selectedOccurrences.length !== selectedIds.size) {
+          throw new Error("Selected occurrence ownership changed before the split.");
+        }
+
+        const now = new Date().toISOString();
+        const language = normalizeLanguage(preview.source.lexicalUnit.language);
+        createdId = crypto.randomUUID();
+        const newUnit: LexicalUnit = {
+          id: createdId,
+          contentKey: makeContentKey(canonicalText, language),
+          canonicalText,
+          normalizedCanonicalText: normalizeIdentityText(canonicalText),
+          language,
+          note,
+          status: "inbox",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const sourceUnit: LexicalUnit = {
+          ...preview.source.lexicalUnit,
+          status: "inbox",
+          updatedAt: now,
+        };
+
+        await this.database.lexicalUnits.add(newUnit);
+        await this.database.lexicalUnits.put(sourceUnit);
+        await this.database.occurrences.bulkPut(
+          selectedOccurrences.map((occurrence) => ({
+            ...occurrence,
+            lexicalUnitId: createdId,
+          })),
+        );
+      },
+    );
+
+    const [source, created] = await Promise.all([
+      this.collectedItem(input.sourceId),
+      this.collectedItem(createdId),
+    ]);
+    return { source, created };
   }
 
   async previewRestore(backup: BackupDocument): Promise<RestorePreview> {

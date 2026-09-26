@@ -491,13 +491,15 @@ export class BatchCapturePipeline {
     candidates: readonly BatchCaptureCandidate[],
   ): Promise<BatchCaptureCandidate[]> {
     const corpus = await this.repository.list();
-    const canonicalOwners = new Map<string, string>();
+    const canonicalOwners = new Map<string, Set<string>>();
     const observedOwners = new Map<string, Set<string>>();
     const evidenceOwners = new Map<string, Set<string>>();
 
     for (const item of corpus) {
       const unit = item.lexicalUnit;
-      canonicalOwners.set(unit.contentKey, unit.id);
+      const canonical = canonicalOwners.get(unit.contentKey) ?? new Set<string>();
+      canonical.add(unit.id);
+      canonicalOwners.set(unit.contentKey, canonical);
 
       for (const occurrence of item.occurrences) {
         const observedKey = `${normalizeLanguage(unit.language)}::${occurrence.normalizedSurfaceText}`;
@@ -519,10 +521,10 @@ export class BatchCapturePipeline {
 
     return candidates.map((candidate) => {
       const matchingIds = new Set<string>();
-      const directOwner = canonicalOwners.get(
+      const directOwners = canonicalOwners.get(
         makeContentKey(candidate.surfaceText, candidate.language),
-      );
-      if (directOwner) matchingIds.add(directOwner);
+      ) ?? new Set<string>();
+      for (const directOwner of directOwners) matchingIds.add(directOwner);
 
       const observedKey = `${candidate.language}::${candidate.normalizedSurfaceText}`;
       for (const owner of observedOwners.get(observedKey) ?? []) {

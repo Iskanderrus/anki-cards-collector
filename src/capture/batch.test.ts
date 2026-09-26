@@ -1060,4 +1060,57 @@ describe("BatchCapturePipeline", () => {
 
     expect(await repository.list()).toEqual([]);
   });
+
+  it("classifies same-canonical split owners as ambiguous and honors explicit ownership resolution", async () => {
+    const first = await repository.capture({
+      text: "כתב",
+      context: "הכתב עובד בבנק.",
+      language: "he",
+      capturedAt: "2026-09-19T09:00:00.000Z",
+      source: evidence("כתב", "הכתב עובד בבנק.").source,
+    });
+    const withSecond = await repository.capture({
+      text: "כתב",
+      context: "זה כתב ברור.",
+      language: "he",
+      capturedAt: "2026-09-19T09:05:00.000Z",
+      source: evidence("כתב", "זה כתב ברור.").source,
+    });
+    const moved = withSecond.occurrences[1]!;
+    const splitPreview = await repository.previewSplit(first.lexicalUnit.id, [moved.id]);
+    const split = await repository.splitLexicalUnit({
+      sourceId: first.lexicalUnit.id,
+      selectedOccurrenceIds: [moved.id],
+      expectedSnapshotToken: splitPreview.snapshotToken,
+      canonicalText: "כתב",
+      note: "second sense",
+    });
+
+    const staged = await pipeline.stageBatch("same-canonical-owners", [
+      evidence("כתב", "כתב חדש."),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("needs-review");
+    expect(staged.candidates[0]?.matchingLexicalUnitIds).toEqual(
+      [first.lexicalUnit.id, split.created.lexicalUnit.id].sort(),
+    );
+
+    const committed = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+      resolutions: {
+        [staged.candidates[0]!.id]: split.created.lexicalUnit.id,
+      },
+    });
+    expect(committed.summary.evidenceAdded).toBe(1);
+    expect(committed.committed[0]?.item.lexicalUnit.id).toBe(split.created.lexicalUnit.id);
+
+    const exact = await pipeline.stageBatch("same-canonical-exact", [
+      evidence("כתב", moved.context),
+    ]);
+    expect(exact.candidates[0]?.disposition).toBe("already-represented");
+    const exactCommit = await pipeline.commit({
+      candidateIds: [exact.candidates[0]!.id],
+    });
+    expect(exactCommit.summary.unchanged).toBe(1);
+  });
+
 });

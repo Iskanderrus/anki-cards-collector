@@ -384,6 +384,13 @@ const server = createServer((request, response) => {
           <p id="duplicate-archive-current">duplicate archive current appears in a controlled sentence.</p>
           <p id="duplicate-archive-next">duplicate archive next appears in a controlled sentence.</p>
           <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
+          <p id="exported-merge-target">exported merge target appears in a controlled sentence.</p>
+          <p id="exported-merge-source">exported merge source appears in a controlled sentence.</p>
+          <p id="merge-conflict-a">merge conflict alpha appears in a controlled sentence.</p>
+          <p id="merge-conflict-b">merge conflict beta appears in a controlled sentence.</p>
+          <p id="review-split-a">review split appears in the first controlled split context.</p>
+          <p id="review-split-b">review split appears in the second controlled split context.</p>
+          <p id="review-split-next">review split next appears in a controlled sentence.</p>
         </main>
       </body>
     </html>`);
@@ -543,6 +550,21 @@ async function cardForTerm(panel, term) {
   });
   await card.waitFor();
   return card;
+}
+
+async function openMergeDialog(panel, card, candidateTerm) {
+  const moreActions = card.locator(".more-actions");
+  if (!(await moreActions.evaluate((node) => node instanceof HTMLDetailsElement && node.open))) {
+    await moreActions.locator("summary").first().click();
+  }
+  await card.getByRole("button", { name: "Merge with another unit…" }).click();
+  const dialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await dialog.waitFor();
+  await dialog.getByLabel("Find merge candidate").fill(candidateTerm);
+  const candidate = dialog.locator(".identity-candidate").filter({ hasText: candidateTerm }).first();
+  await candidate.click();
+  await dialog.getByText("Surviving Collector ID").waitFor();
+  return dialog;
 }
 
 async function stopExtensionServiceWorker(context, page, extensionId) {
@@ -2681,25 +2703,26 @@ try {
   );
 
   markE2eStage("post-accp018-regression-suite");
-  // ACCP-003: a canonical edit that would merge independently exported units is
-  // blocked before any corpus mutation. Re-open the Serbian card because the
-  // mapped-export acceptance above intentionally focused a different detail.
+  // ACCP-004 changes the ACCP-003 invariant: canonical equality is only a
+  // possible merge candidate, never an implicit consolidation/conflict.
+  // Use the two already-exported baseline cards to prove the edit preview stays
+  // non-destructive even though an explicit merge of them would later be unsafe.
   secondRoutingCard = await cardForTerm(panel, "Context menu phrase");
   await secondRoutingCard.getByRole("button", { name: "Edit" }).click();
-  const conflictEditor = secondRoutingCard.locator(".editor");
-  await conflictEditor.getByLabel("Canonical form").fill("Aunque llueva");
-  await conflictEditor.getByLabel("Language code").fill("he");
-  const conflictPreview = secondRoutingCard.locator(".canonicalization-preview.conflict");
-  await conflictPreview.waitFor();
+  const sameCanonicalEditor = secondRoutingCard.locator(".editor");
+  await sameCanonicalEditor.getByLabel("Canonical form").fill("Aunque llueva");
+  await sameCanonicalEditor.getByLabel("Language code").fill("he");
+  const sameCanonicalPreview = secondRoutingCard.locator(".canonicalization-preview.rename");
+  await sameCanonicalPreview.waitFor();
   assert.match(
-    await conflictPreview.innerText(),
-    /(different export destinations|different Anki notes)/i,
-    "Unsafe consolidation should explain the identity conflict before Save.",
+    await sameCanonicalPreview.innerText(),
+    /separate lexical unit.*already use this canonical form/i,
+    "Canonical equality should be presented as a separate possible merge candidate.",
   );
   assert.equal(
     await secondRoutingCard.getByRole("button", { name: "Save" }).isDisabled(),
-    true,
-    "Conflict preview must block Save instead of relying on a failed write.",
+    false,
+    "Same-canonical text must not turn canonical editing into an implicit merge conflict.",
   );
   await secondRoutingCard.getByRole("button", { name: "Cancel" }).click();
 
@@ -2770,8 +2793,11 @@ try {
     "Capturing a long item should keep the user in the compact queue.",
   );
 
-  // ACCP-003: safe canonical consolidation is previewed, then committed without
-  // losing either observed form/context.
+  // ACCP-004: canonical equality no longer collapses identity. First prove
+  // that editing to an existing canonical keeps two units, then merge them
+  // explicitly, split them back into same-canonical identities, reload, and
+  // merge explicitly again.
+  markE2eStage("accp004-canonical-edit-explicit-merge-split");
   await setCaptureLanguage(panel, "es");
   const countBeforeCanonicalPair = await termCount(panel);
 
@@ -2790,134 +2816,196 @@ try {
     "Canonicalization fixture should begin as two distinct lexical units.",
   );
 
-  const observedCanonicalCard = await cardForTerm(panel, "Tengo");
+  let observedCanonicalCard = await cardForTerm(panel, "Tengo");
   await observedCanonicalCard.getByRole("button", { name: "Edit" }).click();
   await observedCanonicalCard.locator(".editor").getByLabel("Canonical form").fill("tener");
-  const consolidationPreview = observedCanonicalCard.locator(".canonicalization-preview.consolidate");
-  await consolidationPreview.waitFor();
+  const sameCanonicalRename = observedCanonicalCard.locator(".canonicalization-preview.rename");
+  await sameCanonicalRename.waitFor();
   assert.match(
-    await consolidationPreview.innerText(),
-    /1 \+ 1 occurrences become 2/,
-    "Consolidation preview should make the occurrence consequence explicit.",
-  );
-  assert.match(
-    await consolidationPreview.innerText(),
-    /returns to Inbox/i,
-    "Consolidation preview should make re-approval explicit.",
+    await sameCanonicalRename.innerText(),
+    /stay separate unless you explicitly merge/i,
+    "Canonical editing must advertise same-canonical units without consolidating them.",
   );
   await observedCanonicalCard.getByRole("button", { name: "Save" }).click();
   await observedCanonicalCard.locator(".editor").waitFor({ state: "detached" });
-
-  const consolidatedCard = panel.locator(".detail-card", {
-    has: panel.locator(".term", { hasText: "tener" }),
+  await ensureQueue(panel);
+  const sameCanonicalRowsAfterEdit = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
   });
-  await consolidatedCard.waitFor();
-  const consolidatedEvidence = consolidatedCard.locator(".canonical-evidence");
-  await consolidatedEvidence.getByText("Observed forms (2)").waitFor();
-  assert.match(await consolidatedEvidence.innerText(), /tener/);
-  assert.match(await consolidatedEvidence.innerText(), /Tengo/);
-  assert.match(await consolidatedEvidence.innerText(), /Quiero tener tiempo para estudiar\./);
-  assert.match(await consolidatedEvidence.innerText(), /Tengo tiempo para estudiar hoy\./);
+  assert.equal(
+    await sameCanonicalRowsAfterEdit.count(),
+    2,
+    "Saving a same-canonical edit must retain two lexical identities.",
+  );
+
+  await sameCanonicalRowsAfterEdit.nth(0).click();
+  observedCanonicalCard = panel.locator(".detail-card");
+  await observedCanonicalCard.waitFor();
+  await observedCanonicalCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  const mergeActionButton = observedCanonicalCard.getByRole("button", { name: "Merge with another unit…" });
+  await mergeActionButton.click();
+  let mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.waitFor();
+  assert.equal(
+    await mergeDialog.getByRole("heading", { name: "Merge lexical units" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Merge dialog should put initial focus on its heading.",
+  );
+  const mergeA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    mergeA11y.violations.length,
+    0,
+    "Merge dialog accessibility violations:\n"
+      + JSON.stringify(mergeA11y.violations, null, 2),
+  );
+  await panel.keyboard.press("Shift+Tab");
+  assert.equal(
+    await mergeDialog.getByRole("button", { name: "Cancel" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Shift+Tab from the merge heading must remain inside the dialog.",
+  );
+  await panel.keyboard.press("Escape");
+  await mergeDialog.waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLButtonElement
+      && active.textContent?.trim() === "Merge with another unit…";
+  });
+  assert.equal(
+    await mergeActionButton.evaluate((element) => element === document.activeElement),
+    true,
+    "Escape must close the merge dialog and restore focus to its trigger.",
+  );
+  assert.equal(ankiRequests.length, 0, "Canceling merge with Escape must not call Anki.");
+  await mergeActionButton.click();
+  mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.waitFor();
+  await mergeDialog.getByLabel("Find merge candidate").fill("tener");
+  await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
+  const mergeSurvivorPreview = mergeDialog.locator(".identity-survivor");
+  await mergeSurvivorPreview.waitFor();
+  assert.match(
+    await mergeSurvivorPreview.innerText(),
+    /2 occurrences will belong to the survivor/i,
+    "Merge preview must show the combined occurrence count before confirmation.",
+  );
+  await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await mergeDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "A local lexical merge must not call AnkiConnect.",
+  );
+  await panel.locator(".detail-card .pill", { hasText: "inbox" }).waitFor();
   await ensureQueue(panel);
   assert.equal(
     await termCount(panel),
     countBeforeCanonicalPair + 1,
-    "Successful canonical consolidation should reduce two compatible units to one.",
+    "Explicit merge should reduce the pair to one lexical identity.",
   );
 
-  markE2eStage("accp012-review-canonicalization-identity-reconciliation");
+  const mergedCanonicalRow = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  }).first();
+  await mergedCanonicalRow.click();
+  let identityCard = panel.locator(".detail-card");
+  await identityCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  await identityCard.getByRole("button", { name: "Split occurrences…" }).click();
+  let splitDialog = panel.getByRole("dialog", { name: "Split occurrences" });
+  await splitDialog.waitFor();
+  assert.equal(
+    await splitDialog.getByRole("heading", { name: "Split occurrences" })
+      .evaluate((element) => element === document.activeElement),
+    true,
+    "Split dialog should put initial focus on its heading.",
+  );
+  const splitA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    splitA11y.violations.length,
+    0,
+    "Split dialog accessibility violations:\n"
+      + JSON.stringify(splitA11y.violations, null, 2),
+  );
+  const splitChoices = splitDialog.locator('.identity-occurrence-choice input[type="checkbox"]');
+  assert.equal(await splitChoices.count(), 2);
+  await splitChoices.nth(1).check();
+  await splitDialog.getByLabel("New unit learner note").fill("deliberate second sense");
+  await splitDialog.getByRole("button", { name: "Review split" }).click();
+  const splitPreviewSummary = splitDialog.locator(".identity-survivor");
+  await splitPreviewSummary.waitFor();
+  assert.match(
+    await splitPreviewSummary.innerText(),
+    /new Collector ID, no Anki binding, and Inbox status/i,
+    "Split preview must show the new identity and binding consequences before confirmation.",
+  );
+  await splitDialog.getByRole("button", { name: "Confirm split" }).click();
+  await splitDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "A local lexical split must not call AnkiConnect.",
+  );
+
+  await ensureQueue(panel);
+  let sameCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
+  assert.equal(
+    await sameCanonicalRows.count(),
+    2,
+    "Same-canonical split must persist as two distinct queue items.",
+  );
+  assert.equal(
+    await sameCanonicalRows.locator(".pill").filter({ hasText: "inbox" }).count(),
+    2,
+    "Both sides of a semantic split must require explicit review.",
+  );
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  sameCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
+  assert.equal(
+    await sameCanonicalRows.count(),
+    2,
+    "Same-canonical split identities must survive extension reload.",
+  );
+
+  await sameCanonicalRows.nth(0).click();
+  identityCard = panel.locator(".detail-card");
+  await identityCard.locator(".more-actions > summary").click();
+  await identityCard.getByRole("button", { name: "Merge with another unit…" }).click();
+  mergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await mergeDialog.getByLabel("Find merge candidate").fill("tener");
+  await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
+  await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await mergeDialog.waitFor({ state: "detached" });
+  await ensureQueue(panel);
+  const remergedCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^tener$/ }),
+  });
+  assert.equal(
+    await remergedCanonicalRows.count(),
+    1,
+    "The reloaded split identities must merge only after explicit confirmation.",
+  );
+
+  markE2eStage("accp004-review-session-merge-ready");
   await setCaptureLanguage(panel, "es");
 
-  await selectText(contentPage, "#review-survivor", "review survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  let remediationCard = await cardForTerm(panel, "review survivor");
-  await remediationCard.getByRole("button", { name: "Ready" }).click();
-  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
-  await ensureQueue(panel);
-
-  await selectText(contentPage, "#review-next", "review next");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "review next")).waitFor();
-
-  await selectText(contentPage, "#review-current", "review current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "review current")).waitFor();
-
-  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
-  assert.match(await panel.locator(".detail-card .term").innerText(), /review current/i);
-  remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("review survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
-  assert.match(await panel.locator(".detail-card .term").innerText(), /review survivor/i);
-  await panel.waitForFunction(() => {
-    const ready = [...document.querySelectorAll(".detail-card button")]
-      .find((button) => button.textContent?.trim() === "Ready");
-    return ready instanceof HTMLButtonElement && !ready.disabled;
-  });
-  await panel.keyboard.press("r");
-  await panel.locator(".detail-card .term", { hasText: /review next/i }).waitFor();
-  assert.match(
-    await panel.locator(".detail-card .term").innerText(),
-    /review next/i,
-    "REVIEW_CANONICALIZATION_IDENTITY_RECONCILIATION: Ready must mutate the visible survivor.",
-  );
-  await panel.keyboard.press("b");
-  await (await queueRowForTerm(panel, "review survivor")).locator(".pill", { hasText: "ready" }).waitFor();
-  await (await queueRowForTerm(panel, "review next")).locator(".pill", { hasText: "inbox" }).waitFor();
-
-  await selectText(contentPage, "#archive-survivor", "archive survivor");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  remediationCard = await cardForTerm(panel, "archive survivor");
-  await remediationCard.getByRole("button", { name: "Ready" }).click();
-  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
-  await ensureQueue(panel);
-
-  await selectText(contentPage, "#archive-next", "archive next");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "archive next")).waitFor();
-  await selectText(contentPage, "#archive-current", "archive current");
-  await contentPage.bringToFront();
-  await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "archive current")).waitFor();
-
-  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
-  assert.match(await panel.locator(".detail-card .term").innerText(), /archive current/i);
-  remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("archive survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
-  await panel.waitForFunction(() => {
-    const archive = [...document.querySelectorAll(".detail-card button")]
-      .find((button) => button.textContent?.trim() === "Archive");
-    return archive instanceof HTMLButtonElement && !archive.disabled;
-  });
-  await panel.keyboard.press("a");
-  await panel.locator(".detail-card .term", { hasText: /archive next/i }).waitFor();
-  assert.match(
-    await panel.locator(".detail-card .term").innerText(),
-    /archive next/i,
-    "Archive must mutate the visible survivor and leave the next item untouched.",
-  );
-  await panel.keyboard.press("b");
-  await (await queueRowForTerm(panel, "archive survivor")).locator(".pill", { hasText: "archived" }).waitFor();
-  await (await queueRowForTerm(panel, "archive next")).locator(".pill", { hasText: "inbox" }).waitFor();
-
-  markE2eStage("accp012-review-duplicate-survivor-ordering");
-
-  // Duplicate-survivor regression: the survivor is part of the original Inbox
-  // session and has already been reviewed before the current item consolidates
-  // into it. Reconciliation must keep the current logical position rather than
-  // appending the survivor after the next unreviewed item.
+  // Build [B, A, C] in the Inbox review snapshot, with B already carrying an
+  // exported Anki identity. Review B, then merge active A into B. B must survive
+  // exactly once at A's logical position and Ready must advance to C.
   await selectText(contentPage, "#duplicate-ready-next", "duplicate ready next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
@@ -2931,31 +3019,57 @@ try {
   await selectText(contentPage, "#duplicate-ready-survivor", "duplicate ready survivor");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "duplicate ready survivor")).waitFor();
+  let remediationCard = await cardForTerm(panel, "duplicate ready survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Back to inbox" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate ready survivor/i,
-    "Duplicate-survivor Ready fixture must begin with B in [B,A,C].",
+    "Exported survivor fixture must begin the [B,A,C] review snapshot.",
   );
   await panel.keyboard.press("r");
   await panel.locator(".detail-card .term", { hasText: /duplicate ready current/i }).waitFor();
 
   remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate ready survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  ankiRequests.length = 0;
+  let reviewMergeDialog = await openMergeDialog(panel, remediationCard, "duplicate ready survivor");
+  assert.match(
+    await reviewMergeDialog.locator(".identity-preview-grid").innerText(),
+    /Anki: exported/i,
+    "Merge preview must expose the exported target identity.",
+  );
+  assert.equal(
+    await reviewMergeDialog.getByLabel("Merged canonical form").inputValue(),
+    "duplicate ready survivor",
+    "The only exported lexical identity must determine the default survivor content.",
+  );
+  await reviewMergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await reviewMergeDialog.waitFor({ state: "detached" });
+  assert.equal(
+    ankiRequests.length,
+    0,
+    "Merging an exported and an unexported unit must not mutate Anki immediately.",
+  );
   await panel.locator(".detail-card .term", { hasText: /duplicate ready survivor/i }).waitFor();
-
+  await panel.waitForFunction(() => {
+    const ready = [...document.querySelectorAll(".detail-card button")]
+      .find((button) => button.textContent?.trim() === "Ready");
+    return ready instanceof HTMLButtonElement && !ready.disabled;
+  });
   await panel.keyboard.press("r");
   await panel.locator(".detail-card .term", { hasText: /duplicate ready next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate ready next/i,
-    "Duplicate survivor Ready must advance to C instead of ending the review session.",
+    "Merge reconciliation must remove stale source/duplicate survivor IDs and advance to C.",
   );
   await panel.keyboard.press("b");
   await (await queueRowForTerm(panel, "duplicate ready survivor"))
@@ -2963,6 +3077,7 @@ try {
   await (await queueRowForTerm(panel, "duplicate ready next"))
     .locator(".pill", { hasText: "inbox" }).waitFor();
 
+  markE2eStage("accp004-review-session-merge-archive");
   await selectText(contentPage, "#duplicate-archive-next", "duplicate archive next");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
@@ -2976,37 +3091,168 @@ try {
   await selectText(contentPage, "#duplicate-archive-survivor", "duplicate archive survivor");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
-  await (await queueRowForTerm(panel, "duplicate archive survivor")).waitFor();
+  remediationCard = await cardForTerm(panel, "duplicate archive survivor");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  remediationCard = panel.locator(".detail-card");
+  await remediationCard.getByRole("button", { name: "Back to inbox" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
 
   await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate archive survivor/i,
-    "Duplicate-survivor Archive fixture must begin with B in [B,A,C].",
+    "Archive fixture must begin with exported survivor B.",
   );
   await panel.keyboard.press("a");
   await panel.locator(".detail-card .term", { hasText: /duplicate archive current/i }).waitFor();
-
   remediationCard = panel.locator(".detail-card");
-  await remediationCard.getByRole("button", { name: "Edit" }).click();
-  await remediationCard.locator(".editor").getByLabel("Canonical form").fill("duplicate archive survivor");
-  await remediationCard.locator(".canonicalization-preview.consolidate").waitFor();
-  await remediationCard.getByRole("button", { name: "Save" }).click();
-  await remediationCard.locator(".editor").waitFor({ state: "detached" });
+  reviewMergeDialog = await openMergeDialog(panel, remediationCard, "duplicate archive survivor");
+  await reviewMergeDialog.getByRole("button", { name: "Confirm merge" }).click();
+  await reviewMergeDialog.waitFor({ state: "detached" });
   await panel.locator(".detail-card .term", { hasText: /duplicate archive survivor/i }).waitFor();
-
   await panel.keyboard.press("a");
   await panel.locator(".detail-card .term", { hasText: /duplicate archive next/i }).waitFor();
   assert.match(
     await panel.locator(".detail-card .term").innerText(),
     /duplicate archive next/i,
-    "Duplicate survivor Archive must advance to C instead of ending the review session.",
+    "Archive after merge must mutate the visible survivor and advance to C.",
   );
   await panel.keyboard.press("b");
   await (await queueRowForTerm(panel, "duplicate archive survivor"))
     .locator(".pill", { hasText: "archived" }).waitFor();
-  await (await queueRowForTerm(panel, "duplicate archive next"))
-    .locator(".pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp004-exported-merge-conflict");
+  await selectText(contentPage, "#merge-conflict-a", "merge conflict alpha");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "merge conflict alpha")).waitFor();
+  await selectText(contentPage, "#merge-conflict-b", "merge conflict beta");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "merge conflict beta")).waitFor();
+
+  let conflictCard = await cardForTerm(panel, "merge conflict alpha");
+  await conflictCard.getByRole("button", { name: "Ready" }).click();
+  await conflictCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+  conflictCard = await cardForTerm(panel, "merge conflict beta");
+  await conflictCard.getByRole("button", { name: "Ready" }).click();
+  await conflictCard.locator(".pill", { hasText: "ready" }).waitFor();
+  await exportReady(panel);
+  await panel.locator(".notice", { hasText: /exported/i }).waitFor();
+  await ensureQueue(panel);
+
+  conflictCard = await cardForTerm(panel, "merge conflict alpha");
+  ankiRequests.length = 0;
+  const conflictMergeButton = conflictCard.getByRole("button", { name: "Merge with another unit…" });
+  await conflictCard.locator(".more-actions > summary").click();
+  await conflictMergeButton.click();
+  let conflictMergeDialog = panel.getByRole("dialog", { name: "Merge lexical units" });
+  await conflictMergeDialog.getByLabel("Find merge candidate").fill("merge conflict beta");
+  await conflictMergeDialog.locator(".identity-candidate")
+    .filter({ hasText: "merge conflict beta" }).first().click();
+  await conflictMergeDialog.getByRole("alert").waitFor();
+  assert.match(
+    await conflictMergeDialog.getByRole("alert").innerText(),
+    /different Anki notes|different Anki destination bindings/i,
+    "Two independent exported identities must block explicit merge.",
+  );
+  assert.equal(
+    await conflictMergeDialog.getByRole("button", { name: "Confirm merge" }).isDisabled(),
+    true,
+    "Conflict merge confirmation must remain disabled.",
+  );
+  const conflictMergeA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    conflictMergeA11y.violations.length,
+    0,
+    "Blocked merge accessibility violations:\n"
+      + JSON.stringify(conflictMergeA11y.violations, null, 2),
+  );
+  await conflictMergeDialog.getByRole("button", { name: "Cancel" }).click();
+  await conflictMergeDialog.waitFor({ state: "detached" });
+  await panel.waitForFunction(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLButtonElement
+      && active.textContent?.trim() === "Merge with another unit…";
+  });
+  assert.equal(
+    await conflictMergeButton.evaluate((element) => element === document.activeElement),
+    true,
+    "Canceling an identity dialog must restore focus to its More actions trigger.",
+  );
+  assert.equal(ankiRequests.length, 0, "Blocked merge preview must not call Anki.");
+  await ensureQueue(panel);
+  await (await queueRowForTerm(panel, "merge conflict alpha")).waitFor();
+  await (await queueRowForTerm(panel, "merge conflict beta")).waitFor();
+
+  markE2eStage("accp004-review-session-split");
+  await selectText(contentPage, "#review-split-next", "review split next");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "review split next")).waitFor();
+
+  await selectText(contentPage, "#review-split-a", "review split");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#review-split-b", "review split");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let reviewSplitRow = await queueRowForTerm(panel, "review split");
+  await reviewSplitRow.getByText(/2 occurrences/).waitFor();
+
+  await panel.getByRole("button", { name: /^Review Inbox/ }).first().click();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /^review split$/i,
+    "The two-occurrence split source must be the active review item.",
+  );
+  let splitReviewCard = panel.locator(".detail-card");
+  await splitReviewCard.locator(".more-actions > summary").click();
+  ankiRequests.length = 0;
+  await splitReviewCard.getByRole("button", { name: "Split occurrences…" }).click();
+  let reviewSplitDialog = panel.getByRole("dialog", { name: "Split occurrences" });
+  const reviewSplitChoices = reviewSplitDialog.locator(
+    '.identity-occurrence-choice input[type="checkbox"]',
+  );
+  assert.equal(await reviewSplitChoices.count(), 2);
+  await reviewSplitChoices.nth(1).check();
+  await reviewSplitDialog.getByRole("button", { name: "Review split" }).click();
+  await reviewSplitDialog.getByText("Split preview").waitFor();
+  await reviewSplitDialog.getByRole("button", { name: "Confirm split" }).click();
+  await reviewSplitDialog.waitFor({ state: "detached" });
+  assert.equal(ankiRequests.length, 0, "Split during review must not call Anki.");
+  await panel.locator(".detail-card .term", { hasText: /^review split$/i }).waitFor();
+
+  await panel.keyboard.press("r");
+  await panel.locator(".detail-card .term", { hasText: /review split next/i }).waitFor();
+  assert.match(
+    await panel.locator(".detail-card .term").innerText(),
+    /review split next/i,
+    "The new split child must not be inserted into the active review-session snapshot.",
+  );
+  await panel.keyboard.press("b");
+  await ensureQueue(panel);
+  const splitRowsAfterReview = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^review split$/ }),
+  });
+  assert.equal(await splitRowsAfterReview.count(), 2);
+  assert.equal(
+    await splitRowsAfterReview.locator(".pill").filter({ hasText: "ready" }).count(),
+    1,
+    "Original split source should be the reviewed Ready unit.",
+  );
+  assert.equal(
+    await splitRowsAfterReview.locator(".pill").filter({ hasText: "inbox" }).count(),
+    1,
+    "New split identity should remain Inbox for a later review session.",
+  );
 
   markE2eStage("accp012-ready-recapture-returns-to-inbox");
   await selectText(contentPage, "#recapture-approval", "recapture approval");

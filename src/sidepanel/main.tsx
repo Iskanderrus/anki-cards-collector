@@ -18,8 +18,10 @@ import type {
 } from "../core/types";
 import type {
   CanonicalizationPreview,
+  MergePreview,
   ObservedFormGroup,
   RestorePreview,
+  SplitPreview,
 } from "../storage/repository";
 import { repository } from "../storage/repository";
 import {
@@ -57,6 +59,10 @@ import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
 import { Onboarding } from "./onboarding";
 import { ExportPreviewDialog } from "./export-preview-dialog";
+import {
+  MergeLexicalUnitDialog,
+  SplitLexicalUnitDialog,
+} from "./identity-operations-dialog";
 import {
   buildExportPreview,
   friendlyExportFailure,
@@ -99,6 +105,23 @@ type ObservedFormsUiState =
   | { kind: "live"; lexicalUnitId: string; groups: ObservedFormGroup[] }
   | { kind: "error"; lexicalUnitId: string; error: string };
 
+interface MergeDialogState {
+  sourceId: string;
+  preview: MergePreview | null;
+  canonicalText: string;
+  note: string;
+  error: string;
+}
+
+interface SplitDialogState {
+  sourceId: string;
+  selectedOccurrenceIds: string[];
+  canonicalText: string;
+  note: string;
+  preview: SplitPreview | null;
+  error: string;
+}
+
 function sameCanonicalizationPreview(
   left: CanonicalizationPreview,
   right: CanonicalizationPreview,
@@ -108,43 +131,25 @@ function sameCanonicalizationPreview(
     && left.currentId === right.currentId
     && left.requestedCanonicalText === right.requestedCanonicalText
     && left.requestedLanguage === right.requestedLanguage
-    && left.target?.id === right.target?.id
-    && left.survivingLexicalUnitId === right.survivingLexicalUnitId
-    && left.resultingOccurrenceCount === right.resultingOccurrenceCount
-    && left.preservedAnkiNoteId === right.preservedAnkiNoteId
-    && left.conflictReason === right.conflictReason
+    && left.willReturnToInbox === right.willReturnToInbox
+    && JSON.stringify(left.sameCanonicalCandidates) === JSON.stringify(right.sameCanonicalCandidates)
   );
 }
 
 function canonicalizationPreviewMessage(preview: CanonicalizationPreview): string {
+  const duplicateMessage = preview.sameCanonicalCandidates.length > 0
+    ? ` ${preview.sameCanonicalCandidates.length} separate lexical unit${preview.sameCanonicalCandidates.length === 1 ? "" : "s"} already use this canonical form. They stay separate unless you explicitly merge them.`
+    : "";
+
   if (preview.kind === "unchanged") {
-    return "Canonical identity is unchanged.";
+    return `Canonical text is unchanged.${duplicateMessage}`;
   }
 
-  if (preview.kind === "rename") {
-    return [
-      `Rename “${preview.currentCanonicalText}” to “${preview.requestedCanonicalText}”.`,
-      `${preview.currentOccurrenceCount} captured occurrence${preview.currentOccurrenceCount === 1 ? "" : "s"} stay attached.`,
-      preview.willReturnToInbox ? "The item will return to Inbox for re-approval." : "",
-    ].filter(Boolean).join(" ");
-  }
-
-  if (preview.kind === "conflict") {
-    return preview.conflictReason ?? "This canonical change cannot be applied safely.";
-  }
-
-  const targetCount = preview.target?.occurrenceCount ?? 0;
-  const keepsCurrent = preview.survivingLexicalUnitId === preview.currentId;
   return [
-    `Consolidate with existing “${preview.target?.canonicalText ?? preview.requestedCanonicalText}”.`,
-    `${preview.currentOccurrenceCount} + ${targetCount} occurrences become ${preview.resultingOccurrenceCount ?? preview.currentOccurrenceCount + targetCount}.`,
-    keepsCurrent
-      ? "This item’s Collector identity will be kept."
-      : "The existing canonical unit’s Collector identity will be kept.",
-    preview.preservedAnkiNoteId !== undefined
-      ? `Anki note ${preview.preservedAnkiNoteId} will be preserved.`
-      : "",
-    "The result returns to Inbox for re-approval.",
+    `Rename “${preview.currentCanonicalText}” to “${preview.requestedCanonicalText}”.`,
+    `${preview.currentOccurrenceCount} captured occurrence${preview.currentOccurrenceCount === 1 ? "" : "s"} stay attached to this Collector ID.`,
+    preview.willReturnToInbox ? "The item will return to Inbox for re-approval." : "",
+    duplicateMessage.trim(),
   ].filter(Boolean).join(" ");
 }
 
@@ -311,29 +316,27 @@ function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
 }
 
-function reconcileReviewSessionIds(
+function reconcileReviewSessionMerge(
   ids: string[],
-  oldId: string,
+  sourceId: string,
+  targetId: string,
   survivingId: string,
 ): string[] {
-  const oldIndex = ids.indexOf(oldId);
-  if (oldIndex < 0 || oldId === survivingId) return ids;
+  const involved = new Set([sourceId, targetId, survivingId]);
+  const involvedIndexes = ids
+    .map((id, index) => involved.has(id) ? index : -1)
+    .filter((index) => index >= 0);
+  if (involvedIndexes.length === 0) return ids;
 
-  const survivorIndex = ids.indexOf(survivingId);
-  const withoutEither = ids.filter((id) => id !== oldId && id !== survivingId);
-  const logicalCurrentIndex = oldIndex - (
-    survivorIndex >= 0 && survivorIndex < oldIndex ? 1 : 0
-  );
-  const insertionIndex = Math.min(
-    Math.max(0, logicalCurrentIndex),
-    withoutEither.length,
-  );
+  const insertionAtOriginalIndex = Math.min(...involvedIndexes);
+  const before = ids
+    .slice(0, insertionAtOriginalIndex)
+    .filter((id) => !involved.has(id));
+  const after = ids
+    .slice(insertionAtOriginalIndex)
+    .filter((id) => !involved.has(id));
 
-  return [
-    ...withoutEither.slice(0, insertionIndex),
-    survivingId,
-    ...withoutEither.slice(insertionIndex),
-  ];
+  return [...before, survivingId, ...after];
 }
 
 function sourceLabel(occurrence: Occurrence | undefined): string {
@@ -366,12 +369,15 @@ function App(): React.ReactElement {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
   const [observedFormsState, setObservedFormsState] = useState<ObservedFormsUiState>({ kind: "idle" });
+  const [mergeDialog, setMergeDialog] = useState<MergeDialogState | null>(null);
+  const [splitDialog, setSplitDialog] = useState<SplitDialogState | null>(null);
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const loadRequestId = useRef(0);
   const restoreExportFocusRef = useRef(false);
+  const identityActionFocusRef = useRef<HTMLElement | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportOutcomes, setExportOutcomes] = useState<Record<string, ExportItemOutcome>>({});
   const [catalogState, setCatalogState] = useState<CatalogUiState>({ kind: "idle" });
@@ -1197,40 +1203,228 @@ function App(): React.ReactElement {
         : undefined;
       setCanonicalizationState({ kind: "live", preview: latestPreview });
 
-      if (latestPreview.kind === "conflict") {
-        setError(latestPreview.conflictReason ?? "This canonical change cannot be applied safely.");
-        return;
-      }
-
       if (!shownPreview || !sameCanonicalizationPreview(shownPreview, latestPreview)) {
         setError(
-          "Canonical identity changed while you were editing. Review the updated preview, then save again.",
+          "Canonical lookup changed while you were editing. Review the updated preview, then save again.",
         );
         return;
       }
 
       const updated = await repository.update(id, editDraft);
-      if (updated.lexicalUnit.id !== id) {
-        commitReviewSessionIds((current) =>
-          reconcileReviewSessionIds(current, id, updated.lexicalUnit.id)
+      if (updated.lexicalUnit.status === "inbox") {
+        setNotice(
+          latestPreview.sameCanonicalCandidates.length > 0
+            ? "Changes saved. Same-canonical lexical units remain separate; use Merge explicitly if they represent one learning unit."
+            : "Changes saved. Review the updated learning target before marking it ready again.",
         );
-      }
-      const proposal = proposeLearningCard(updated);
-      if (updated.lexicalUnit.status === "ready" && !proposal.recommended) {
-        await repository.setStatus(updated.lexicalUnit.id, "inbox");
-        setNotice("Changes saved. This item returned to the inbox because its learning target needs review.");
-      } else if (updated.lexicalUnit.id !== id) {
-        setNotice("Changes saved. Matching observed forms were consolidated under one canonical unit; review it before export.");
-      } else if (updated.lexicalUnit.status === "inbox") {
-        setNotice("Changes saved. Review the updated learning target before marking it ready again.");
       } else {
-        setNotice("Changes saved. The next Anki export will update the same Collector note.");
+        setNotice("Changes saved. The Collector identity is unchanged.");
       }
       selectActiveId(updated.lexicalUnit.id);
       cancelEdit();
       await load(updated.lexicalUnit.id);
     } catch (editError) {
       setError(editError instanceof Error ? editError.message : "Could not save changes.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function restoreIdentityActionFocus(): void {
+    const opener = identityActionFocusRef.current;
+    identityActionFocusRef.current = null;
+    requestAnimationFrame(() => opener?.focus({ preventScroll: true }));
+  }
+
+  function closeMergeDialog(): void {
+    setMergeDialog(null);
+    restoreIdentityActionFocus();
+  }
+
+  function closeSplitDialog(): void {
+    setSplitDialog(null);
+    restoreIdentityActionFocus();
+  }
+
+  function beginMerge(item: CollectedItem, opener: HTMLElement): void {
+    identityActionFocusRef.current = opener;
+    setSplitDialog(null);
+    setMergeDialog({
+      sourceId: item.lexicalUnit.id,
+      preview: null,
+      canonicalText: item.lexicalUnit.canonicalText,
+      note: item.lexicalUnit.note,
+      error: "",
+    });
+  }
+
+  async function chooseMergeCandidate(targetId: string): Promise<void> {
+    if (!mergeDialog) return;
+    setBusy(true);
+    setMergeDialog((current) => current ? { ...current, error: "" } : current);
+    try {
+      const preview = await repository.previewMerge(mergeDialog.sourceId, targetId);
+      const survivor = preview.survivingLexicalUnitId === preview.source.lexicalUnit.id
+        ? preview.source
+        : preview.target;
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview,
+        canonicalText: survivor.lexicalUnit.canonicalText,
+        note: survivor.lexicalUnit.note,
+        error: "",
+      } : current);
+    } catch (mergeError) {
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview: null,
+        error: mergeError instanceof Error ? mergeError.message : "Could not preview this merge.",
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmMerge(): Promise<void> {
+    const state = mergeDialog;
+    const preview = state?.preview;
+    if (!state || !preview) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await repository.mergeLexicalUnits({
+        sourceId: state.sourceId,
+        targetId: preview.target.lexicalUnit.id,
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: state.canonicalText,
+        note: state.note,
+      });
+      commitReviewSessionIds((current) =>
+        reconcileReviewSessionMerge(
+          current,
+          state.sourceId,
+          preview.target.lexicalUnit.id,
+          result.survivingLexicalUnitId,
+        )
+      );
+      identityActionFocusRef.current = null;
+      setMergeDialog(null);
+      selectActiveId(result.survivingLexicalUnitId);
+      await load(result.survivingLexicalUnitId);
+      setView("detail");
+      setNotice("Merge complete. The surviving lexical unit is back in Inbox for explicit review; Anki was not changed.");
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+      });
+    } catch (mergeError) {
+      const message = mergeError instanceof Error ? mergeError.message : "Could not merge these lexical units.";
+      let refreshed: MergePreview | null = preview;
+      try {
+        refreshed = await repository.previewMerge(state.sourceId, preview.target.lexicalUnit.id);
+      } catch {
+        refreshed = null;
+      }
+      setMergeDialog((current) => current ? {
+        ...current,
+        preview: refreshed,
+        error: message,
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function beginSplit(item: CollectedItem, opener: HTMLElement): void {
+    identityActionFocusRef.current = opener;
+    setMergeDialog(null);
+    setSplitDialog({
+      sourceId: item.lexicalUnit.id,
+      selectedOccurrenceIds: [],
+      canonicalText: item.lexicalUnit.canonicalText,
+      note: "",
+      preview: null,
+      error: "",
+    });
+  }
+
+  function toggleSplitOccurrence(id: string, selected: boolean): void {
+    setSplitDialog((current) => {
+      if (!current) return current;
+      const ids = new Set(current.selectedOccurrenceIds);
+      if (selected) ids.add(id);
+      else ids.delete(id);
+      return {
+        ...current,
+        selectedOccurrenceIds: [...ids],
+        preview: null,
+        error: "",
+      };
+    });
+  }
+
+  async function reviewSplit(): Promise<void> {
+    if (!splitDialog) return;
+    setBusy(true);
+    setSplitDialog((current) => current ? { ...current, error: "", preview: null } : current);
+    try {
+      const preview = await repository.previewSplit(
+        splitDialog.sourceId,
+        splitDialog.selectedOccurrenceIds,
+      );
+      setSplitDialog((current) => current ? { ...current, preview, error: "" } : current);
+    } catch (splitError) {
+      setSplitDialog((current) => current ? {
+        ...current,
+        preview: null,
+        error: splitError instanceof Error ? splitError.message : "Could not preview this split.",
+      } : current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSplit(): Promise<void> {
+    const state = splitDialog;
+    const preview = state?.preview;
+    if (!state || !preview) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await repository.splitLexicalUnit({
+        sourceId: state.sourceId,
+        selectedOccurrenceIds: state.selectedOccurrenceIds,
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: state.canonicalText,
+        note: state.note,
+      });
+      identityActionFocusRef.current = null;
+      setSplitDialog(null);
+      selectActiveId(result.source.lexicalUnit.id);
+      await load(result.source.lexicalUnit.id);
+      setView("detail");
+      setNotice(
+        `Split complete. “${result.created.lexicalUnit.canonicalText}” is a new Inbox identity with no Anki binding. The current review-session snapshot was not expanded.`,
+      );
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(".detail-card")?.focus({ preventScroll: true });
+      });
+    } catch (splitError) {
+      const message = splitError instanceof Error ? splitError.message : "Could not split this lexical unit.";
+      let refreshed: SplitPreview | null = preview;
+      try {
+        refreshed = await repository.previewSplit(state.sourceId, state.selectedOccurrenceIds);
+      } catch {
+        refreshed = null;
+      }
+      setSplitDialog((current) => current ? {
+        ...current,
+        preview: refreshed,
+        error: message,
+      } : current);
     } finally {
       setBusy(false);
     }
@@ -1739,6 +1933,8 @@ function App(): React.ReactElement {
         || editingId !== null
         || onboardingOpen
         || exportPreviewOpen
+        || mergeDialog !== null
+        || splitDialog !== null
         || isTypingTarget(event.target)
       ) return;
 
@@ -1819,11 +2015,28 @@ function App(): React.ReactElement {
     editingId,
     exportPreviewOpen,
     items,
+    mergeDialog,
     onboardingOpen,
+    splitDialog,
     reviewSessionIds,
     reviewSessionItems,
     view,
   ]);
+
+  const mergeSource = mergeDialog
+    ? items.find((item) => item.lexicalUnit.id === mergeDialog.sourceId)
+    : undefined;
+  const splitSource = splitDialog
+    ? items.find((item) => item.lexicalUnit.id === splitDialog.sourceId)
+    : undefined;
+  const mergeCandidates = mergeSource
+    ? items.filter(
+        (item) =>
+          item.lexicalUnit.id !== mergeSource.lexicalUnit.id
+          && item.lexicalUnit.language.trim().toLowerCase()
+            === mergeSource.lexicalUnit.language.trim().toLowerCase(),
+      )
+    : [];
 
   return (
     <main className="app">
@@ -1842,6 +2055,49 @@ function App(): React.ReactElement {
           busy={busy}
           onClose={closeExportPreview}
           onExport={() => void exportToAnki()}
+        />
+      )}
+
+      {mergeDialog && mergeSource && (
+        <MergeLexicalUnitDialog
+          source={mergeSource}
+          candidates={mergeCandidates}
+          preview={mergeDialog.preview}
+          canonicalText={mergeDialog.canonicalText}
+          note={mergeDialog.note}
+          error={mergeDialog.error}
+          busy={busy}
+          onChooseCandidate={(id) => void chooseMergeCandidate(id)}
+          onCanonicalTextChange={(value) => setMergeDialog((current) =>
+            current ? { ...current, canonicalText: value } : current
+          )}
+          onNoteChange={(value) => setMergeDialog((current) =>
+            current ? { ...current, note: value } : current
+          )}
+          onCancel={closeMergeDialog}
+          onConfirm={() => void confirmMerge()}
+        />
+      )}
+
+      {splitDialog && splitSource && (
+        <SplitLexicalUnitDialog
+          source={splitSource}
+          selectedOccurrenceIds={splitDialog.selectedOccurrenceIds}
+          canonicalText={splitDialog.canonicalText}
+          note={splitDialog.note}
+          preview={splitDialog.preview}
+          error={splitDialog.error}
+          busy={busy}
+          onToggleOccurrence={toggleSplitOccurrence}
+          onCanonicalTextChange={(value) => setSplitDialog((current) =>
+            current ? { ...current, canonicalText: value, preview: null, error: "" } : current
+          )}
+          onNoteChange={(value) => setSplitDialog((current) =>
+            current ? { ...current, note: value, preview: null, error: "" } : current
+          )}
+          onReview={() => void reviewSplit()}
+          onCancel={closeSplitDialog}
+          onConfirm={() => void confirmSplit()}
         />
       )}
 
@@ -2684,7 +2940,7 @@ function App(): React.ReactElement {
                   </label>
                   <div
                     className={`canonicalization-preview${canonicalizationState.kind === "live" ? ` ${canonicalizationState.preview.kind}` : ""}`}
-                    role={canonicalizationState.kind === "live" && canonicalizationState.preview.kind === "conflict" ? "alert" : "status"}
+                    role="status"
                     aria-live="polite"
                   >
                     {canonicalizationState.kind === "loading" && "Checking canonical identity…"}
@@ -2712,11 +2968,7 @@ function App(): React.ReactElement {
                     <button
                       className="primary"
                       type="submit"
-                      disabled={
-                        busy
-                        || canonicalizationState.kind !== "live"
-                        || canonicalizationState.preview.kind === "conflict"
-                      }
+                      disabled={busy || canonicalizationState.kind !== "live"}
                     >
                       Save
                     </button>
@@ -2885,6 +3137,27 @@ function App(): React.ReactElement {
                   <details className="more-actions">
                     <summary>More actions</summary>
                     <div className="more-actions-body">
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy}
+                        onClick={(event) => beginMerge(item, event.currentTarget)}
+                      >
+                        Merge with another unit…
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy || item.occurrences.length < 2}
+                        title={
+                          item.occurrences.length < 2
+                            ? "A split needs at least two occurrences."
+                            : undefined
+                        }
+                        onClick={(event) => beginSplit(item, event.currentTarget)}
+                      >
+                        Split occurrences…
+                      </button>
                       <button
                         className="ghost danger"
                         disabled={busy || reconciliationPending}
