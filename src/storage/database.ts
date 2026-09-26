@@ -95,6 +95,15 @@ export class CollectorDatabase extends Dexie {
         },
       );
     });
+
+    // ACCP-004: lexical-unit ID is identity. contentKey remains a normalized
+    // language/canonical lookup key, but it is deliberately non-unique so
+    // homographs and pedagogical sense splits can coexist.
+    this.version(5).stores({
+      lexicalUnits: "&id, contentKey, status, updatedAt",
+      occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+      exportBindings: "&lexicalUnitId, profileId, state, ankiNoteId",
+    });
   }
 }
 

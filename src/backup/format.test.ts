@@ -70,11 +70,38 @@ describe("backup format", () => {
     );
     const backup = parseBackup(raw);
 
-    expect(backup.version).toBe(3);
+    expect(backup.version).toBe(4);
     expect(backup.exportedAt).toBe("2026-09-19T10:00:00Z");
     expect(backup.items).toEqual([sampleItem()]);
     expect(backup.settings).toEqual(settings());
     expect(backup.exportBindings).toEqual([binding()]);
+  });
+
+  it("round-trips two distinct same-canonical lexical ids without collapsing them", () => {
+    const first = sampleItem();
+    const second = structuredClone(first);
+    second.lexicalUnit.id = "unit-2";
+    second.lexicalUnit.note = "distinct sense";
+    second.occurrences[0]!.id = "occ-2";
+    second.occurrences[0]!.lexicalUnitId = "unit-2";
+    second.occurrences[0]!.context = "Otro contexto para el mismo texto.";
+
+    const raw = serializeBackup(
+      [first, second],
+      settings(),
+      [binding()],
+      "2026-09-26T00:00:00Z",
+    );
+    const parsed = parseBackup(raw);
+
+    expect(parsed.version).toBe(4);
+    expect(parsed.items).toHaveLength(2);
+    expect(parsed.items.map((item) => item.lexicalUnit.id).sort()).toEqual(["unit-1", "unit-2"]);
+    expect(parsed.items.every((item) => item.lexicalUnit.contentKey === "es::tener")).toBe(true);
+    expect(parsed.items[0]!.occurrences[0]!.lexicalUnitId).toBe("unit-1");
+    expect(parsed.items[1]!.occurrences[0]!.lexicalUnitId).toBe("unit-2");
+    expect(parsed.exportBindings).toHaveLength(1);
+    expect(parsed.exportBindings[0]?.lexicalUnitId).toBe("unit-1");
   });
 
   it("migrates a v1 backup into canonical and observed forms without inventing profile settings", () => {
@@ -109,7 +136,7 @@ describe("backup format", () => {
       }],
     }));
 
-    expect(backup.version).toBe(3);
+    expect(backup.version).toBe(4);
     expect(backup.settings).toBeUndefined();
     expect(backup.items[0]?.lexicalUnit.canonicalText).toBe("aunque");
     expect(backup.items[0]?.occurrences[0]?.surfaceText).toBe("aunque");
@@ -132,7 +159,7 @@ describe("backup format", () => {
       items: [item],
     }));
 
-    expect(backup.version).toBe(3);
+    expect(backup.version).toBe(4);
     expect(backup.settings).toBeUndefined();
     expect(backup.exportBindings[0]).toMatchObject({
       lexicalUnitId: "unit-1",
@@ -143,10 +170,10 @@ describe("backup format", () => {
 
   it("rejects backups produced by a newer schema", () => {
     expect(() => parseBackup(JSON.stringify({
-      version: 4,
+      version: 5,
       exportedAt: "2026-09-19T10:00:00Z",
       items: [],
-    }))).toThrow("Backup version 4 is newer than this extension supports");
+    }))).toThrow("Backup version 5 is newer than this extension supports");
   });
 
   it("rejects export bindings that point to a missing profile", () => {
@@ -205,6 +232,7 @@ describe("backup format", () => {
       [],
       "2026-09-20T10:00:00Z",
     )) as Record<string, unknown>;
+    raw.version = 3;
     raw.exportBindings = [{
       lexicalUnitId: "unit-1",
       profileId: "es-profile",

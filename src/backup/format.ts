@@ -12,9 +12,9 @@ import {
 import { makeContentKey, normalizeIdentityText, normalizeText } from "../core/normalize";
 import { migrateSettings } from "../settings";
 
-export const BACKUP_VERSION = 3 as const;
+export const BACKUP_VERSION = 4 as const;
 
-export interface BackupDocumentV3 {
+export interface BackupDocumentV4 {
   version: typeof BACKUP_VERSION;
   exportedAt: string;
   items: CollectedItem[];
@@ -22,7 +22,7 @@ export interface BackupDocumentV3 {
   settings?: CollectorSettings;
 }
 
-export type BackupDocument = BackupDocumentV3;
+export type BackupDocument = BackupDocumentV4;
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -192,19 +192,16 @@ function readLegacyV1Item(value: unknown, path: string): CollectedItem {
 }
 
 function validateItems(items: CollectedItem[]): CollectedItem[] {
+  // Canonical/content keys are lookup data, not identity. ACCP-004 permits
+  // multiple distinct lexical IDs to carry the same normalized key.
   const lexicalIds = new Set<string>();
-  const contentKeys = new Set<string>();
   const occurrenceIds = new Set<string>();
 
   for (const item of items) {
     if (lexicalIds.has(item.lexicalUnit.id)) {
       throw new Error(`Backup contains duplicate lexical unit id ${item.lexicalUnit.id}.`);
     }
-    if (contentKeys.has(item.lexicalUnit.contentKey)) {
-      throw new Error(`Backup contains duplicate content key ${item.lexicalUnit.contentKey}.`);
-    }
     lexicalIds.add(item.lexicalUnit.id);
-    contentKeys.add(item.lexicalUnit.contentKey);
 
     for (const occurrence of item.occurrences) {
       if (occurrence.lexicalUnitId !== item.lexicalUnit.id) {
@@ -308,7 +305,7 @@ export function serializeBackup(
   exportedAt = new Date().toISOString(),
 ): string {
   const normalizedSettings = migrateSettings(settings);
-  const document: BackupDocumentV3 = {
+  const document: BackupDocumentV4 = {
     version: BACKUP_VERSION,
     exportedAt,
     items,
@@ -318,7 +315,7 @@ export function serializeBackup(
   return JSON.stringify(document, null, 2);
 }
 
-export function parseBackup(raw: string): BackupDocumentV3 {
+export function parseBackup(raw: string): BackupDocumentV4 {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -337,7 +334,7 @@ export function parseBackup(raw: string): BackupDocumentV3 {
       `Backup version ${version} is newer than this extension supports (version ${BACKUP_VERSION}).`,
     );
   }
-  if (version !== 1 && version !== 2 && version !== BACKUP_VERSION) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== BACKUP_VERSION) {
     throw new Error(`Backup version ${version} is not supported.`);
   }
 
@@ -377,7 +374,7 @@ export function parseBackup(raw: string): BackupDocumentV3 {
     throw new Error("Backup.exportBindings must be an array.");
   }
   if (root.settings === undefined) {
-    throw new Error("Backup.settings is required for backup version 3.");
+    throw new Error(`Backup.settings is required for backup version ${version}.`);
   }
 
   const settings = migrateSettings(root.settings);

@@ -633,6 +633,7 @@ summary:focus-visible {
   display: flex;
   gap: 7px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .backfill-panel {
@@ -690,6 +691,12 @@ summary:focus-visible {
   line-height: 1.4;
   color: color-mix(in srgb, CanvasText 72%, transparent);
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .identity-preview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 420px) {
@@ -1130,6 +1137,97 @@ summary:focus-visible {
 
 .product-dialog h2:focus {
   outline: none;
+}
+
+.identity-dialog {
+  width: min(100%, 680px);
+}
+.identity-source-summary,
+.identity-survivor,
+.identity-unit-preview {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+  overflow-wrap: anywhere;
+}
+.identity-source-summary > span:first-child,
+.identity-survivor > strong {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 64%, transparent);
+}
+.identity-candidate-list {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+.identity-candidate {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: start;
+  justify-items: start;
+}
+.identity-candidate.selected {
+  outline: 2px solid color-mix(in srgb, CanvasText 40%, transparent);
+  outline-offset: -2px;
+}
+.identity-candidate > span {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 64%, transparent);
+}
+.identity-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.identity-unit-head {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  justify-content: space-between;
+}
+.identity-occurrence-list {
+  display: grid;
+  gap: 5px;
+  max-height: 190px;
+  overflow: auto;
+}
+.identity-conflict {
+  border: 1px solid #b42318;
+}
+.identity-occurrence-picker {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 13%, transparent);
+  border-radius: 10px;
+}
+.identity-occurrence-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, CanvasText 3%, transparent);
+}
+.identity-occurrence-choice input {
+  width: auto;
+  margin-top: 3px;
+}
+.identity-occurrence-choice > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.identity-dialog code {
+  overflow-wrap: anywhere;
 }
 
 .dialog-progress,

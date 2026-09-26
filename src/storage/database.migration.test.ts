@@ -21,6 +21,12 @@ const LEGACY_V3_SCHEMA = {
   exportBindings: "&lexicalUnitId, profileId, ankiNoteId",
 } as const;
 
+const LEGACY_V4_SCHEMA = {
+  lexicalUnits: "&id, &contentKey, status, updatedAt",
+  occurrences: "&id, lexicalUnitId, normalizedSurfaceText, capturedAt",
+  exportBindings: "&lexicalUnitId, profileId, state, ankiNoteId",
+} as const;
+
 interface LegacyLexicalUnitV1 {
   id: string;
   contentKey: string;
@@ -221,6 +227,83 @@ describe("CollectorDatabase migration baseline", () => {
       state: "exported",
       ankiNoteId: 5151,
     });
+
+    current.close();
+  });
+
+
+  it("migrates the frozen v4 unique-canonical schema to v5 without changing ids or bindings", async () => {
+    const name = `collector-v4-identity-migration-${crypto.randomUUID()}`;
+    databaseNames.push(name);
+
+    const unit: LexicalUnit = {
+      id: "v4-unit",
+      contentKey: "es::banco",
+      canonicalText: "banco",
+      normalizedCanonicalText: "banco",
+      language: "es",
+      note: "financial sense",
+      status: "ready",
+      createdAt: "2026-09-24T10:00:00Z",
+      updatedAt: "2026-09-25T10:00:00Z",
+      ankiNoteId: 6161,
+    };
+    const occurrence: Occurrence = {
+      id: "v4-occurrence",
+      lexicalUnitId: unit.id,
+      surfaceText: "banco",
+      normalizedSurfaceText: "banco",
+      context: "El banco aprobó el préstamo.",
+      source: {
+        kind: "web",
+        adapter: "generic-web",
+        url: "https://example.com/bank",
+        title: "Bank example",
+      },
+      capturedAt: "2026-09-24T10:00:00Z",
+    };
+    const binding = {
+      lexicalUnitId: unit.id,
+      profileId: "es-profile",
+      state: "exported",
+      ankiNoteId: 6161,
+      deckName: "Spanish RU",
+      deckId: "2",
+      modelName: "Collector Basic",
+      modelId: "10",
+      updatedAt: "2026-09-25T10:00:00Z",
+    };
+
+    const legacy = new Dexie(name);
+    legacy.version(4).stores(LEGACY_V4_SCHEMA);
+    await legacy.open();
+    await legacy.table<LexicalUnit>("lexicalUnits").add(unit);
+    await legacy.table<Occurrence>("occurrences").add(occurrence);
+    await legacy.table("exportBindings").add(binding);
+    legacy.close();
+
+    const current = new CollectorDatabase(name);
+    await current.open();
+
+    expect(await current.lexicalUnits.get(unit.id)).toEqual(unit);
+    expect(await current.occurrences.get(occurrence.id)).toEqual(occurrence);
+    expect(await current.exportBindings.get(unit.id)).toEqual(binding);
+
+    const splitIdentity: LexicalUnit = {
+      ...unit,
+      id: "v5-same-canonical-unit",
+      note: "river sense",
+      status: "inbox",
+      ankiNoteId: undefined,
+      createdAt: "2026-09-26T00:00:00Z",
+      updatedAt: "2026-09-26T00:00:00Z",
+    };
+    await current.lexicalUnits.add(splitIdentity);
+
+    const sameCanonical = await current.lexicalUnits.where("contentKey").equals("es::banco").toArray();
+    expect(sameCanonical.map((value) => value.id).sort()).toEqual(
+      ["v4-unit", "v5-same-canonical-unit"].sort(),
+    );
 
     current.close();
   });

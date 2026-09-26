@@ -52,7 +52,7 @@ The model therefore separates:
 - **LexicalUnit** — the canonical thing I may want to learn;
 - **Occurrence** — one observed surface form, its context, and its source.
 
-If `tengo ganas de`, `tenía ganas de`, and `tener ganas de` are consolidated under the same canonical unit, those forms remain separate occurrences rather than being flattened away. A later capture of an already-observed surface form routes back to that canonical unit.
+If `tengo ganas de`, `tenía ganas de`, and `tener ganas de` are explicitly merged into one lexical unit, those forms remain separate occurrences rather than being flattened away. A later capture of an already-observed surface form routes back to that unit only when ownership is unambiguous; if an intentional split leaves several plausible owners, Collector requires explicit ownership resolution instead of guessing.
 
 ## Architecture
 
