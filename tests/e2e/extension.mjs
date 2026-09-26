@@ -384,6 +384,10 @@ const server = createServer((request, response) => {
           <p id="duplicate-archive-current">duplicate archive current appears in a controlled sentence.</p>
           <p id="duplicate-archive-next">duplicate archive next appears in a controlled sentence.</p>
           <p id="recapture-approval">recapture approval appears in a detailed controlled context for review.</p>
+          <p id="policy-upgrade-first">policy evidence appears in a controlled sentence with enough surrounding words.</p>
+          <p id="policy-upgrade-strong">Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.</p>
+          <p id="policy-weak-chunk">weak chunk</p>
+          <p id="policy-unbounded-sentence">although rain continues we still walk outside every morning</p>
           <p id="exported-merge-target">exported merge target appears in a controlled sentence.</p>
           <p id="exported-merge-source">exported merge source appears in a controlled sentence.</p>
           <p id="merge-conflict-a">merge conflict alpha appears in a controlled sentence.</p>
@@ -810,7 +814,7 @@ try {
   );
   assert.match(
     await firstCard.locator(".occurrence-selection").innerText(),
-    /Using occurrence 1 of 2/,
+    /Selected occurrence 1 of 2/,
     "Review should explain which occurrence drives the proposal.",
   );
   const observedEvidence = firstCard.locator(".canonical-evidence");
@@ -1371,6 +1375,9 @@ try {
   assert.match(await mixedDestinationPreview.innerText(), /Hebrew RU/);
   assert.match(await mixedDestinationPreview.innerText(), /Serbian RU/);
   assert.match(await mixedDestinationPreview.innerText(), /2 Ready/);
+  assert.match(await mixedDestinationPreview.innerText(), /Reviewed study content \(2\)/);
+  assert.match(await mixedDestinationPreview.innerText(), /Prompt:/);
+  assert.match(await mixedDestinationPreview.innerText(), /Observed:/);
   const executeMixedExport = mixedDestinationPreview.getByRole("button", { name: /^Export 2 items$/ });
   await panel.keyboard.press("Shift+Tab");
   assert.equal(
@@ -1980,10 +1987,37 @@ try {
     "A selected new staged candidate should enter the normal corpus exactly once.",
   );
 
-  // Normal review remains a separate explicit action after import.
+  // Normal review remains a separate explicit action after import. ACCP-005
+  // deliberately fails closed for isolated vocabulary with no learner note:
+  // the visible Duolingo matching pair is evidence available to the learner,
+  // but Collector does not silently manufacture/copy a semantic answer.
   let importedHebrewCard = await cardForTerm(panel, "מרק");
-  const importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
+  let importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
   assert.equal(await importedReady.count(), 1, "Imported staged evidence must arrive in Inbox.");
+  assert.equal(
+    await importedReady.isDisabled(),
+    true,
+    "An isolated imported word without a learner note must fail closed under ACCP-005.",
+  );
+  const importedExplanation = importedHebrewCard.locator(".proposal-explanation");
+  await importedExplanation.locator("summary").click();
+  await importedExplanation.locator(".proposal-warning").getByText(
+    /Add a learner note or capture this word in a clearer context/i,
+  ).waitFor();
+
+  await importedHebrewCard.getByRole("button", { name: "Edit" }).click();
+  const importedEditor = importedHebrewCard.locator(".editor");
+  await importedEditor.getByLabel("Learner note").fill("soup");
+  await importedEditor.getByRole("button", { name: "Save" }).click();
+  await importedEditor.waitFor({ state: "detached" });
+
+  importedHebrewCard = await cardForTerm(panel, "מרק");
+  importedReady = importedHebrewCard.getByRole("button", { name: "Ready" });
+  assert.equal(
+    await importedReady.isDisabled(),
+    false,
+    "Explicit learner evidence should make the isolated word reviewable.",
+  );
   await importedReady.click();
   await importedHebrewCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assert.match(
@@ -3269,7 +3303,7 @@ try {
     "New split identity should remain Inbox for a later review session.",
   );
 
-  markE2eStage("accp012-ready-recapture-returns-to-inbox");
+  markE2eStage("accp005-equivalent-recapture-preserves-ready");
   await selectText(contentPage, "#recapture-approval", "recapture approval");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
@@ -3283,11 +3317,83 @@ try {
   await clickPanelButton(panel, "Collect");
   await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
   remediationCard = await cardForTerm(panel, "recapture approval");
-  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assert.equal(
     await remediationCard.getByRole("button", { name: "Ready" }).count(),
-    1,
-    "READY_RECAPTURE_RETURNS_TO_INBOX: new evidence must require explicit approval again.",
+    0,
+    "ACCP005_EQUIVALENT_RECAPTURE_PRESERVES_READY: equivalent evidence must not invalidate approval.",
+  );
+  assert.match(
+    await remediationCard.locator(".occurrence-selection").innerText(),
+    /Selected occurrence 2 of 2/,
+    "Equal-quality equivalent evidence should use the deterministic newer-occurrence tie break without changing study content.",
+  );
+
+  markE2eStage("accp005-stronger-evidence-invalidates-ready");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#policy-upgrade-first", "policy evidence");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  remediationCard = await cardForTerm(panel, "policy evidence");
+  await remediationCard.getByRole("button", { name: "Ready" }).click();
+  await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#policy-upgrade-strong", "policy evidence");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
+  remediationCard = await cardForTerm(panel, "policy evidence");
+  await remediationCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.match(
+    await remediationCard.locator(".occurrence-selection").innerText(),
+    /Selected occurrence 2 of 2/,
+    "A stronger occurrence must become the authoritative selected evidence.",
+  );
+  assert.match(
+    await remediationCard.locator(".learning-proposal").innerText(),
+    /context-production/,
+    "Strong chunk context should produce a contextual-production proposal.",
+  );
+  assert.equal(
+    await remediationCard.getByRole("button", { name: "Ready" }).isDisabled(),
+    false,
+    "The changed strong proposal should require explicit re-approval.",
+  );
+
+  markE2eStage("accp005-weak-context-fails-closed");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#policy-weak-chunk", "weak chunk");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  const weakPolicyCard = await cardForTerm(panel, "weak chunk");
+  const weakExplanation = weakPolicyCard.locator(".proposal-explanation");
+  await weakExplanation.locator("summary").click();
+  await weakExplanation.locator(".proposal-warning").getByText(
+    /Capture the chunk in a clearer surrounding sentence or add a learner note/i,
+  ).waitFor();
+  assert.equal(
+    await weakPolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
+    true,
+    "Weak chunk context must not silently become a production card.",
+  );
+
+  markE2eStage("accp005-sentence-without-target-fails-closed");
+  await ensureQueue(panel);
+  const unboundedSentence = "although rain continues we still walk outside every morning";
+  await selectText(contentPage, "#policy-unbounded-sentence", unboundedSentence);
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  const sentencePolicyCard = await cardForTerm(panel, unboundedSentence);
+  const sentenceExplanation = sentencePolicyCard.locator(".proposal-explanation");
+  await sentenceExplanation.locator("summary").click();
+  await sentenceExplanation.locator(".proposal-warning").getByText(
+    /Narrow the canonical target or add an explicit learner note/i,
+  ).waitFor();
+  assert.equal(
+    await sentencePolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
+    true,
+    "An unbounded sentence must remain non-recommended until remediated.",
   );
 
   markE2eStage("complete");

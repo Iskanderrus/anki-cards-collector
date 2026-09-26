@@ -8,7 +8,10 @@ import type {
   ReviewStatus,
 } from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
-import { selectBestOccurrence } from "../learning/occurrence-selection";
+import {
+  deriveLearningStudyContent,
+  learningStudyContentSignature,
+} from "../learning/policy";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
@@ -148,6 +151,15 @@ function occurrenceFingerprint(occurrence: Occurrence): string {
 
 function sameOccurrence(left: Occurrence, right: Occurrence): boolean {
   return occurrenceFingerprint(left) === occurrenceFingerprint(right);
+}
+
+function reviewStatusAfterStudyMutation(
+  before: CollectedItem,
+  after: CollectedItem,
+): ReviewStatus {
+  return learningStudyContentSignature(before) === learningStudyContentSignature(after)
+    ? before.lexicalUnit.status
+    : "inbox";
 }
 
 function buildRestorePlan(
@@ -362,13 +374,14 @@ function identitySummary(
   occurrences: Occurrence[],
   exportBinding: ExportBinding | undefined,
 ): LexicalIdentitySummary {
-  const selected = selectBestOccurrence(occurrences);
+  const item: CollectedItem = { lexicalUnit, occurrences };
+  const selectedOccurrence = deriveLearningStudyContent(item).selectedOccurrence;
   return {
     lexicalUnit,
     occurrences: [...occurrences].sort((left, right) =>
       left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id)
     ),
-    ...(selected ? { selectedOccurrenceId: selected.occurrence.id } : {}),
+    ...(selectedOccurrence ? { selectedOccurrenceId: selectedOccurrence.id } : {}),
     ...(exportBinding ? { exportBinding } : {}),
   };
 }
@@ -422,6 +435,7 @@ export class CaptureRepository {
     const context = normalizeText(draft.context).slice(0, 800);
     const now = draft.capturedAt || new Date().toISOString();
     let lexicalUnit: LexicalUnit;
+    let previousItem: CollectedItem | undefined;
     let addOccurrence = true;
 
     if (targetLexicalUnitId) {
@@ -431,8 +445,12 @@ export class CaptureRepository {
         throw new Error("Target lexical unit uses a different language.");
       }
 
-      lexicalUnit = { ...target, status: "inbox", updatedAt: now };
-      await this.database.lexicalUnits.put(lexicalUnit);
+      const occurrences = await this.database.occurrences
+        .where("lexicalUnitId")
+        .equals(target.id)
+        .toArray();
+      previousItem = { lexicalUnit: target, occurrences };
+      lexicalUnit = target;
     } else {
       const [directOwners, observed] = await Promise.all([
         this.database.lexicalUnits.where("contentKey").equals(directContentKey).toArray(),
@@ -468,8 +486,12 @@ export class CaptureRepository {
         }
       } else if (matchingOwners.size === 1) {
         const existing = [...matchingOwners.values()][0]!;
-        lexicalUnit = { ...existing, status: "inbox", updatedAt: now };
-        await this.database.lexicalUnits.put(lexicalUnit);
+        const occurrences = await this.database.occurrences
+          .where("lexicalUnitId")
+          .equals(existing.id)
+          .toArray();
+        previousItem = { lexicalUnit: existing, occurrences };
+        lexicalUnit = existing;
       } else {
         lexicalUnit = {
           id: crypto.randomUUID(),
@@ -487,7 +509,7 @@ export class CaptureRepository {
     }
 
     if (addOccurrence) {
-      await this.database.occurrences.add({
+      const addedOccurrence: Occurrence = {
         id: crypto.randomUUID(),
         lexicalUnitId: lexicalUnit.id,
         surfaceText,
@@ -495,7 +517,21 @@ export class CaptureRepository {
         context,
         source: draft.source,
         capturedAt: now,
-      });
+      };
+      await this.database.occurrences.add(addedOccurrence);
+
+      if (previousItem) {
+        const nextItem: CollectedItem = {
+          lexicalUnit,
+          occurrences: [...previousItem.occurrences, addedOccurrence],
+        };
+        lexicalUnit = {
+          ...lexicalUnit,
+          status: reviewStatusAfterStudyMutation(previousItem, nextItem),
+          updatedAt: now,
+        };
+        await this.database.lexicalUnits.put(lexicalUnit);
+      }
     }
 
     return lexicalUnit;
@@ -695,22 +731,13 @@ export class CaptureRepository {
       targetLexicalUnitId = [...matchingOwners.keys()][0]!;
     }
 
-    let lexicalUnit = await this.captureWithinTransaction(
+    const lexicalUnit = await this.captureWithinTransaction(
       entry.draft,
       targetLexicalUnitId,
     );
     const kind: CaptureBatchOutcomeKind = targetLexicalUnitId
       ? "evidence-added"
       : "new-unit";
-
-    if (lexicalUnit.status !== "inbox") {
-      lexicalUnit = {
-        ...lexicalUnit,
-        status: "inbox",
-        updatedAt: entry.draft.capturedAt || new Date().toISOString(),
-      };
-      await this.database.lexicalUnits.put(lexicalUnit);
-    }
 
     return { kind, lexicalUnitId: lexicalUnit.id };
   }
@@ -787,23 +814,41 @@ export class CaptureRepository {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
 
+        const currentOccurrences = await this.database.occurrences
+          .where("lexicalUnitId")
+          .equals(id)
+          .toArray();
+        const before: CollectedItem = {
+          lexicalUnit: current,
+          occurrences: currentOccurrences,
+        };
+
         let occurrence: Occurrence | undefined;
-        let nextContext: string | undefined;
+        let nextOccurrence: Occurrence | undefined;
         let occurrenceChanged = false;
         if (
           changes.occurrenceId !== undefined
           && (changes.context !== undefined || requestedSurface !== undefined)
         ) {
-          occurrence = await this.database.occurrences.get(changes.occurrenceId);
-          if (!occurrence || occurrence.lexicalUnitId !== id) {
+          occurrence = currentOccurrences.find(
+            (candidate) => candidate.id === changes.occurrenceId,
+          );
+          if (!occurrence) {
             throw new Error("The selected occurrence no longer belongs to this item.");
           }
-          nextContext = changes.context === undefined
-            ? undefined
+          const nextContext = changes.context === undefined
+            ? occurrence.context
             : normalizeText(changes.context).slice(0, 800);
+          const nextSurface = requestedSurface ?? occurrence.surfaceText;
           occurrenceChanged =
-            (nextContext !== undefined && nextContext !== occurrence.context)
-            || (requestedSurface !== undefined && requestedSurface !== occurrence.surfaceText);
+            nextContext !== occurrence.context
+            || nextSurface !== occurrence.surfaceText;
+          nextOccurrence = {
+            ...occurrence,
+            context: nextContext,
+            surfaceText: nextSurface,
+            normalizedSurfaceText: normalizeIdentityText(nextSurface),
+          };
         }
 
         const lexicalContentChanged =
@@ -811,29 +856,35 @@ export class CaptureRepository {
           || current.canonicalText !== canonicalText
           || normalizeLanguage(current.language) !== language
           || current.note !== requestedNote;
-        const requiresReview = lexicalContentChanged || occurrenceChanged;
+        const contentChanged = lexicalContentChanged || occurrenceChanged;
 
-        await this.database.lexicalUnits.put({
+        const draftUnit: LexicalUnit = {
           ...current,
           contentKey,
           canonicalText,
           normalizedCanonicalText,
           language,
           note: requestedNote,
-          status: requiresReview ? "inbox" : current.status,
-          updatedAt: requiresReview ? now : current.updatedAt,
-        });
+        };
+        const nextOccurrences = occurrenceChanged && nextOccurrence
+          ? currentOccurrences.map((candidate) =>
+              candidate.id === nextOccurrence!.id ? nextOccurrence! : candidate
+            )
+          : currentOccurrences;
+        const draftAfter: CollectedItem = {
+          lexicalUnit: draftUnit,
+          occurrences: nextOccurrences,
+        };
+        const nextUnit: LexicalUnit = {
+          ...draftUnit,
+          status: reviewStatusAfterStudyMutation(before, draftAfter),
+          updatedAt: contentChanged ? now : current.updatedAt,
+        };
 
-        if (occurrence && occurrenceChanged) {
-          await this.database.occurrences.update(occurrence.id, {
-            ...(nextContext === undefined ? {} : { context: nextContext }),
-            ...(requestedSurface === undefined
-              ? {}
-              : {
-                  surfaceText: requestedSurface,
-                  normalizedSurfaceText: normalizeIdentityText(requestedSurface),
-                }),
-          });
+        await this.database.lexicalUnits.put(nextUnit);
+
+        if (occurrenceChanged && nextOccurrence) {
+          await this.database.occurrences.put(nextOccurrence);
         }
       },
     );
@@ -939,6 +990,8 @@ export class CaptureRepository {
           normalizedCanonicalText: normalizeIdentityText(canonicalText),
           language,
           note,
+          // ACCP-004 makes explicit merge an approval boundary even when the
+          // currently selected study payload happens to remain textually equal.
           status: "inbox",
           createdAt: survivor.lexicalUnit.createdAt < removed.lexicalUnit.createdAt
             ? survivor.lexicalUnit.createdAt
@@ -1054,6 +1107,7 @@ export class CaptureRepository {
         };
         const sourceUnit: LexicalUnit = {
           ...preview.source.lexicalUnit,
+          // ACCP-004 requires both split identities to pass review again.
           status: "inbox",
           updatedAt: now,
         };
@@ -1105,6 +1159,20 @@ export class CaptureRepository {
           throw new Error(`Backup has ${plan.preview.conflicts.length} conflict(s). Resolve them before restoring.`);
         }
 
+        const localOccurrencesByUnit = new Map<string, Occurrence[]>();
+        for (const occurrence of localOccurrences) {
+          const values = localOccurrencesByUnit.get(occurrence.lexicalUnitId) ?? [];
+          values.push(occurrence);
+          localOccurrencesByUnit.set(occurrence.lexicalUnitId, values);
+        }
+        const beforeByExistingId = new Map<string, CollectedItem>();
+        for (const unit of localUnits) {
+          beforeByExistingId.set(unit.id, {
+            lexicalUnit: unit,
+            occurrences: localOccurrencesByUnit.get(unit.id) ?? [],
+          });
+        }
+
         for (const unit of plan.lexicalUnitsToAdd) {
           await this.database.lexicalUnits.add(unit);
         }
@@ -1119,6 +1187,38 @@ export class CaptureRepository {
         }
         for (const binding of plan.exportBindingsToAdd) {
           await this.database.exportBindings.add(binding);
+        }
+
+        const touchedExistingIds = new Set<string>();
+        for (const unit of plan.lexicalUnitsToUpdate) {
+          if (beforeByExistingId.has(unit.id)) touchedExistingIds.add(unit.id);
+        }
+        for (const occurrence of [...plan.occurrencesToAdd, ...plan.occurrencesToUpdate]) {
+          if (beforeByExistingId.has(occurrence.lexicalUnitId)) {
+            touchedExistingIds.add(occurrence.lexicalUnitId);
+          }
+        }
+
+        for (const lexicalUnitId of touchedExistingIds) {
+          const before = beforeByExistingId.get(lexicalUnitId)!;
+          const currentUnit = await this.database.lexicalUnits.get(lexicalUnitId);
+          if (!currentUnit || currentUnit.status !== "ready") continue;
+
+          const currentOccurrences = await this.database.occurrences
+            .where("lexicalUnitId")
+            .equals(lexicalUnitId)
+            .toArray();
+          const after: CollectedItem = {
+            lexicalUnit: currentUnit,
+            occurrences: currentOccurrences,
+          };
+          if (learningStudyContentSignature(before) !== learningStudyContentSignature(after)) {
+            await this.database.lexicalUnits.put({
+              ...currentUnit,
+              status: "inbox",
+              updatedAt: new Date().toISOString(),
+            });
+          }
         }
 
         completedPreview = plan.preview;

@@ -184,7 +184,7 @@ describe("AnkiClient", () => {
           Prompt: "Hoy […] salir a caminar por el centro.",
           Answer: "tengo ganas de\n\nCanonical: tener ganas de\n\nWant / feel like doing something.",
           CardKind: "context-production",
-          Why: "A multi-word canonical unit with an observed form in usable context is better practiced as one contextual production target.",
+          Why: "The selected observed chunk has a strong contextual occurrence, so the observed surface form is the bounded production target.",
           Canonical: "tener ganas de",
           Observed: "tengo ganas de",
           Expression: "tener ganas de",

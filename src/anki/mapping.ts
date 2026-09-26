@@ -4,7 +4,10 @@ import type {
   ExportFieldMapping,
   ExportProfile,
 } from "../core/types";
-import { proposeLearningCard } from "../learning/policy";
+import {
+  deriveLearningStudyContent,
+  type DerivedLearningStudyContent,
+} from "../learning/policy";
 
 export const COLLECTOR_SEMANTIC_FIELDS: readonly CollectorSemanticField[] = [
   "Prompt",
@@ -182,32 +185,21 @@ export function validateMappedTemplates(
 
 export function mappedSemanticValues(
   item: CollectedItem,
+  derived: DerivedLearningStudyContent = deriveLearningStudyContent(item),
 ): Record<CollectorSemanticField, string> {
-  const proposal = proposeLearningCard(item);
-  if (!proposal.recommended) {
-    throw new Error(proposal.warning ?? "This item needs review before export.");
+  if (!derived.proposal.recommended) {
+    throw new Error(derived.proposal.warning ?? "This item needs review before export.");
   }
-
-  const occurrence = proposal.occurrenceSelection?.occurrence;
-  return {
-    Prompt: proposal.prompt,
-    Answer: proposal.answer,
-    Canonical: item.lexicalUnit.canonicalText,
-    Observed: occurrence?.surfaceText ?? item.lexicalUnit.canonicalText,
-    Context: occurrence?.context ?? "",
-    Note: item.lexicalUnit.note,
-    Source: occurrence?.source.url ?? "",
-    CardKind: proposal.cardKind,
-    Why: proposal.reason,
-  };
+  return derived.semanticValues;
 }
 
 export function mappedAnkiFields(
   item: CollectedItem,
   profile: ExportProfile,
+  derived: DerivedLearningStudyContent = deriveLearningStudyContent(item),
 ): Record<string, string> {
   const mapping = validateMappedProfile(profile);
-  const values = mappedSemanticValues(item);
+  const values = mappedSemanticValues(item, derived);
   const fields = Object.create(null) as Record<string, string>;
 
   for (const semantic of COLLECTOR_SEMANTIC_FIELDS) {
