@@ -2922,8 +2922,13 @@ try {
   await splitChoices.nth(1).check();
   await splitDialog.getByLabel("New unit learner note").fill("deliberate second sense");
   await splitDialog.getByRole("button", { name: "Review split" }).click();
-  await splitDialog.getByText("Split preview").waitFor();
-  assert.match(await splitDialog.innerText(), /new Collector ID, no Anki binding, and Inbox status/i);
+  const splitPreviewSummary = splitDialog.locator(".identity-survivor");
+  await splitPreviewSummary.waitFor();
+  assert.match(
+    await splitPreviewSummary.innerText(),
+    /new Collector ID, no Anki binding, and Inbox status/i,
+    "Split preview must show the new identity and binding consequences before confirmation.",
+  );
   await splitDialog.getByRole("button", { name: "Confirm split" }).click();
   await splitDialog.waitFor({ state: "detached" });
   assert.equal(
