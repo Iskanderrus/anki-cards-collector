@@ -20,7 +20,7 @@ The following work is already part of the current baseline:
 - **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle;
 - **ACCP-017** — bounded read-only deck/model analysis with representative existing-card previews and real-Anki acceptance;
 - **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell;
-- **ACCP-003** — explicit canonicalization review with rename/consolidation preview and identity-safe consolidation;
+- **ACCP-003** — explicit canonicalization review and identity-safe canonical rename; ACCP-004 supersedes canonical-equality-driven consolidation with explicit merge;
 - **ACCP-014** — mapped export through existing user-owned Anki note types with fail-closed validation;
 - **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
 - **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics;
@@ -47,7 +47,7 @@ The compact queue + focused detail/settings shell is now baseline UI.
 
 ### ACCP-003 — canonicalization workflow — completed
 
-Canonical/observed review, rename/consolidation preview, and identity-safe consolidation are now baseline behavior.
+Canonical/observed review and identity-safe rename are baseline behavior. ACCP-004 supersedes canonicalization-induced consolidation with deliberate explicit merge.
 
 ---
 
