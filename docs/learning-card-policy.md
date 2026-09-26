@@ -139,7 +139,7 @@ Source
 language
 ```
 
-Capture, edit, merge, split, and backup restore all use this invariant.
+Capture, edit, and backup restore use this signature invariant.
 
 If the signature changes, a previously Ready item returns to Inbox. Examples:
 
@@ -147,11 +147,11 @@ If the signature changes, a previously Ready item returns to Inbox. Examples:
 - canonical rename changes `Canonical` and possibly the card decision;
 - selected observed/context edit changes the retrieval task;
 - a newly captured stronger occurrence replaces the old selected evidence;
-- merge/split/restore changes the effective selected study payload.
+- restore changes the effective selected study payload.
 
-If a mutation does not change the study payload, approval is preserved. For example, an equivalent repeated occurrence may win a recency tie while producing exactly the same exported fields; occurrence count/timestamp alone does not invalidate Ready.
+If a signature-sensitive mutation does not change the study payload, approval is preserved. For example, an equivalent repeated occurrence may win a recency tie while producing exactly the same exported fields; occurrence count/timestamp alone does not invalidate Ready.
 
-New split identities always start in Inbox.
+Explicit merge and split retain the stricter ACCP-004 identity-operation boundary: a merge result returns to Inbox, and both split identities are Inbox. Those deliberate identity changes require review again even when the currently selected study payload is textually unchanged.
 
 ## Review/export parity
 
