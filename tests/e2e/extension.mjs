@@ -3367,10 +3367,11 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   const weakPolicyCard = await cardForTerm(panel, "weak chunk");
-  assert.match(
-    await weakPolicyCard.locator(".learning-proposal").innerText(),
+  const weakExplanation = weakPolicyCard.locator(".proposal-explanation");
+  await weakExplanation.locator("summary").click();
+  await weakExplanation.locator(".proposal-warning").getByText(
     /Capture the chunk in a clearer surrounding sentence or add a learner note/i,
-  );
+  ).waitFor();
   assert.equal(
     await weakPolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
     true,
@@ -3384,10 +3385,11 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   const sentencePolicyCard = await cardForTerm(panel, unboundedSentence);
-  assert.match(
-    await sentencePolicyCard.locator(".learning-proposal").innerText(),
+  const sentenceExplanation = sentencePolicyCard.locator(".proposal-explanation");
+  await sentenceExplanation.locator("summary").click();
+  await sentenceExplanation.locator(".proposal-warning").getByText(
     /Narrow the canonical target or add an explicit learner note/i,
-  );
+  ).waitFor();
   assert.equal(
     await sentencePolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
     true,
