@@ -2870,8 +2870,13 @@ try {
   );
   await mergeDialog.getByLabel("Find merge candidate").fill("tener");
   await mergeDialog.locator(".identity-candidate").filter({ hasText: "tener" }).first().click();
-  await mergeDialog.getByText("Surviving Collector ID").waitFor();
-  assert.match(await mergeDialog.innerText(), /2 occurrences will belong to the survivor/i);
+  const mergeSurvivorPreview = mergeDialog.locator(".identity-survivor");
+  await mergeSurvivorPreview.waitFor();
+  assert.match(
+    await mergeSurvivorPreview.innerText(),
+    /2 occurrences will belong to the survivor/i,
+    "Merge preview must show the combined occurrence count before confirmation.",
+  );
   await mergeDialog.getByRole("button", { name: "Confirm merge" }).click();
   await mergeDialog.waitFor({ state: "detached" });
   assert.equal(
