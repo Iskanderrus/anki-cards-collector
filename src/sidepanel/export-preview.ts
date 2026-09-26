@@ -200,6 +200,26 @@ export async function buildExportPreview(
   };
 }
 
+export function exportPreviewStudyContentIsCurrent(
+  preview: ExportPreview,
+  items: CollectedItem[],
+): boolean {
+  const reviewedById = new Map(
+    preview.studyItems.map((studyItem) => [studyItem.id, studyItem]),
+  );
+  const exportableIds = new Set(preview.exportableIds);
+  const current = items.filter(
+    (item) => item.lexicalUnit.status === "ready" && exportableIds.has(item.lexicalUnit.id),
+  );
+
+  return current.length === preview.exportable
+    && current.every((item) => {
+      const reviewed = reviewedById.get(item.lexicalUnit.id);
+      return reviewed !== undefined
+        && reviewed.studyContentSignature === learningStudyContentSignature(item);
+    });
+}
+
 export function friendlyExportFailure(error: string): string {
   const lower = error.toLowerCase();
 

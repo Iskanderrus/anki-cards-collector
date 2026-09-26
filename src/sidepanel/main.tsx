@@ -53,10 +53,7 @@ import {
   type RepresentativeAnkiCard,
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
-import {
-  deriveLearningStudyContent,
-  learningStudyContentSignature,
-} from "../learning/policy";
+import { deriveLearningStudyContent } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
@@ -69,6 +66,7 @@ import {
 } from "./identity-operations-dialog";
 import {
   buildExportPreview,
+  exportPreviewStudyContentIsCurrent,
   friendlyExportFailure,
   type ExportPreview,
 } from "./export-preview";
@@ -1416,22 +1414,13 @@ function App(): React.ReactElement {
     if (!preview) return;
 
     const exportableIds = new Set(preview.exportableIds);
-    const previewStudyItems = new Map(
-      preview.studyItems.map((studyItem) => [studyItem.id, studyItem]),
-    );
     const exportable = items.filter(
       (item) => item.lexicalUnit.status === "ready" && exportableIds.has(item.lexicalUnit.id),
     );
-    const studyContentChanged = exportable.some((item) => {
-      const reviewed = previewStudyItems.get(item.lexicalUnit.id);
-      return !reviewed
-        || reviewed.studyContentSignature !== learningStudyContentSignature(item);
-    });
 
     if (
       exportable.length === 0
-      || exportable.length !== preview.exportable
-      || studyContentChanged
+      || !exportPreviewStudyContentIsCurrent(preview, items)
     ) {
       setError(
         preview.totalReady === 0
