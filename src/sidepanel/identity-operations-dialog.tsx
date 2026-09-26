@@ -412,7 +412,7 @@ export function SplitLexicalUnitDialog({
           <button
             type="button"
             className="danger"
-            disabled={busy || !preview}
+            disabled={busy || !preview || !canonicalText.trim()}
             onClick={onConfirm}
           >
             Confirm split
