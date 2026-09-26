@@ -4,7 +4,10 @@ import type {
   ExportFieldMapping,
   ExportProfile,
 } from "../core/types";
-import {\n  deriveLearningStudyContent,\n  type DerivedLearningStudyContent,\n} from "../learning/policy";
+import {
+  deriveLearningStudyContent,
+  type DerivedLearningStudyContent,
+} from "../learning/policy";
 
 export const COLLECTOR_SEMANTIC_FIELDS: readonly CollectorSemanticField[] = [
   "Prompt",

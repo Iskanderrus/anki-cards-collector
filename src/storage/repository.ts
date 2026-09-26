@@ -8,7 +8,10 @@ import type {
   ReviewStatus,
 } from "../core/types";
 import { makeContentKey, normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
-import { selectBestOccurrence } from "../learning/occurrence-selection";\nimport { learningStudyContentSignature } from "../learning/policy";
+import {
+  deriveLearningStudyContent,
+  learningStudyContentSignature,
+} from "../learning/policy";
 import { CollectorDatabase, db as defaultDb } from "./database";
 
 export interface EditLexicalUnitInput {
@@ -371,13 +374,14 @@ function identitySummary(
   occurrences: Occurrence[],
   exportBinding: ExportBinding | undefined,
 ): LexicalIdentitySummary {
-  const selected = selectBestOccurrence(occurrences);
+  const item: CollectedItem = { lexicalUnit, occurrences };
+  const selectedOccurrence = deriveLearningStudyContent(item).selectedOccurrence;
   return {
     lexicalUnit,
     occurrences: [...occurrences].sort((left, right) =>
       left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id)
     ),
-    ...(selected ? { selectedOccurrenceId: selected.occurrence.id } : {}),
+    ...(selectedOccurrence ? { selectedOccurrenceId: selectedOccurrence.id } : {}),
     ...(exportBinding ? { exportBinding } : {}),
   };
 }
@@ -1186,6 +1190,22 @@ export class CaptureRepository {
           throw new Error(`Backup has ${plan.preview.conflicts.length} conflict(s). Resolve them before restoring.`);
         }
 
+        const localOccurrencesByUnit = new Map<string, Occurrence[]>();
+        for (const occurrence of localOccurrences) {
+          const values = localOccurrencesByUnit.get(occurrence.lexicalUnitId) ?? [];
+          values.push(occurrence);
+          localOccurrencesByUnit.set(occurrence.lexicalUnitId, values);
+        }
+        const beforeByExistingId = new Map(
+          localUnits.map((unit) => [
+            unit.id,
+            {
+              lexicalUnit: unit,
+              occurrences: localOccurrencesByUnit.get(unit.id) ?? [],
+            } satisfies CollectedItem,
+          ]),
+        );
+
         for (const unit of plan.lexicalUnitsToAdd) {
           await this.database.lexicalUnits.add(unit);
         }
@@ -1200,6 +1220,38 @@ export class CaptureRepository {
         }
         for (const binding of plan.exportBindingsToAdd) {
           await this.database.exportBindings.add(binding);
+        }
+
+        const touchedExistingIds = new Set<string>();
+        for (const unit of plan.lexicalUnitsToUpdate) {
+          if (beforeByExistingId.has(unit.id)) touchedExistingIds.add(unit.id);
+        }
+        for (const occurrence of [...plan.occurrencesToAdd, ...plan.occurrencesToUpdate]) {
+          if (beforeByExistingId.has(occurrence.lexicalUnitId)) {
+            touchedExistingIds.add(occurrence.lexicalUnitId);
+          }
+        }
+
+        for (const lexicalUnitId of touchedExistingIds) {
+          const before = beforeByExistingId.get(lexicalUnitId)!;
+          const currentUnit = await this.database.lexicalUnits.get(lexicalUnitId);
+          if (!currentUnit || currentUnit.status !== "ready") continue;
+
+          const currentOccurrences = await this.database.occurrences
+            .where("lexicalUnitId")
+            .equals(lexicalUnitId)
+            .toArray();
+          const after: CollectedItem = {
+            lexicalUnit: currentUnit,
+            occurrences: currentOccurrences,
+          };
+          if (learningStudyContentSignature(before) !== learningStudyContentSignature(after)) {
+            await this.database.lexicalUnits.put({
+              ...currentUnit,
+              status: "inbox",
+              updatedAt: new Date().toISOString(),
+            });
+          }
         }
 
         completedPreview = plan.preview;
