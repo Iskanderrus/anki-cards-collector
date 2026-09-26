@@ -4,7 +4,10 @@ import type {
   ExportBinding,
   ExportProfile,
 } from "../core/types";
-import { deriveLearningStudyContent } from "../learning/policy";
+import {
+  deriveLearningStudyContent,
+  learningStudyContentSignature,
+} from "../learning/policy";
 import {
   resolveExportRoute,
   validateProfileForCurrentExport,
@@ -25,11 +28,24 @@ export interface ExportPreviewBlockedItem {
   reason: string;
 }
 
+export interface ExportPreviewStudyItem {
+  id: string;
+  canonicalText: string;
+  studyContentSignature: string;
+  cardKind: string;
+  prompt: string;
+  answer: string;
+  observed: string;
+  context: string;
+  note: string;
+}
+
 export interface ExportPreview {
   totalReady: number;
   exportable: number;
   blocked: number;
   exportableIds: string[];
+  studyItems: ExportPreviewStudyItem[];
   groups: ExportPreviewGroup[];
   blockedItems: ExportPreviewBlockedItem[];
 }
@@ -104,11 +120,13 @@ export async function buildExportPreview(
   const ready = items.filter((item) => item.lexicalUnit.status === "ready");
   const exportableIds: string[] = [];
   const blockedItems: ExportPreviewBlockedItem[] = [];
+  const studyItems: ExportPreviewStudyItem[] = [];
   const grouped = new Map<string, ExportPreviewGroup>();
   const liveValidations = new Map<string, Promise<void>>();
 
   for (const item of ready) {
-    const proposal = deriveLearningStudyContent(item).proposal;
+    const derived = deriveLearningStudyContent(item);
+    const proposal = derived.proposal;
     if (!proposal.recommended) {
       blockedItems.push({
         id: item.lexicalUnit.id,
@@ -135,6 +153,17 @@ export async function buildExportPreview(
       await validation;
 
       exportableIds.push(item.lexicalUnit.id);
+      studyItems.push({
+        id: item.lexicalUnit.id,
+        canonicalText: derived.semanticValues.Canonical,
+        studyContentSignature: learningStudyContentSignature(item),
+        cardKind: derived.semanticValues.CardKind,
+        prompt: derived.semanticValues.Prompt,
+        answer: derived.semanticValues.Answer,
+        observed: derived.semanticValues.Observed,
+        context: derived.semanticValues.Context,
+        note: derived.semanticValues.Note,
+      });
       const current = grouped.get(key);
       if (current) {
         current.count += 1;
@@ -162,6 +191,7 @@ export async function buildExportPreview(
     exportable: exportableIds.length,
     blocked: blockedItems.length,
     exportableIds,
+    studyItems,
     groups: [...grouped.values()].sort((left, right) =>
       left.profileName.localeCompare(right.profileName)
       || left.deckName.localeCompare(right.deckName)

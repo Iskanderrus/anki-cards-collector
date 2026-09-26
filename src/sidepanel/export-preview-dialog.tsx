@@ -68,6 +68,29 @@ export function ExportPreviewDialog({
               <span>{preview.blocked} blocked</span>
             </div>
 
+            {preview.studyItems.length > 0 && (
+              <details className="export-preview-study-items" open>
+                <summary>Reviewed study content ({preview.studyItems.length})</summary>
+                <ul>
+                  {preview.studyItems.map((item) => (
+                    <li key={item.id}>
+                      <strong dir="auto">{item.canonicalText}</strong>
+                      <span>{item.cardKind}</span>
+                      <span><b>Prompt:</b> <span dir="auto">{item.prompt}</span></span>
+                      <span><b>Answer:</b> <span dir="auto">{item.answer || "—"}</span></span>
+                      <span><b>Observed:</b> <span dir="auto">{item.observed}</span></span>
+                      {item.context && (
+                        <span><b>Context:</b> <span dir="auto">{item.context}</span></span>
+                      )}
+                      {item.note && (
+                        <span><b>Note:</b> <span dir="auto">{item.note}</span></span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
             {preview.groups.length > 0 && (
               <div className="export-preview-groups" aria-label="Resolved Anki destinations">
                 {preview.groups.map((group) => (

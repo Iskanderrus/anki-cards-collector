@@ -53,7 +53,10 @@ import {
   type RepresentativeAnkiCard,
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
-import { deriveLearningStudyContent } from "../learning/policy";
+import {
+  deriveLearningStudyContent,
+  learningStudyContentSignature,
+} from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
@@ -1413,15 +1416,27 @@ function App(): React.ReactElement {
     if (!preview) return;
 
     const exportableIds = new Set(preview.exportableIds);
+    const previewStudyItems = new Map(
+      preview.studyItems.map((studyItem) => [studyItem.id, studyItem]),
+    );
     const exportable = items.filter(
       (item) => item.lexicalUnit.status === "ready" && exportableIds.has(item.lexicalUnit.id),
     );
+    const studyContentChanged = exportable.some((item) => {
+      const reviewed = previewStudyItems.get(item.lexicalUnit.id);
+      return !reviewed
+        || reviewed.studyContentSignature !== learningStudyContentSignature(item);
+    });
 
-    if (exportable.length === 0) {
+    if (
+      exportable.length === 0
+      || exportable.length !== preview.exportable
+      || studyContentChanged
+    ) {
       setError(
         preview.totalReady === 0
           ? "Nothing is Ready for export yet. Review Inbox items and explicitly mark the ones you want to study as Ready."
-          : "Ready items changed or are blocked. Reopen Export and review the current destination/profile guidance.",
+          : "Reviewed study content changed. Reopen Export and review the current Prompt, Answer, card kind and evidence before exporting.",
       );
       return;
     }
