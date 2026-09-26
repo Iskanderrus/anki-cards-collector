@@ -1,5 +1,5 @@
 import type { CollectedItem, ExportProfile } from "../core/types";
-import { proposeLearningCard } from "../learning/policy";
+import { deriveLearningStudyContent } from "../learning/policy";
 import { COLLECTOR_MANAGED_MODEL_NAME } from "../settings";
 import {
   collectorIdentityQuery,
@@ -231,12 +231,13 @@ export class AnkiClient {
     if (profile.mode !== "mapped-user-model") return;
 
     validateMappedProfile(profile);
-    const proposal = proposeLearningCard(item);
+    const derived = deriveLearningStudyContent(item);
+    const proposal = derived.proposal;
     if (!proposal.recommended) {
       throw new Error(proposal.warning ?? "This item needs review before export.");
     }
 
-    const fields = mappedAnkiFields(item, profile);
+    const fields = mappedAnkiFields(item, profile, derived);
     const identityTag = collectorIdentityTag(item.lexicalUnit.id);
     const candidate = {
       deckName: profile.deckName,
@@ -265,14 +266,15 @@ export class AnkiClient {
     profile: ExportProfile,
     existingNoteId?: number,
   ): Promise<number> {
-    const proposal = proposeLearningCard(item);
+    const derived = deriveLearningStudyContent(item);
+    const proposal = derived.proposal;
     if (!proposal.recommended) {
       throw new Error(proposal.warning ?? "This item needs review before export.");
     }
 
-    const semanticValues = mappedSemanticValues(item);
+    const semanticValues = mappedSemanticValues(item, derived);
     const fields = profile.mode === "mapped-user-model"
-      ? mappedAnkiFields(item, profile)
+      ? mappedAnkiFields(item, profile, derived)
       : {
           CollectorID: item.lexicalUnit.id,
           Prompt: semanticValues.Prompt,

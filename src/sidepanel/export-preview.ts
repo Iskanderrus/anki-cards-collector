@@ -4,7 +4,7 @@ import type {
   ExportBinding,
   ExportProfile,
 } from "../core/types";
-import { proposeLearningCard } from "../learning/policy";
+import { deriveLearningStudyContent } from "../learning/policy";
 import {
   resolveExportRoute,
   validateProfileForCurrentExport,
@@ -108,7 +108,7 @@ export async function buildExportPreview(
   const liveValidations = new Map<string, Promise<void>>();
 
   for (const item of ready) {
-    const proposal = proposeLearningCard(item);
+    const proposal = deriveLearningStudyContent(item).proposal;
     if (!proposal.recommended) {
       blockedItems.push({
         id: item.lexicalUnit.id,

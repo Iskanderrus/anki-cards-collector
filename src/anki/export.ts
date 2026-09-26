@@ -1,5 +1,5 @@
 import type { CollectedItem } from "../core/types";
-import { proposeLearningCard } from "../learning/policy";
+import { deriveLearningStudyContent } from "../learning/policy";
 
 function cleanCell(value: string): string {
   return value.replace(/[\t\r\n]+/g, " ").trim();
@@ -7,19 +7,19 @@ function cleanCell(value: string): string {
 
 export function toTsv(items: CollectedItem[]): string {
   const rows = items.map((item) => {
-    const proposal = proposeLearningCard(item);
-    const selected = proposal.occurrenceSelection?.occurrence;
+    const derived = deriveLearningStudyContent(item);
+    const values = derived.semanticValues;
     return [
       item.lexicalUnit.id,
-      proposal.cardKind,
-      proposal.prompt,
-      proposal.answer,
-      proposal.reason,
-      item.lexicalUnit.canonicalText,
-      selected?.surfaceText ?? item.lexicalUnit.canonicalText,
-      selected?.context ?? "",
-      item.lexicalUnit.note,
-      selected?.source.url ?? "",
+      values.CardKind,
+      values.Prompt,
+      values.Answer,
+      values.Why,
+      values.Canonical,
+      values.Observed,
+      values.Context,
+      values.Note,
+      values.Source,
     ].map(cleanCell).join("\t");
   });
 

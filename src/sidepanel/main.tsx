@@ -53,7 +53,7 @@ import {
   type RepresentativeAnkiCard,
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
-import { proposeLearningCard } from "../learning/policy";
+import { deriveLearningStudyContent } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
@@ -1110,7 +1110,7 @@ function App(): React.ReactElement {
     if (status === "ready") {
       const item = items.find((candidate) => candidate.lexicalUnit.id === id);
       if (item) {
-        const proposal = proposeLearningCard(item);
+        const proposal = deriveLearningStudyContent(item).proposal;
         if (!proposal.recommended) {
           setError(proposal.warning ?? "Review this item before marking it Ready.");
           return;
@@ -1141,7 +1141,7 @@ function App(): React.ReactElement {
   }
 
   function beginEdit(item: CollectedItem): void {
-    const proposal = proposeLearningCard(item);
+    const proposal = deriveLearningStudyContent(item).proposal;
     const occurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
     setEditingId(item.lexicalUnit.id);
     setEditDraft({
@@ -1770,7 +1770,7 @@ function App(): React.ReactElement {
 
   function exportTsv(): void {
     const ready = items.filter(
-      (item) => item.lexicalUnit.status === "ready" && proposeLearningCard(item).recommended,
+      (item) => item.lexicalUnit.status === "ready" && deriveLearningStudyContent(item).proposal.recommended,
     );
     downloadText("anki-cards-collector.tsv", toTsv(ready), "text/tab-separated-values;charset=utf-8");
   }
@@ -2303,7 +2303,7 @@ function App(): React.ReactElement {
           )}
         <ReviewQueue
           entries={items.map((item) => {
-            const proposal = proposeLearningCard(item);
+            const proposal = deriveLearningStudyContent(item).proposal;
             const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
             const binding = exportBindings[item.lexicalUnit.id];
             const route = resolvedRoute(item);
@@ -2800,7 +2800,7 @@ function App(): React.ReactElement {
           const editing = editingId === unit.id && editDraft !== null;
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
-          const proposal = proposeLearningCard(item);
+          const proposal = deriveLearningStudyContent(item).proposal;
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
