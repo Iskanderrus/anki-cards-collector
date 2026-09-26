@@ -817,6 +817,38 @@ describe("CaptureRepository", () => {
     expect(await database.lexicalUnits.get(second.lexicalUnit.id)).toBeUndefined();
   });
 
+  it("does not transplant an unexported override onto a surviving legacy Anki identity", async () => {
+    const exported = await repository.capture(draft("banco", "El banco está abierto."));
+    const unexported = await repository.capture(draft("orilla", "Caminamos por la orilla."));
+    await repository.setAnkiNoteId(exported.lexicalUnit.id, 4040);
+    await repository.setExportBinding({
+      lexicalUnitId: unexported.lexicalUnit.id,
+      profileId: "profile-override",
+      state: "override",
+      deckName: "Other deck",
+      modelName: "Other model",
+    });
+
+    const preview = await repository.previewMerge(
+      exported.lexicalUnit.id,
+      unexported.lexicalUnit.id,
+    );
+    expect(preview.blocked).toBe(false);
+    expect(preview.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
+
+    const result = await repository.mergeLexicalUnits({
+      sourceId: exported.lexicalUnit.id,
+      targetId: unexported.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    });
+
+    expect(result.item.lexicalUnit.ankiNoteId).toBe(4040);
+    expect(await repository.getExportBinding(exported.lexicalUnit.id)).toBeNull();
+    expect(await repository.getExportBinding(unexported.lexicalUnit.id)).toBeNull();
+  });
+
   it("allows merge only when two exported bindings prove the same effective identity", async () => {
     const first = await repository.capture(draft("banco", "El banco está abierto."));
     const second = await repository.capture(draft("orilla", "Caminamos por la orilla."));
