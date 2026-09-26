@@ -6,7 +6,8 @@ Make lexical-unit identity management deliberate and support separate senses/hom
 
 ## Dependencies
 
-- ACCP-003.
+- ACCP-003 canonicalization/observed-form review;
+- ACCP-012 sequential Inbox review and review-session identity reconciliation.
 
 ## Domain changes
 
