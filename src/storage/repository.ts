@@ -983,13 +983,16 @@ export class CaptureRepository {
         // being removed onto a different surviving lexical identity.
         const bindingToKeep = survivor.exportBinding;
 
-        const mergedDraft: LexicalUnit = {
+        const mergedUnit: LexicalUnit = {
           ...survivor.lexicalUnit,
           contentKey: makeContentKey(canonicalText, language),
           canonicalText,
           normalizedCanonicalText: normalizeIdentityText(canonicalText),
           language,
           note,
+          // ACCP-004 makes explicit merge an approval boundary even when the
+          // currently selected study payload happens to remain textually equal.
+          status: "inbox",
           createdAt: survivor.lexicalUnit.createdAt < removed.lexicalUnit.createdAt
             ? survivor.lexicalUnit.createdAt
             : removed.lexicalUnit.createdAt,
@@ -997,26 +1000,6 @@ export class CaptureRepository {
           ...(survivingNoteId === undefined
             ? { ankiNoteId: undefined }
             : { ankiNoteId: survivingNoteId }),
-        };
-        const mergedOccurrences = [
-          ...survivor.occurrences,
-          ...removed.occurrences.map((occurrence) => ({
-            ...occurrence,
-            lexicalUnitId: survivingLexicalUnitId,
-          })),
-        ];
-        const mergedUnit: LexicalUnit = {
-          ...mergedDraft,
-          status: reviewStatusAfterStudyMutation(
-            {
-              lexicalUnit: survivor.lexicalUnit,
-              occurrences: survivor.occurrences,
-            },
-            {
-              lexicalUnit: mergedDraft,
-              occurrences: mergedOccurrences,
-            },
-          ),
         };
 
         await this.database.occurrences
@@ -1122,25 +1105,11 @@ export class CaptureRepository {
           createdAt: now,
           updatedAt: now,
         };
-        const remainingOccurrences = preview.source.occurrences.filter(
-          (occurrence) => !selectedIds.has(occurrence.id),
-        );
-        const sourceDraft: LexicalUnit = {
-          ...preview.source.lexicalUnit,
-          updatedAt: now,
-        };
         const sourceUnit: LexicalUnit = {
-          ...sourceDraft,
-          status: reviewStatusAfterStudyMutation(
-            {
-              lexicalUnit: preview.source.lexicalUnit,
-              occurrences: preview.source.occurrences,
-            },
-            {
-              lexicalUnit: sourceDraft,
-              occurrences: remainingOccurrences,
-            },
-          ),
+          ...preview.source.lexicalUnit,
+          // ACCP-004 requires both split identities to pass review again.
+          status: "inbox",
+          updatedAt: now,
         };
 
         await this.database.lexicalUnits.add(newUnit);
