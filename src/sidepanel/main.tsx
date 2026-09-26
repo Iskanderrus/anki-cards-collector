@@ -57,6 +57,7 @@ import { proposeLearningCard } from "../learning/policy";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
+import { reconcileReviewSessionMerge } from "./review-session";
 import { Onboarding } from "./onboarding";
 import { ExportPreviewDialog } from "./export-preview-dialog";
 import {
@@ -314,29 +315,6 @@ interface EditDraft {
 
 function latestOccurrence(item: CollectedItem) {
   return item.occurrences.at(-1);
-}
-
-function reconcileReviewSessionMerge(
-  ids: string[],
-  sourceId: string,
-  targetId: string,
-  survivingId: string,
-): string[] {
-  const involved = new Set([sourceId, targetId, survivingId]);
-  const involvedIndexes = ids
-    .map((id, index) => involved.has(id) ? index : -1)
-    .filter((index) => index >= 0);
-  if (involvedIndexes.length === 0) return ids;
-
-  const insertionAtOriginalIndex = Math.min(...involvedIndexes);
-  const before = ids
-    .slice(0, insertionAtOriginalIndex)
-    .filter((id) => !involved.has(id));
-  const after = ids
-    .slice(insertionAtOriginalIndex)
-    .filter((id) => !involved.has(id));
-
-  return [...before, survivingId, ...after];
 }
 
 function sourceLabel(occurrence: Occurrence | undefined): string {
