@@ -3032,11 +3032,15 @@ function App(): React.ReactElement {
                     ) : null}
                   </div>
 
-                  {proposal.occurrenceSelection && item.occurrences.length > 1 && (
+                  {proposal.occurrenceSelection && (
                     <div className="occurrence-selection">
                       <strong>
-                        Using occurrence {proposal.occurrenceSelection.selectedNumber} of {proposal.occurrenceSelection.occurrenceCount}
+                        Selected occurrence {proposal.occurrenceSelection.selectedNumber} of {proposal.occurrenceSelection.occurrenceCount}
                       </strong>
+                      <span dir="auto">{proposal.occurrenceSelection.occurrence.surfaceText}</span>
+                      {proposal.occurrenceSelection.occurrence.context && (
+                        <span dir="auto">{proposal.occurrenceSelection.occurrence.context}</span>
+                      )}
                       <span>{proposal.occurrenceSelection.reason}</span>
                     </div>
                   )}

@@ -98,12 +98,6 @@ function productionAnswer(surfaceText: string, canonicalText: string, note: stri
   ].filter(Boolean).join("\n\n");
 }
 
-function repeatedEncounterReason(item: CollectedItem): string {
-  return item.occurrences.length > 1
-    ? " Repeated encounters remain one learning target; the strongest selected evidence drives this proposal."
-    : "";
-}
-
 function usefulRecognitionContext(selection: OccurrenceSelection | null): boolean {
   const breakdown = selection?.breakdown;
   return Boolean(
@@ -162,7 +156,6 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
   const surfaceText = occurrence?.surfaceText.trim() || canonicalText;
   const context = occurrence?.context.trim() ?? "";
   const tokenCount = wordTokens(canonicalText).length;
-  const repeated = repeatedEncounterReason(item);
   const selection = occurrenceSelection ? { occurrenceSelection } : {};
 
   if (tokenCount > MAX_CAPTURE_WORDS || canonicalText.length > MAX_CAPTURE_CHARS) {
@@ -173,7 +166,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
       prompt: canonicalText,
       answer: note,
       reasonCode: "reject-too-broad",
-      reason: `The canonical target is too broad for one bounded retrieval task.${repeated}`,
+      reason: `The canonical target is too broad for one bounded retrieval task.`,
       recommended: false,
       warningCode: "too-broad",
       warning: "Shorten the canonical form or isolate the part you actually want to retrieve before marking it ready.",
@@ -195,7 +188,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
         prompt: surfaceText,
         answer: recognitionAnswer(surfaceText, canonicalText, note, context),
         reasonCode: "word-note-recognition",
-        reason: `A single lexical item uses recognition, and the learner note supplies the explicit answer without generated semantics.${repeated}`,
+        reason: `A single lexical item uses recognition, and the learner note supplies the explicit answer without generated semantics.`,
         recommended: true,
       };
     }
@@ -208,7 +201,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
         prompt: surfaceText,
         answer: recognitionAnswer(surfaceText, canonicalText, "", context),
         reasonCode: "word-context-recognition",
-        reason: `A single lexical item stays a recognition card. The selected context is shown only as observed evidence, not as an invented meaning.${repeated}`,
+        reason: `A single lexical item stays a recognition card. The selected context is shown only as observed evidence, not as an invented meaning.`,
         recommended: true,
       };
     }
@@ -220,7 +213,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
       prompt: surfaceText,
       answer: recognitionAnswer(surfaceText, canonicalText, "", context),
       reasonCode: "reject-word-evidence",
-      reason: `The selected evidence is too weak or noisy to make a useful recognition card without pretending context is a meaning.${repeated}`,
+      reason: `The selected evidence is too weak or noisy to make a useful recognition card without pretending context is a meaning.`,
       recommended: false,
       warningCode: "add-word-evidence",
       warning: "Add a learner note or capture this word in a clearer context before marking it ready.",
@@ -236,7 +229,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
         prompt: cloze!,
         answer: productionAnswer(surfaceText, canonicalText, note),
         reasonCode: "chunk-context-production",
-        reason: `The selected observed chunk has a strong contextual occurrence, so the observed surface form is the bounded production target.${repeated}`,
+        reason: `The selected observed chunk has a strong contextual occurrence, so the observed surface form is the bounded production target.`,
         recommended: true,
       };
     }
@@ -249,7 +242,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
         prompt: surfaceText,
         answer: recognitionAnswer(surfaceText, canonicalText, note, context),
         reasonCode: "chunk-note-recognition",
-        reason: `The selected context is not strong enough for production, so the explicit learner note supports a safer recognition card.${repeated}`,
+        reason: `The selected context is not strong enough for production, so the explicit learner note supports a safer recognition card.`,
         recommended: true,
       };
     }
@@ -261,7 +254,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
       prompt: surfaceText,
       answer: recognitionAnswer(surfaceText, canonicalText, "", context),
       reasonCode: "reject-chunk-context",
-      reason: `This chunk does not have a strong enough selected context for a bounded production cue, and no learner note supports a safer recognition card.${repeated}`,
+      reason: `This chunk does not have a strong enough selected context for a bounded production cue, and no learner note supports a safer recognition card.`,
       recommended: false,
       warningCode: "improve-chunk-context",
       warning: "Capture the chunk in a clearer surrounding sentence or add a learner note before marking it ready.",
@@ -276,7 +269,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
       prompt: cloze!,
       answer: productionAnswer(surfaceText, canonicalText, note),
       reasonCode: "sentence-context-recall",
-      reason: `This sentence has a bounded retrieval target with useful context on both sides, so contextual recall is supported without generated semantics.${repeated}`,
+      reason: `This sentence has a bounded retrieval target with useful context on both sides, so contextual recall is supported without generated semantics.`,
       recommended: true,
     };
   }
@@ -289,7 +282,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
       prompt: canonicalText,
       answer: note,
       reasonCode: "sentence-note-review",
-      reason: `Context does not support a bounded sentence-recall target, but the learner note supplies a concrete review purpose.${repeated}`,
+      reason: `Context does not support a bounded sentence-recall target, but the learner note supplies a concrete review purpose.`,
       recommended: true,
     };
   }
@@ -301,7 +294,7 @@ export function proposeLearningCard(item: CollectedItem): LearningCardProposal {
     prompt: canonicalText,
     answer: "",
     reasonCode: "reject-sentence-target",
-    reason: `This sentence does not have a useful bounded retrieval target or an explicit learner note.${repeated}`,
+    reason: `This sentence does not have a useful bounded retrieval target or an explicit learner note.`,
     recommended: false,
     warningCode: "narrow-sentence-target",
     warning: "Narrow the canonical target or add an explicit learner note before marking it ready.",
@@ -342,6 +335,7 @@ export function learningStudyContentSignature(item: CollectedItem): string {
     Prompt: values.Prompt,
     Answer: values.Answer,
     CardKind: values.CardKind,
+    Why: values.Why,
     Canonical: values.Canonical,
     Observed: values.Observed,
     Context: values.Context,

@@ -399,6 +399,6 @@ describe("learning-card policy v2", () => {
     const proposal = proposeLearningCard(value);
     expect(proposal.cardKind).toBe("context-production");
     expect(proposal.occurrenceSelection?.occurrenceCount).toBe(3);
-    expect(proposal.reason).toContain("Repeated encounters remain one learning target");
+    expect(proposal.reasonCode).toBe("chunk-context-production");
   });
 });
