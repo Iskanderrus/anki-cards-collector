@@ -157,6 +157,7 @@ describe("CaptureRepository", () => {
       modelName: "Collector Basic",
       modelId: "10",
     });
+    await repository.setStatus(exported.lexicalUnit.id, "ready");
     const occurrenceIds = [
       ...unexported.occurrences.map((occurrence) => occurrence.id),
       ...exported.occurrences.map((occurrence) => occurrence.id),
@@ -1107,6 +1108,8 @@ describe("CaptureRepository", () => {
       modelId: "10",
     });
 
+    await repository.setStatus(exported.lexicalUnit.id, "archived");
+
     const preview = await repository.previewMerge(exported.lexicalUnit.id, unexported.lexicalUnit.id);
     expect(preview.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
 
@@ -1120,6 +1123,7 @@ describe("CaptureRepository", () => {
 
     expect(result.survivingLexicalUnitId).toBe(exported.lexicalUnit.id);
     expect(result.item.lexicalUnit.id).toBe(exported.lexicalUnit.id);
+    expect(result.item.lexicalUnit.status).toBe("inbox");
     expect(await repository.getExportBinding(exported.lexicalUnit.id)).toMatchObject({
       state: "exported",
       ankiNoteId: 9090,
