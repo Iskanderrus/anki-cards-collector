@@ -77,17 +77,15 @@ ACCP-012 is now baseline behavior. Sequential Inbox review, live destination pre
 
 ## Gate E — corpus operations and card quality
 
-### ACCP-004 — explicit merge and split — current merge gate
+### ACCP-004 — explicit merge and split — completed baseline
 
-Depends on completed ACCP-003 and ACCP-012.
+ACCP-004 is now baseline behavior. Lexical-unit ID is primary, canonical/content keys are non-unique lookup data, and merge/split are explicit transactional operations with retained Collector/Anki identity semantics.
 
-This gate changes the foundational identity invariant: lexical-unit ID is primary, canonical/content keys become non-unique lookup data, and merge/split are explicit transactional operations. Frozen v4 → v5 migration and backup v4 round-trip coverage are mandatory.
+### ACCP-005 — learning-card policy v2 — current merge gate
 
-### ACCP-005 — learning-card policy v2
+Depends on completed ACCP-002, ACCP-003, and ACCP-004.
 
-Depends on completed ACCP-002 and ACCP-003.
-
-Must preserve review/export parity.
+This gate refines word/chunk/sentence decisions around one authoritative selected occurrence, makes Ready approval content-sensitive, and preserves exact review/export study-content parity without persisting derived proposals.
 
 ---
 
@@ -107,12 +105,11 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-004 — explicit merge/split
-2. ACCP-005 — learning-card policy v2
-3. ACCP-006 — morphology assistance
-4. ACCP-007 — learning-value decision
+1. ACCP-005 — learning-card policy v2
+2. ACCP-006 — morphology assistance
+3. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, and ACCP-012 are now baseline work. ACCP-004 is the current corpus-identity merge gate.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, ACCP-012, and ACCP-004 are now baseline work. ACCP-005 is the current Gate E implementation/merge target.
 
 ---
 
