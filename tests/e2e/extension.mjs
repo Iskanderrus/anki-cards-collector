@@ -3025,7 +3025,7 @@ try {
   ankiRequests.length = 0;
   let reviewMergeDialog = await openMergeDialog(panel, remediationCard, "duplicate ready survivor");
   assert.match(
-    await reviewMergeDialog.innerText(),
+    await reviewMergeDialog.locator(".identity-preview-grid").innerText(),
     /Anki: exported/i,
     "Merge preview must expose the exported target identity.",
   );
