@@ -68,19 +68,17 @@ Overly broad targets (>25 words or >180 characters) remain non-recommended.
 
 A central study-content signature compares effective content before/after repository mutations.
 
-Covered mutation paths:
+Covered signature-sensitive mutation paths:
 
 - repeated capture / stronger evidence;
 - learner-note edit;
 - canonical edit;
 - selected observed/context edit;
-- explicit merge;
-- explicit split;
 - backup restore.
 
-A changed signature returns Ready to Inbox. Equivalent evidence that leaves exported semantic values unchanged preserves Ready.
+A changed signature returns Ready to Inbox. Equivalent repeated evidence that leaves exported semantic values unchanged preserves Ready.
 
-New split identities always start Inbox.
+Explicit merge and split remain ACCP-004 review boundaries rather than signature-only mutations: a merge result returns to Inbox, and both split identities are Inbox even when the currently selected study payload happens to remain textually equal.
 
 ## Review/export parity
 
@@ -133,7 +131,7 @@ Repository tests cover:
 - stronger capture invalidation;
 - note/canonical/observed/context invalidation;
 - equivalent evidence preserving Ready;
-- merge/split content-sensitive behavior;
+- ACCP-004 merge/split unconditional review-boundary regression;
 - restore reconciliation.
 
 Browser E2E covers:
