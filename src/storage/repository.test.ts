@@ -944,6 +944,29 @@ describe("CaptureRepository", () => {
       .rejects.toThrow("no longer belongs");
   });
 
+  it("rejects confirmation when the selected split subset differs from the preview", async () => {
+    const source = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
+    const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
+    const withThird = await repository.capture(draft("banco", "El banco central queda lejos."));
+    const previewedId = withThird.occurrences[1]!.id;
+    const changedSelectionId = withThird.occurrences[2]!.id;
+    const preview = await repository.previewSplit(source.lexicalUnit.id, [previewedId]);
+
+    await expect(repository.splitLexicalUnit({
+      sourceId: source.lexicalUnit.id,
+      selectedOccurrenceIds: [changedSelectionId],
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    })).rejects.toThrow("preview is stale");
+
+    const items = await repository.list();
+    expect(items).toHaveLength(1);
+    expect(items[0]?.occurrences.map((occurrence) => occurrence.id).sort()).toEqual(
+      withThird.occurrences.map((occurrence) => occurrence.id).sort(),
+    );
+  });
+
   it("rolls back split atomically on an injected occurrence move failure", async () => {
     const source = await repository.capture(draft("banco", "El banco aprobó el préstamo."));
     const withSecond = await repository.capture(draft("banco", "Nos sentamos junto al banco del río."));
