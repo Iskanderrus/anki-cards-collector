@@ -408,16 +408,24 @@ const fixtureUrl = `http://127.0.0.1:${address.port}/`;
 const userDataDir = await mkdtemp(join(tmpdir(), "collector-e2e-"));
 let context;
 let e2eStage = "launch";
-const e2eWatchdog = setTimeout(() => {
-  console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
-  process.exit(1);
-}, 360000);
-e2eWatchdog.unref();
+let e2eWatchdog;
+
+function armE2eWatchdog() {
+  clearTimeout(e2eWatchdog);
+  e2eWatchdog = setTimeout(() => {
+    console.error(`E2E watchdog timed out during stage: ${e2eStage}`);
+    process.exit(1);
+  }, 90000);
+  e2eWatchdog.unref();
+}
 
 function markE2eStage(stage) {
   e2eStage = stage;
   console.log(`E2E_STAGE=${stage}`);
+  armE2eWatchdog();
 }
+
+armE2eWatchdog();
 
 async function selectText(page, selector, phrase) {
   await page.evaluate(({ selector: targetSelector, phrase: targetPhrase }) => {
