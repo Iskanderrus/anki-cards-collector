@@ -1166,4 +1166,230 @@ describe("CaptureRepository", () => {
     expect(remainingPreview.target.selectedOccurrenceId).toBe(result.created.occurrences[0]!.id);
   });
 
+
+  describe("ACCP-005 ready approval invalidation", () => {
+    it("invalidates Ready when a newly added stronger occurrence changes study content", async () => {
+      const weakDraft = {
+        ...draft("tener ganas de", "tener ganas de"),
+        capturedAt: "2026-09-19T11:00:00Z",
+      };
+      const captured = await repository.capture(weakDraft);
+      const withNote = await repository.update(captured.lexicalUnit.id, {
+        canonicalText: "tener ganas de",
+        language: "es",
+        note: "feel like",
+        occurrenceId: captured.occurrences[0]!.id,
+        surfaceText: "tener ganas de",
+        context: "tener ganas de",
+      });
+      await repository.setStatus(withNote.lexicalUnit.id, "ready");
+
+      const stronger = await repository.capture({
+        ...draft(
+          "tener ganas de",
+          "Hoy tener ganas de salir a caminar por el centro es normal.",
+        ),
+        capturedAt: "2026-09-19T10:00:00Z",
+      });
+
+      expect(stronger.lexicalUnit.status).toBe("inbox");
+      expect(stronger.occurrences).toHaveLength(2);
+    });
+
+    it("invalidates Ready after a learner-note edit changes the answer", async () => {
+      const captured = await repository.capture(
+        draft("aunque", "Aunque llueva, voy a caminar por el parque esta tarde."),
+      );
+      await repository.setStatus(captured.lexicalUnit.id, "ready");
+
+      const updated = await repository.update(captured.lexicalUnit.id, {
+        canonicalText: "aunque",
+        language: "es",
+        note: "although / even though",
+        occurrenceId: captured.occurrences[0]!.id,
+        surfaceText: "aunque",
+        context: captured.occurrences[0]!.context,
+      });
+
+      expect(updated.lexicalUnit.status).toBe("inbox");
+    });
+
+    it("invalidates Ready after a canonical edit changes exported study fields", async () => {
+      const captured = await repository.capture(
+        draft("tengo ganas de", "Hoy tengo ganas de salir a caminar por el centro."),
+      );
+      await repository.setStatus(captured.lexicalUnit.id, "ready");
+
+      const updated = await repository.update(captured.lexicalUnit.id, {
+        canonicalText: "tener ganas de",
+        language: "es",
+        note: "",
+        occurrenceId: captured.occurrences[0]!.id,
+        surfaceText: "tengo ganas de",
+        context: captured.occurrences[0]!.context,
+      });
+
+      expect(updated.lexicalUnit.status).toBe("inbox");
+      expect(updated.lexicalUnit.id).toBe(captured.lexicalUnit.id);
+    });
+
+    it("invalidates Ready when selected observed form/context changes", async () => {
+      const captured = await repository.capture(
+        draft("tener ganas de", "Hoy tener ganas de salir a caminar por el centro es normal."),
+      );
+      await repository.setStatus(captured.lexicalUnit.id, "ready");
+
+      const updated = await repository.update(captured.lexicalUnit.id, {
+        canonicalText: "tener ganas de",
+        language: "es",
+        note: "",
+        occurrenceId: captured.occurrences[0]!.id,
+        surfaceText: "tenemos ganas de",
+        context: "Hoy tenemos ganas de salir a caminar por el centro.",
+      });
+
+      expect(updated.lexicalUnit.status).toBe("inbox");
+      expect(updated.occurrences[0]).toMatchObject({
+        surfaceText: "tenemos ganas de",
+        context: "Hoy tenemos ganas de salir a caminar por el centro.",
+      });
+    });
+
+    it("preserves Ready when repeated equivalent evidence does not change study content", async () => {
+      const first = await repository.capture({
+        ...draft("aunque", "Aunque llueva, voy a caminar por el parque esta tarde."),
+        capturedAt: "2026-09-19T10:00:00Z",
+      });
+      await repository.setStatus(first.lexicalUnit.id, "ready");
+
+      const repeated = await repository.capture({
+        ...draft("aunque", "Aunque llueva, voy a caminar por el parque esta tarde."),
+        capturedAt: "2026-09-19T11:00:00Z",
+      });
+
+      expect(repeated.lexicalUnit.status).toBe("ready");
+      expect(repeated.occurrences).toHaveLength(2);
+    });
+
+    it("preserves Ready across merge when added evidence cannot change the selected study content", async () => {
+      const survivor = await repository.capture({
+        ...draft("tener ganas de", "Hoy tener ganas de salir a caminar por el centro es normal."),
+        capturedAt: "2026-09-19T10:00:00Z",
+      });
+      const other = await repository.capture({
+        ...draft("tengo ganas de", "tengo ganas de"),
+        capturedAt: "2026-09-19T11:00:00Z",
+      });
+      await repository.update(other.lexicalUnit.id, {
+        canonicalText: "tener ganas de",
+        language: "es",
+        note: "",
+        occurrenceId: other.occurrences[0]!.id,
+        surfaceText: "tengo ganas de",
+        context: "tengo ganas de",
+      });
+      await repository.setStatus(survivor.lexicalUnit.id, "ready");
+
+      const preview = await repository.previewMerge(
+        survivor.lexicalUnit.id,
+        other.lexicalUnit.id,
+      );
+      const merged = await repository.mergeLexicalUnits({
+        sourceId: survivor.lexicalUnit.id,
+        targetId: other.lexicalUnit.id,
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: "tener ganas de",
+        note: "",
+      });
+
+      expect(merged.survivingLexicalUnitId).toBe(survivor.lexicalUnit.id);
+      expect(merged.item.lexicalUnit.status).toBe("ready");
+    });
+
+    it("preserves Ready on the split source when only non-selected evidence moves", async () => {
+      const strong = await repository.capture({
+        ...draft("banco", "Ayer fuimos al banco del centro para hablar sobre el préstamo."),
+        capturedAt: "2026-09-19T10:00:00Z",
+      });
+      const withWeak = await repository.capture({
+        ...draft("banco", "banco"),
+        capturedAt: "2026-09-19T11:00:00Z",
+      });
+      await repository.setStatus(strong.lexicalUnit.id, "ready");
+
+      const weakId = withWeak.occurrences.find(
+        (occurrence) => occurrence.context === "banco",
+      )!.id;
+      const preview = await repository.previewSplit(strong.lexicalUnit.id, [weakId]);
+      expect(preview.source.selectedOccurrenceId).not.toBe(weakId);
+
+      const split = await repository.splitLexicalUnit({
+        sourceId: strong.lexicalUnit.id,
+        selectedOccurrenceIds: [weakId],
+        expectedSnapshotToken: preview.snapshotToken,
+        canonicalText: "banco",
+        note: "",
+      });
+
+      expect(split.source.lexicalUnit.status).toBe("ready");
+      expect(split.created.lexicalUnit.status).toBe("inbox");
+    });
+
+    it("invalidates an existing Ready item when backup restore changes its effective study content", async () => {
+      const weak = await repository.capture({
+        ...draft("tener ganas de", "tener ganas de"),
+        capturedAt: "2026-09-19T11:00:00Z",
+      });
+      const withNote = await repository.update(weak.lexicalUnit.id, {
+        canonicalText: "tener ganas de",
+        language: "es",
+        note: "feel like",
+        occurrenceId: weak.occurrences[0]!.id,
+        surfaceText: "tener ganas de",
+        context: "tener ganas de",
+      });
+      await repository.setStatus(withNote.lexicalUnit.id, "ready");
+      const ready = (await repository.list()).find(
+        (item) => item.lexicalUnit.id === withNote.lexicalUnit.id,
+      )!;
+
+      const backup: BackupDocument = {
+        version: 4,
+        exportedAt: "2026-09-20T10:00:00Z",
+        settings: DEFAULT_SETTINGS,
+        items: [{
+          lexicalUnit: {
+            ...ready.lexicalUnit,
+            status: "ready",
+            updatedAt: "2099-09-20T10:00:00Z",
+          },
+          occurrences: [
+            ...ready.occurrences,
+            {
+              id: "restore-stronger-occurrence",
+              lexicalUnitId: ready.lexicalUnit.id,
+              surfaceText: "tener ganas de",
+              normalizedSurfaceText: "tener ganas de",
+              context: "Hoy tener ganas de salir a caminar por el centro es normal.",
+              source: {
+                kind: "web",
+                adapter: "generic-web",
+                url: "https://example.com/article",
+                title: "Example",
+              },
+              capturedAt: "2026-09-19T10:00:00Z",
+            },
+          ],
+        }],
+        exportBindings: [],
+      };
+
+      await repository.restoreBackup(backup);
+      const restored = (await repository.list()).find(
+        (item) => item.lexicalUnit.id === ready.lexicalUnit.id,
+      )!;
+      expect(restored.lexicalUnit.status).toBe("inbox");
+    });
+  });
+
 });
