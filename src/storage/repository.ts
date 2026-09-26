@@ -926,10 +926,11 @@ export class CaptureRepository {
         const survivingNoteId =
           effectiveAnkiNoteId(survivor.lexicalUnit, survivor.exportBinding)
           ?? effectiveAnkiNoteId(removed.lexicalUnit, removed.exportBinding);
-        const bindingToKeep = survivor.exportBinding
-          ?? (removed.exportBinding
-            ? { ...removed.exportBinding, lexicalUnitId: survivingLexicalUnitId }
-            : undefined);
+        // A binding is identity/routing state owned by its lexical unit.
+        // Survivor priority already guarantees that an exported binding wins over
+        // an unexported/legacy side. Never transplant a binding from the unit
+        // being removed onto a different surviving lexical identity.
+        const bindingToKeep = survivor.exportBinding;
 
         const mergedUnit: LexicalUnit = {
           ...survivor.lexicalUnit,
