@@ -1,5 +1,8 @@
 # ACCP-003: Canonicalization workflow
 
+> **Superseded identity semantics:** This plan records the ACCP-003 behavior as originally implemented. ACCP-004 / ADR 0012 supersedes canonical-collision consolidation: canonical edits now preserve the current lexical-unit ID, same-canonical units remain separate, and consolidation happens only through the explicit Merge operation.
+
+
 ## Goal
 
 Turn canonical-vs-observed support into an explicit review workflow instead of exposing it as raw editable fields.
