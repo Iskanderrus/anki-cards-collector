@@ -387,6 +387,7 @@ const server = createServer((request, response) => {
           <p id="policy-upgrade-first">policy evidence appears in a controlled sentence with enough surrounding words.</p>
           <p id="policy-upgrade-strong">Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.</p>
           <p id="policy-weak-chunk">weak chunk</p>
+          <p id="learning-value-override">The learning override phrase appears in a controlled sentence with enough surrounding words.</p>
           <p id="policy-unbounded-sentence">although rain continues we still walk outside every morning</p>
           <p id="assist-estar-base">Quiero estar en casa para estudiar con calma esta tarde.</p>
           <p id="assist-estoy">Hoy estoy en casa y tengo bastante tiempo para estudiar español.</p>
@@ -3336,6 +3337,11 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   remediationCard = await cardForTerm(panel, "recapture approval");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Learning value[\s\S]*Study[\s\S]*First useful evidence supports one review card/i,
+    "ACCP007_FIRST_USEFUL_EVIDENCE: first useful material should recommend Study without approving Ready.",
+  );
   await remediationCard.getByRole("button", { name: "Ready" }).click();
   await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   await ensureQueue(panel);
@@ -3355,6 +3361,11 @@ try {
     await remediationCard.locator(".occurrence-selection").innerText(),
     /Selected occurrence 2 of 2/,
     "Equal-quality equivalent evidence should use the deterministic newer-occurrence tie break without changing study content.",
+  );
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Evidence only[\s\S]*adds evidence, but the current study card is unchanged/i,
+    "ACCP007_EQUIVALENT_REPEAT: equivalent evidence should not add study burden.",
   );
 
   markE2eStage("accp005-stronger-evidence-invalidates-ready");
@@ -3388,6 +3399,11 @@ try {
     false,
     "The changed strong proposal should require explicit re-approval.",
   );
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger selected context/i,
+    "ACCP007_BETTER_EVIDENCE: stronger selected evidence should explain the Improve recommendation.",
+  );
 
   markE2eStage("accp005-weak-context-fails-closed");
   await ensureQueue(panel);
@@ -3404,6 +3420,55 @@ try {
     await weakPolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
     true,
     "Weak chunk context must not silently become a production card.",
+  );
+  assert.match(
+    await weakPolicyCard.locator(".learning-value").innerText(),
+    /Archive for now[\s\S]*does not support a useful study card yet/i,
+    "ACCP007_WEAK_EVIDENCE: weak material should recommend Archive without automatically changing status.",
+  );
+  await weakPolicyCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp007-keyboard-human-override");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#learning-value-override", "learning override");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let learningOverrideCard = await cardForTerm(panel, "learning override");
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Learning value[\s\S]*Study/i,
+    "A first useful item should recommend Study.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("a");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "archived" }).waitFor();
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Study/i,
+    "Archiving is an explicit human override and must not rewrite the derived recommendation.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("i");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#learning-value-override", "learning override");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
+  learningOverrideCard = await cardForTerm(panel, "learning override");
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Evidence only/i,
+    "An equivalent repeat should recommend Evidence only while remaining overridable.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("r");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.equal(
+    await learningOverrideCard.locator(".learning-value").getByText("Evidence only", { exact: true }).count(),
+    1,
+    "Ready approval must not mutate the derived evidence-only recommendation.",
   );
 
   markE2eStage("accp005-sentence-without-target-fails-closed");
