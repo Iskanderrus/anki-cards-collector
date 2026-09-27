@@ -3954,11 +3954,11 @@ try {
   const accp024LoadFaultInstalled = await panel.evaluate(() => {
     const storageArea = chrome.storage.local;
     const originalGet = storageArea.get;
-    let injected = false;
+    let settingsReads = 0;
     try {
       storageArea.get = function (...args) {
-        if (!injected) {
-          injected = true;
+        settingsReads += 1;
+        if (settingsReads === 2) {
           storageArea.get = originalGet;
           return Promise.reject(new Error("Injected ACCP-024 post-commit settings refresh failure."));
         }
@@ -3972,7 +3972,7 @@ try {
   assert.equal(
     accp024LoadFaultInstalled,
     true,
-    "The E2E page must be able to inject exactly one post-commit loadSettings failure without a production hook.",
+    "The E2E page must be able to inject the refresh-phase loadSettings failure after the pre-commit durable-settings read, without a production hook.",
   );
 
   await panel.locator(".restore-preview").getByRole("button", { name: "Restore backup" }).click();
