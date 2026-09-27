@@ -221,7 +221,7 @@ try {
   card = await cardForTerm(panel, "policy evidence");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
   );
   assert.match(await card.locator(".card-head > .pill").innerText(), /inbox/i);
   assert.equal(await card.getByRole("button", { name: "Ready" }).isDisabled(), false);
@@ -233,7 +233,7 @@ try {
   card = await cardForTerm(panel, "policy evidence");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
   );
 
   // Weak material: recommendation is Archive for now, but no automatic Archive occurs.
