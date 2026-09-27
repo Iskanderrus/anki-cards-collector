@@ -3421,8 +3421,14 @@ try {
   const assistedId = await assistanceCard.getAttribute("data-card-id");
   const assistance = assistanceCard.locator(".canonical-assistance");
   const suggestCanonical = assistance.getByRole("button", { name: "Suggest canonical form" });
-  await panel.waitForTimeout(50);
-  await suggestCanonical.press("Enter");
+  await suggestCanonical.waitFor();
+  await panel.waitForFunction(() => {
+    const button = [...document.querySelectorAll(".canonical-assistance button")]
+      .find((candidate) => candidate.textContent?.trim() === "Suggest canonical form");
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await suggestCanonical.focus();
+  await panel.keyboard.press("Enter");
   await assistance.getByText("Suggestion", { exact: true }).waitFor();
   await assistance.getByRole("status").filter({ hasText: /Suggestion available/i }).waitFor();
   assert.match(await assistance.innerText(), /estar/);
