@@ -371,6 +371,30 @@ describe("ACCP-006 corpus safety", () => {
       .toBe("tener");
   });
 
+  it("fails closed when the provider occurrence/context changed without a lexical timestamp change", async () => {
+    const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const occurrence = captured.occurrences[0]!;
+    const result = await requestCanonicalFormAssistance(localCanonicalFormProvider, {
+      lexicalUnitId: captured.lexicalUnit.id,
+      lexicalUnitUpdatedAt: captured.lexicalUnit.updatedAt,
+      language: captured.lexicalUnit.language,
+      observedForm: occurrence.surfaceText,
+      currentCanonical: captured.lexicalUnit.canonicalText,
+      context: occurrence.context,
+      occurrenceId: occurrence.id,
+    });
+    if (result.kind !== "suggestion") throw new Error("Expected one suggestion.");
+
+    await database.occurrences.update(occurrence.id, {
+      context: "Tengo hambre.",
+    });
+
+    await expect(
+      acceptCanonicalFormSuggestion(repository, result, result.suggestion),
+    ).rejects.toThrow(/stale|changed/i);
+    expect((await repository.list())[0]?.lexicalUnit.canonicalText).toBe("tengo");
+  });
+
   it("fails a stale suggestion closed after a newer manual canonical edit", async () => {
     const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
     const result = await requestCanonicalFormAssistance(localCanonicalFormProvider, {
