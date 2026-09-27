@@ -45,6 +45,12 @@ jobs:
           name: accp006-production-smoke
           path: artifacts/accp006/production-assistance.png
           if-no-files-found: error
+      - run: xvfb-run -a node tests/e2e/learning-value-production-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: accp007-production-smoke
+          path: artifacts/accp007/*.png
+          if-no-files-found: error
 
   package:
     needs: [check, browser]
