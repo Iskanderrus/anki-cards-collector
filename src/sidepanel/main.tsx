@@ -2025,6 +2025,11 @@ function App(): React.ReactElement {
       return target.closest(".canonical-assistance button, .canonical-assistance input") !== null;
     }
 
+    function isReviewActionControlTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.closest(".card-actions button") !== null;
+    }
+
     function focusItem(id: string): void {
       selectActiveId(id);
       requestAnimationFrame(() => {
@@ -2047,6 +2052,7 @@ function App(): React.ReactElement {
         || splitDialog !== null
         || isTypingTarget(event.target)
         || isAssistanceControlTarget(event.target)
+        || isReviewActionControlTarget(event.target)
       ) return;
 
       if (
