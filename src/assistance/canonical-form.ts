@@ -1,6 +1,5 @@
 import { normalizeIdentityText, normalizeLanguage, normalizeText } from "../core/normalize";
 
-declare const __COLLECTOR_E2E__: boolean;
 import type { CanonicalizationPreview, CaptureRepository } from "../storage/repository";
 
 export type CanonicalFormConfidence = "high" | "possible" | "ambiguous";
@@ -241,61 +240,6 @@ export const localCanonicalFormProvider: CanonicalFormProvider = {
     };
   },
 };
-
-function e2eSuggestion(
-  proposedCanonical: string,
-  language = "es",
-): CanonicalFormProviderResult {
-  return {
-    kind: "suggestions",
-    suggestions: [{
-      proposedCanonical,
-      language,
-      confidence: "high",
-      category: "deterministic-e2e-fixture",
-      evidenceLabel: "Deterministic browser-test fixture.",
-    }],
-  };
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-let e2eSupersedeRequests = 0;
-const e2eCanonicalFormProvider: CanonicalFormProvider = {
-  supports(language: string): boolean {
-    return localCanonicalFormProvider.supports(language);
-  },
-
-  async suggest(input: CanonicalFormProviderInput): Promise<CanonicalFormProviderResult> {
-    const observed = normalizeIdentityText(input.observedForm);
-    if (observed === "providerunavailable") {
-      throw new Error("Deterministic E2E provider failure.");
-    }
-    if (observed === "delayform") {
-      await delay(350);
-      return e2eSuggestion("delaylemma");
-    }
-    if (observed === "supersedeform") {
-      e2eSupersedeRequests += 1;
-      if (e2eSupersedeRequests === 1) {
-        await delay(350);
-        return e2eSuggestion("oldlemma");
-      }
-      return e2eSuggestion("newlemma");
-    }
-    return localCanonicalFormProvider.suggest(input);
-  },
-};
-
-const collectorE2eMode =
-  typeof __COLLECTOR_E2E__ !== "undefined" && __COLLECTOR_E2E__;
-
-export const canonicalFormProvider: CanonicalFormProvider = collectorE2eMode
-  ? e2eCanonicalFormProvider
-  : localCanonicalFormProvider;
-
 
 function e2eSuggestion(
   proposedCanonical: string,
