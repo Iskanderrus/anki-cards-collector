@@ -3023,7 +3023,7 @@ function App(): React.ReactElement {
                     <span className="pill">Advisory</span>
                   </div>
                   <div className="setting-help">
-                    Suggestions never rewrite observed evidence or merge lexical identities automatically.
+                    Provider output never rewrites observed evidence or merges lexical identities automatically.
                   </div>
 
                   {(canonicalAssistanceState.kind === "idle"
