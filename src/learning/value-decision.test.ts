@@ -171,7 +171,7 @@ describe("learning-value decision", () => {
         {
           id: "weak",
           surfaceText: "tener ganas de",
-          context: "Hoy puedo decir tener ganas de salir.",
+          context: "tener ganas de",
           minute: 0,
         },
         {
@@ -316,7 +316,7 @@ describe("learning-value decision", () => {
       [{
         id: "river",
         surfaceText: "banco",
-        context: "Nos sentamos junto al banco.",
+        context: "banco",
         minute: 1,
       }],
       { id: "unit-b" },
