@@ -57,7 +57,7 @@ ACCP-007 adds a separate derived decision above this card-content policy.
 The learning-value layer has four explicit outcomes:
 
 - **Study** — the current corpus supports one useful study item but does not justify an improvement/redundancy claim;
-- **Improve** — the ACCP-002-selected occurrence is strictly stronger than the best studyable alternative occurrence already persisted for that lexical unit;
+- **Improve** — the ACCP-002-selected occurrence is strictly stronger than the other independently studyable occurrence already persisted for that lexical unit;
 - **Evidence only** — removing the selected occurrence still leaves the same ACCP-005 effective study content, so equivalent evidence exists without extra study burden;
 - **Archive for now** — current ACCP-005 content is not studyable enough to recommend a card.
 
