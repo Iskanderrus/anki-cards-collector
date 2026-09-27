@@ -33,11 +33,13 @@ No new persistent recommendation or override state is required. Backup v4 and In
 
 `deriveLearningValueDecision()` is the authoritative ACCP-007 boundary.
 
-Inputs are local corpus state only. Event-level comparisons require the real semantic before-state. The focused review surface retains the last loaded `CollectedItem` snapshot when a learning-relevant corpus mutation is observed and compares that exact snapshot with the reloaded item.
+Inputs are the persisted local `CollectedItem` only. ACCP-007 is corpus-relative, not event-relative.
 
-`capturedAt` is source chronology, not ingestion order. ACCP-007 never removes the "newest" occurrence to fabricate a before-state, and UUID ordering is never used as mutation chronology.
+The current ACCP-002-selected occurrence is compared with a deterministic counterfactual corpus formed by removing that selected occurrence and deriving ACCP-005 again from the remaining persisted occurrences. This asks whether the current best evidence is equivalent to, stronger than, or merely different from the best alternative evidence already present in the same lexical unit.
 
-If no trustworthy before-state exists (for example, a cold/reopened side panel), ACCP-007 describes only the current snapshot: usable content is `Study`, non-studyable content is `Archive for now`. It does not claim `Evidence only` or `Improve` without an actual comparison boundary.
+`capturedAt` remains source chronology and participates only in ACCP-002's documented deterministic selection tie-break. ACCP-007 never interprets it, UUID order, or side-panel session state as ingestion/mutation order.
+
+Because the recommendation is computed from the same persisted corpus snapshot on every load, closing/reopening the side panel or restarting the browser cannot change the result unless learning-relevant persisted corpus state changed.
 
 The function does not use:
 
@@ -54,21 +56,19 @@ The current accepted corpus state is authoritative. Unaccepted ACCP-006 suggesti
 
 | Condition | Recommendation | Reason semantics |
 | --- | --- | --- |
-| current ACCP-005 proposal is non-recommended | **Archive for now** | current evidence does not support a useful study card |
-| useful current snapshot with no trustworthy before-state | **Study** | current evidence supports one useful study card |
-| explicit empty before-state → first usable evidence | **Study** | first useful evidence supports one review card |
-| previous state was non-studyable and current state is usable | **Improve** | new evidence/user input makes useful study content possible |
-| previous and current ACCP-005 effective study signatures are equal | **Evidence only** | evidence is retained but current study content is unchanged |
-| selected occurrence changed and ACCP-002 quality strictly increased | **Improve** | stronger selected context materially improves the proposal |
-| usable study content changed without a proven quality improvement | **Study** | the card remains useful but changed and requires review |
+| current ACCP-005 proposal is non-recommended | **Archive for now** | current corpus does not support a useful study card |
+| current proposal is useful and has no studyable alternative occurrence | **Study** | current corpus supports one useful study card |
+| removing the selected occurrence leaves the same ACCP-005 effective signature | **Evidence only** | equivalent persisted evidence already supports the same study card |
+| selected occurrence has strictly higher ACCP-002 quality than the best studyable alternative | **Improve** | the selected evidence is materially stronger than the best alternative in this corpus |
+| alternative study content exists but is different without a strict quality improvement | **Study** | useful study content exists, but no deterministic improvement claim is justified |
 
 Occurrence count by itself never creates a new card or an Improve recommendation.
 
-The fallback `Study` rule is deliberate: a changed payload is not labelled “Improve” unless the local deterministic evidence proves improvement.
+The fallback `Study` rule is deliberate: different content is not labelled “Improve” unless the current selected occurrence is strictly stronger than the best studyable alternative.
 
 ## Repeated evidence
 
-An exact/equivalent repeat stays attached to the same lexical unit. If the ACCP-005 effective signature is unchanged, ACCP-007 returns `evidence-only`.
+An exact/equivalent repeat stays attached to the same lexical unit. If removing the selected occurrence leaves an alternative corpus with the same ACCP-005 effective signature, ACCP-007 returns `evidence-only`.
 
 That outcome:
 
@@ -80,13 +80,13 @@ That outcome:
 
 ## Better evidence
 
-When newly captured evidence becomes the ACCP-002 selected occurrence, changes effective ACCP-005 study content, and has strictly higher occurrence quality, the recommendation is `improve`.
+When the current ACCP-002 selected occurrence has strictly higher quality than the best studyable alternative occurrence in the persisted corpus, the recommendation is `improve`.
 
 Existing ACCP-005 invalidation remains authoritative: if the effective study signature changed, a previously Ready item returns to Inbox and must be explicitly approved again.
 
 ## Learner notes and other mutations
 
-For an explicit old-vs-new comparison, a learner-note change that turns a previously non-recommended ACCP-005 proposal into usable study content resolves to `improve`.
+Learner notes are part of current persisted corpus state. They may make ACCP-005 study content usable, but ACCP-007 does not infer note history or call a note change an improvement merely because a prior value is no longer available.
 
 ACCP-007 does not invent semantic value for the note. It observes only the resulting ACCP-005 state.
 
@@ -148,29 +148,28 @@ new schema:     none
 backup change:  none
 ```
 
-Equivalent restored corpus state derives the same snapshot decision and reason. Mutation explanations are intentionally ephemeral: a side-panel reload keeps the actual pre-mutation item in memory only while that review session remains open. Workflow-only status changes do not replace that baseline; a later learning-relevant mutation does.
+Equivalent restored corpus state derives the same decision and reason. The classifier has no side-panel/session baseline: the same persisted lexical unit, notes, and occurrence set produce the same recommendation after side-panel/browser recreation. Workflow-only status changes do not affect the recommendation.
 
 ## Tests
 
 Coverage includes:
 
-- cold/current useful word/chunk/sentence;
-- explicit empty before-state → first useful evidence;
+- useful word/chunk/sentence corpus;
 - weak ACCP-005 content;
+- learner-note-supported current corpus;
 - exact/equivalent repeat;
-- occurrence-count-only repeat;
-- stronger selected evidence;
-- weak-to-usable old/new comparison through learner note;
-- Ready + equivalent repeat;
+- Evidence only stability after side-panel/browser recreation;
+- stronger selected evidence against the best studyable alternative;
+- delayed staged import whose stronger evidence has an older `capturedAt`;
+- same-timestamp multi-evidence staged commit without UUID-as-mutation-order behavior;
+- Study fallback when the alternative evidence is not independently studyable;
+- equal-quality but materially different evidence remaining Study;
+- workflow-status independence;
 - stable lexical/Anki identity;
 - same-canonical independent identities;
 - split-style independent occurrence subsets;
 - merge-style survivor recomputation;
 - deterministic restore-equivalent state;
-- cross-identity comparison rejection, including non-studyable current content;
-- delayed staged import whose stronger evidence has an older `capturedAt`;
-- same-timestamp multi-evidence staged commit without UUID-as-chronology behavior;
-- status-only reload preserving the last real mutation baseline;
 - focused-review Study / Evidence only / Improve / Archive UI;
 - keyboard Study → Archive and Evidence only → Ready overrides;
 - existing ACCP-005 Ready invalidation and export parity regressions.
