@@ -4,7 +4,17 @@ import { generateBrandIcons } from "./generate-brand-icons.mjs";
 
 const e2e = process.env.COLLECTOR_E2E === "1";
 const release = process.env.COLLECTOR_RELEASE === "1";
+if (e2e && release) {
+  throw new Error("COLLECTOR_E2E and COLLECTOR_RELEASE are mutually exclusive build modes.");
+}
+
+const productionRuntime = !e2e;
+const nodeEnv = productionRuntime ? "production" : "development";
 const sourcemap = release ? false : true;
+const define = {
+  __COLLECTOR_E2E__: JSON.stringify(e2e),
+  "process.env.NODE_ENV": JSON.stringify(nodeEnv),
+};
 
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
@@ -19,9 +29,7 @@ await Promise.all([
     target: "chrome120",
     sourcemap,
     minifySyntax: true,
-    define: {
-      __COLLECTOR_E2E__: JSON.stringify(e2e),
-    },
+    define,
   }),
   build({
     entryPoints: ["src/content.ts"],
@@ -31,9 +39,8 @@ await Promise.all([
     platform: "browser",
     target: "chrome120",
     sourcemap,
-    define: {
-      __COLLECTOR_E2E__: JSON.stringify(e2e),
-    },
+    minifySyntax: true,
+    define,
   }),
   build({
     entryPoints: ["src/sidepanel/main.tsx"],
@@ -43,9 +50,8 @@ await Promise.all([
     platform: "browser",
     target: "chrome120",
     sourcemap,
-    define: {
-      __COLLECTOR_E2E__: JSON.stringify(e2e),
-    },
+    minifySyntax: true,
+    define,
   }),
 ]);
 
@@ -64,5 +70,5 @@ await Promise.all([
   generateBrandIcons("dist/icons"),
 ]);
 
-const mode = e2e ? "E2E" : release ? "release" : "production";
-console.log(`Built ${mode} extension into dist/`);
+const mode = e2e ? "E2E/development" : release ? "release/production" : "production";
+console.log(`Built ${mode} extension (NODE_ENV=${nodeEnv}) into dist/`);
