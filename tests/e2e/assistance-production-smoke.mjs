@@ -207,7 +207,6 @@ try {
   console.log("ACCP006_PRODUCTION_SMOKE=PASS");
 } finally {
   await context?.close();
-  clearTimeout();
   await rm(userDataDir, { recursive: true, force: true });
   await new Promise((resolveClose) => server.close(resolveClose));
 }
