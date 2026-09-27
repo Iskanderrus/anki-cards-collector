@@ -33,7 +33,11 @@ No new persistent recommendation or override state is required. Backup v4 and In
 
 `deriveLearningValueDecision()` is the authoritative ACCP-007 boundary.
 
-Inputs are local corpus state only. For event-level comparisons it can also receive an explicit semantic before-state. Review without an explicit before-state derives the previous evidence boundary by removing the chronologically newest occurrence and recomputing ACCP-002/005 behavior.
+Inputs are local corpus state only. Event-level comparisons require the real semantic before-state. The focused review surface retains the last loaded `CollectedItem` snapshot when a learning-relevant corpus mutation is observed and compares that exact snapshot with the reloaded item.
+
+`capturedAt` is source chronology, not ingestion order. ACCP-007 never removes the "newest" occurrence to fabricate a before-state, and UUID ordering is never used as mutation chronology.
+
+If no trustworthy before-state exists (for example, a cold/reopened side panel), ACCP-007 describes only the current snapshot: usable content is `Study`, non-studyable content is `Archive for now`. It does not claim `Evidence only` or `Improve` without an actual comparison boundary.
 
 The function does not use:
 
@@ -51,7 +55,8 @@ The current accepted corpus state is authoritative. Unaccepted ACCP-006 suggesti
 | Condition | Recommendation | Reason semantics |
 | --- | --- | --- |
 | current ACCP-005 proposal is non-recommended | **Archive for now** | current evidence does not support a useful study card |
-| first usable study evidence | **Study** | first useful evidence supports one review card |
+| useful current snapshot with no trustworthy before-state | **Study** | current evidence supports one useful study card |
+| explicit empty before-state → first usable evidence | **Study** | first useful evidence supports one review card |
 | previous state was non-studyable and current state is usable | **Improve** | new evidence/user input makes useful study content possible |
 | previous and current ACCP-005 effective study signatures are equal | **Evidence only** | evidence is retained but current study content is unchanged |
 | selected occurrence changed and ACCP-002 quality strictly increased | **Improve** | stronger selected context materially improves the proposal |
@@ -143,13 +148,14 @@ new schema:     none
 backup change:  none
 ```
 
-Equivalent restored corpus state must derive the same decision and reason.
+Equivalent restored corpus state derives the same snapshot decision and reason. Mutation explanations are intentionally ephemeral: a side-panel reload keeps the actual pre-mutation item in memory only while that review session remains open. Workflow-only status changes do not replace that baseline; a later learning-relevant mutation does.
 
 ## Tests
 
 Coverage includes:
 
-- first useful word/chunk/sentence;
+- cold/current useful word/chunk/sentence;
+- explicit empty before-state → first useful evidence;
 - weak ACCP-005 content;
 - exact/equivalent repeat;
 - occurrence-count-only repeat;
@@ -161,7 +167,10 @@ Coverage includes:
 - split-style independent occurrence subsets;
 - merge-style survivor recomputation;
 - deterministic restore-equivalent state;
-- cross-identity comparison rejection;
+- cross-identity comparison rejection, including non-studyable current content;
+- delayed staged import whose stronger evidence has an older `capturedAt`;
+- same-timestamp multi-evidence staged commit without UUID-as-chronology behavior;
+- status-only reload preserving the last real mutation baseline;
 - focused-review Study / Evidence only / Improve / Archive UI;
 - keyboard Study → Archive and Evidence only → Ready overrides;
 - existing ACCP-005 Ready invalidation and export parity regressions.
