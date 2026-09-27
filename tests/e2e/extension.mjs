@@ -3641,7 +3641,7 @@ try {
   await assistancePanel.getByRole("button", { name: "Check again" }).click();
   await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
   assert.match(await assistancePanel.innerText(), /newlemma/);
-  await panel.waitForTimeout(500);
+  await panel.waitForTimeout(1300);
   assert.doesNotMatch(
     await assistancePanel.innerText(),
     /oldlemma/,
