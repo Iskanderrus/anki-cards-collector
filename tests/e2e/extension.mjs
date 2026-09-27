@@ -3870,6 +3870,406 @@ try {
     "The first request must not overwrite the second request when it returns late.",
   );
 
+  markE2eStage("accp024-postcommit-restore-recovery");
+  await openSettings(panel);
+  const accp024BaselineSettings = await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings;
+  });
+  assert.ok(accp024BaselineSettings, "ACCP-024 requires persisted baseline settings.");
+
+  const accp024ProfileId = "accp024-profile-new";
+  const accp024UnitId = "accp024-restored-unit";
+  const accp024OccurrenceId = "accp024-restored-occurrence";
+  assert.equal(
+    accp024BaselineSettings.exportProfiles.some((profile) => profile.id === accp024ProfileId),
+    false,
+    "The restored profile must be introduced by the backup, not pre-exist locally.",
+  );
+
+  const accp024RestoredProfile = {
+    id: accp024ProfileId,
+    name: "ACCP-024 restored profile",
+    language: "es",
+    deckName: "ACCP-024 Restored Deck",
+    modelName: "Collector Basic",
+    mode: "collector-managed",
+  };
+  const accp024Backup = {
+    version: 4,
+    exportedAt: "2026-09-27T20:00:00.000Z",
+    items: [{
+      lexicalUnit: {
+        id: accp024UnitId,
+        contentKey: "es::accp24restore",
+        canonicalText: "accp24restore",
+        normalizedCanonicalText: "accp24restore",
+        language: "es",
+        note: "ACCP-024 committed restore fixture",
+        status: "ready",
+        createdAt: "2026-09-27T19:00:00.000Z",
+        updatedAt: "2026-09-27T20:00:00.000Z",
+      },
+      occurrences: [{
+        id: accp024OccurrenceId,
+        lexicalUnitId: accp024UnitId,
+        surfaceText: "accp24restore",
+        normalizedSurfaceText: "accp24restore",
+        context: "The ACCP-024 committed restore fixture survives a failed interface refresh.",
+        source: {
+          kind: "web",
+          adapter: "generic-web",
+          url: "https://example.com/accp024",
+          title: "ACCP-024 fixture",
+        },
+        capturedAt: "2026-09-27T19:30:00.000Z",
+      }],
+    }],
+    exportBindings: [{
+      lexicalUnitId: accp024UnitId,
+      profileId: accp024ProfileId,
+      state: "reserved",
+      updatedAt: "2026-09-27T20:00:00.000Z",
+    }],
+    settings: {
+      ...accp024BaselineSettings,
+      exportProfiles: [
+        ...accp024BaselineSettings.exportProfiles,
+        accp024RestoredProfile,
+      ],
+    },
+  };
+
+  const restoreInput = panel.locator("input[data-restore-backup-input]");
+  await restoreInput.setInputFiles({
+    name: "accp024-postcommit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(accp024Backup)),
+  });
+  await panel.locator(".notice", {
+    hasText: "Backup validated. Review the dry-run counts before restoring.",
+  }).waitFor();
+  await panel.locator(".restore-preview").getByRole("button", { name: "Restore backup" }).waitFor();
+
+  const accp024LoadFaultInstalled = await panel.evaluate(() => {
+    const storageArea = chrome.storage.local;
+    const originalGet = storageArea.get;
+    let injected = false;
+    try {
+      storageArea.get = function (...args) {
+        if (!injected) {
+          injected = true;
+          storageArea.get = originalGet;
+          return Promise.reject(new Error("Injected ACCP-024 post-commit settings refresh failure."));
+        }
+        return originalGet.apply(storageArea, args);
+      };
+      return storageArea.get !== originalGet;
+    } catch {
+      return false;
+    }
+  });
+  assert.equal(
+    accp024LoadFaultInstalled,
+    true,
+    "The E2E page must be able to inject exactly one post-commit loadSettings failure without a production hook.",
+  );
+
+  await panel.locator(".restore-preview").getByRole("button", { name: "Restore backup" }).click();
+  await panel.locator(".notice", {
+    hasText: "Restore completed. Collector could not refresh the interface. Your restored data is saved. Reload the extension or side panel to continue.",
+  }).waitFor();
+  await panel.waitForFunction(() =>
+    document.activeElement instanceof HTMLInputElement
+    && document.activeElement.matches("[data-restore-backup-input]")
+  );
+
+  const accp024CommittedState = await panel.evaluate(async ({ unitId, occurrenceId, profileId }) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const databaseState = await new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open("anki-cards-collector");
+      openRequest.onerror = () => reject(openRequest.error);
+      openRequest.onsuccess = () => {
+        const db = openRequest.result;
+        const transaction = db.transaction(
+          ["lexicalUnits", "occurrences", "exportBindings"],
+          "readonly",
+        );
+        const unitRequest = transaction.objectStore("lexicalUnits").get(unitId);
+        const occurrenceRequest = transaction.objectStore("occurrences").get(occurrenceId);
+        const bindingRequest = transaction.objectStore("exportBindings").get(unitId);
+        transaction.oncomplete = () => {
+          const result = {
+            unit: unitRequest.result ?? null,
+            occurrence: occurrenceRequest.result ?? null,
+            binding: bindingRequest.result ?? null,
+          };
+          db.close();
+          resolve(result);
+        };
+        transaction.onerror = () => {
+          const error = transaction.error;
+          db.close();
+          reject(error);
+        };
+      };
+    });
+    return {
+      settings: stored.collectorSettings,
+      databaseState,
+      profileId,
+    };
+  }, {
+    unitId: accp024UnitId,
+    occurrenceId: accp024OccurrenceId,
+    profileId: accp024ProfileId,
+  });
+
+  assert.equal(
+    accp024CommittedState.settings.exportProfiles.some(
+      (profile) => profile.id === accp024ProfileId,
+    ),
+    true,
+    "Post-commit refresh failure must not compensate the restored profile out of settings.",
+  );
+  assert.equal(accp024CommittedState.databaseState.unit?.id, accp024UnitId);
+  assert.equal(accp024CommittedState.databaseState.occurrence?.id, accp024OccurrenceId);
+  assert.equal(
+    accp024CommittedState.databaseState.binding?.profileId,
+    accp024ProfileId,
+    "The committed export binding must retain the backup-introduced profile id.",
+  );
+
+  const accp024WarningA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    accp024WarningA11y.violations.length,
+    0,
+    "ACCP-024 committed-success warning accessibility violations:\n"
+      + JSON.stringify(accp024WarningA11y.violations, null, 2),
+  );
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  await (await queueRowForTerm(panel, "accp24restore")).waitFor();
+  assert.equal(
+    await panel.getByRole("button", { name: "Restore backup" }).count(),
+    0,
+    "Reload recovery must not require a second restore.",
+  );
+
+  const accp024ReloadedCoherence = await panel.evaluate(async ({ unitId, profileId }) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const binding = await new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open("anki-cards-collector");
+      openRequest.onerror = () => reject(openRequest.error);
+      openRequest.onsuccess = () => {
+        const db = openRequest.result;
+        const transaction = db.transaction("exportBindings", "readonly");
+        const request = transaction.objectStore("exportBindings").get(unitId);
+        transaction.oncomplete = () => {
+          const result = request.result ?? null;
+          db.close();
+          resolve(result);
+        };
+        transaction.onerror = () => {
+          const error = transaction.error;
+          db.close();
+          reject(error);
+        };
+      };
+    });
+    return {
+      hasProfile: stored.collectorSettings.exportProfiles.some(
+        (profile) => profile.id === profileId,
+      ),
+      binding,
+    };
+  }, { unitId: accp024UnitId, profileId: accp024ProfileId });
+  assert.equal(accp024ReloadedCoherence.hasProfile, true);
+  assert.equal(accp024ReloadedCoherence.binding?.profileId, accp024ProfileId);
+
+  markE2eStage("accp024-precommit-restore-compensation");
+  await openSettings(panel);
+  const accp024PrecommitBaseSettings = await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings;
+  });
+  const accp024PrecommitProfileId = "accp024-precommit-profile";
+  const accp024PrecommitUnitId = "accp024-precommit-unit";
+  const accp024PrecommitOccurrenceId = "accp024-precommit-occurrence";
+  const accp024PrecommitBackup = {
+    version: 4,
+    exportedAt: "2026-09-27T21:00:00.000Z",
+    items: [{
+      lexicalUnit: {
+        id: accp024PrecommitUnitId,
+        contentKey: "es::accp24precommit",
+        canonicalText: "accp24precommit",
+        normalizedCanonicalText: "accp24precommit",
+        language: "es",
+        note: "",
+        status: "ready",
+        createdAt: "2026-09-27T20:30:00.000Z",
+        updatedAt: "2026-09-27T21:00:00.000Z",
+      },
+      occurrences: [{
+        id: accp024PrecommitOccurrenceId,
+        lexicalUnitId: accp024PrecommitUnitId,
+        surfaceText: "accp24precommit",
+        normalizedSurfaceText: "accp24precommit",
+        context: "The ACCP-024 pre-commit fixture must remain absent when repository restore rejects.",
+        source: {
+          kind: "web",
+          adapter: "generic-web",
+          url: "https://example.com/accp024-precommit",
+          title: "ACCP-024 precommit fixture",
+        },
+        capturedAt: "2026-09-27T20:40:00.000Z",
+      }],
+    }],
+    exportBindings: [{
+      lexicalUnitId: accp024PrecommitUnitId,
+      profileId: accp024PrecommitProfileId,
+      state: "reserved",
+      updatedAt: "2026-09-27T21:00:00.000Z",
+    }],
+    settings: {
+      ...accp024PrecommitBaseSettings,
+      exportProfiles: [
+        ...accp024PrecommitBaseSettings.exportProfiles,
+        {
+          id: accp024PrecommitProfileId,
+          name: "ACCP-024 precommit profile",
+          language: "es",
+          deckName: "ACCP-024 Precommit Deck",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+    },
+  };
+
+  await restoreInput.setInputFiles({
+    name: "accp024-precommit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(accp024PrecommitBackup)),
+  });
+  await panel.locator(".notice", {
+    hasText: "Backup validated. Review the dry-run counts before restoring.",
+  }).waitFor();
+
+  await panel.evaluate(async ({ unitId }) => {
+    await new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open("anki-cards-collector");
+      openRequest.onerror = () => reject(openRequest.error);
+      openRequest.onsuccess = () => {
+        const db = openRequest.result;
+        const transaction = db.transaction("exportBindings", "readwrite");
+        transaction.objectStore("exportBindings").put({
+          lexicalUnitId: unitId,
+          profileId: "accp024-conflicting-local-profile",
+          state: "reserved",
+          updatedAt: "2026-09-27T21:00:01.000Z",
+        });
+        transaction.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        transaction.onerror = () => {
+          const error = transaction.error;
+          db.close();
+          reject(error);
+        };
+      };
+    });
+  }, { unitId: accp024PrecommitUnitId });
+
+  await panel.locator(".restore-preview").getByRole("button", { name: "Restore backup" }).click();
+  await panel.locator(".notice.error", {
+    hasText: "Restore was not applied. Your existing Collector data and settings are unchanged.",
+  }).waitFor();
+
+  const accp024PrecommitFailureState = await panel.evaluate(async ({ unitId, occurrenceId, profileId }) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const databaseState = await new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open("anki-cards-collector");
+      openRequest.onerror = () => reject(openRequest.error);
+      openRequest.onsuccess = () => {
+        const db = openRequest.result;
+        const transaction = db.transaction(["lexicalUnits", "occurrences"], "readonly");
+        const unitRequest = transaction.objectStore("lexicalUnits").get(unitId);
+        const occurrenceRequest = transaction.objectStore("occurrences").get(occurrenceId);
+        transaction.oncomplete = () => {
+          const result = {
+            unit: unitRequest.result ?? null,
+            occurrence: occurrenceRequest.result ?? null,
+          };
+          db.close();
+          resolve(result);
+        };
+        transaction.onerror = () => {
+          const error = transaction.error;
+          db.close();
+          reject(error);
+        };
+      };
+    });
+    return {
+      hasBackupOnlyProfile: stored.collectorSettings.exportProfiles.some(
+        (profile) => profile.id === profileId,
+      ),
+      databaseState,
+    };
+  }, {
+    unitId: accp024PrecommitUnitId,
+    occurrenceId: accp024PrecommitOccurrenceId,
+    profileId: accp024PrecommitProfileId,
+  });
+  assert.equal(
+    accp024PrecommitFailureState.hasBackupOnlyProfile,
+    false,
+    "A pre-commit repository failure must compensate the preparatory backup-only profile.",
+  );
+  assert.equal(
+    accp024PrecommitFailureState.databaseState.unit,
+    null,
+    "A pre-commit repository failure must not add the backup lexical unit.",
+  );
+  assert.equal(
+    accp024PrecommitFailureState.databaseState.occurrence,
+    null,
+    "A pre-commit repository failure must not add the backup occurrence.",
+  );
+
+  await panel.evaluate(async ({ unitId }) => {
+    await new Promise((resolve, reject) => {
+      const openRequest = indexedDB.open("anki-cards-collector");
+      openRequest.onerror = () => reject(openRequest.error);
+      openRequest.onsuccess = () => {
+        const db = openRequest.result;
+        const transaction = db.transaction("exportBindings", "readwrite");
+        transaction.objectStore("exportBindings").delete(unitId);
+        transaction.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        transaction.onerror = () => {
+          const error = transaction.error;
+          db.close();
+          reject(error);
+        };
+      };
+    });
+  }, { unitId: accp024PrecommitUnitId });
+
+  await panel.locator(".restore-preview").getByRole("button", { name: "Restore backup" }).click();
+  await panel.locator(".notice", { hasText: "Backup restored: 1 items added" }).waitFor();
+  await ensureQueue(panel);
+  await (await queueRowForTerm(panel, "accp24precommit")).waitFor();
+
   markE2eStage("complete");
   console.log("Browser extension capture, compact queue/detail, canonicalization, canonical-form assistance, keyboard, accessibility, and permission checks passed.");
 } finally {
