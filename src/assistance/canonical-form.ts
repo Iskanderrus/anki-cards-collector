@@ -45,6 +45,7 @@ export interface CanonicalFormRequestSnapshot {
   observedForm: string;
   currentCanonical: string;
   occurrenceId?: string;
+  context?: string;
 }
 
 export type CanonicalFormAssistanceResult =
@@ -82,6 +83,9 @@ const MAX_PROVIDER_CONTEXT_CHARS = 320;
 
 function requestSnapshot(input: CanonicalFormAssistanceInput): CanonicalFormRequestSnapshot {
   const language = normalizeLanguage(input.language);
+  const context = input.context === undefined
+    ? undefined
+    : normalizeText(input.context).slice(0, MAX_PROVIDER_CONTEXT_CHARS);
   return {
     lexicalUnitId: input.lexicalUnitId,
     lexicalUnitUpdatedAt: input.lexicalUnitUpdatedAt,
@@ -89,22 +93,19 @@ function requestSnapshot(input: CanonicalFormAssistanceInput): CanonicalFormRequ
     observedForm: normalizeText(input.observedForm),
     currentCanonical: normalizeText(input.currentCanonical),
     ...(input.occurrenceId ? { occurrenceId: input.occurrenceId } : {}),
+    ...(context ? { context } : {}),
   };
 }
 
 function providerInput(
-  input: CanonicalFormAssistanceInput,
+  _input: CanonicalFormAssistanceInput,
   snapshot: CanonicalFormRequestSnapshot,
 ): CanonicalFormProviderInput {
-  const context = input.context === undefined
-    ? undefined
-    : normalizeText(input.context).slice(0, MAX_PROVIDER_CONTEXT_CHARS);
-
   return {
     language: snapshot.language,
     observedForm: snapshot.observedForm,
     currentCanonical: snapshot.currentCanonical,
-    ...(context ? { context } : {}),
+    ...(snapshot.context ? { context: snapshot.context } : {}),
   };
 }
 
@@ -334,9 +335,19 @@ export async function acceptCanonicalFormSuggestion(
   const current = (await repository.list()).find(
     (item) => item.lexicalUnit.id === snapshot.lexicalUnitId,
   );
+  const currentOccurrence = snapshot.occurrenceId
+    ? current?.occurrences.find((occurrence) => occurrence.id === snapshot.occurrenceId)
+    : undefined;
+  const occurrenceChanged = snapshot.occurrenceId !== undefined && (
+    !currentOccurrence
+    || normalizeText(currentOccurrence.surfaceText) !== snapshot.observedForm
+    || normalizeText(currentOccurrence.context).slice(0, MAX_PROVIDER_CONTEXT_CHARS)
+      !== (snapshot.context ?? "")
+  );
   if (
     !current
     || current.lexicalUnit.updatedAt !== snapshot.lexicalUnitUpdatedAt
+    || occurrenceChanged
     || !sameCanonicalState(
       current.lexicalUnit.canonicalText,
       current.lexicalUnit.language,
