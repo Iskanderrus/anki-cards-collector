@@ -145,7 +145,7 @@ existing export pipeline
 
 The decision boundary consumes only local accepted persisted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm.
 
-For a studyable item, ACCP-007 removes the current ACCP-002-selected occurrence to form a deterministic counterfactual corpus and derives ACCP-005 again. Equivalent effective study content means `evidence-only`; a strictly higher selected-occurrence quality than the best studyable alternative means `improve`; otherwise the useful corpus remains `study`. Non-studyable content is `archive`.
+For a studyable item, ACCP-007 removes the current ACCP-002-selected occurrence to form a deterministic counterfactual corpus and derives ACCP-005 again. Equivalent effective study content means `evidence-only`; a strictly higher selected-occurrence quality than the other studyable evidence means `improve`; otherwise the useful corpus remains `study`. Non-studyable content is `archive`.
 
 This boundary deliberately does not derive mutation order from `Occurrence.capturedAt`, occurrence UUIDs, or side-panel session memory. `capturedAt` may still participate in ACCP-002's documented tie-break because it is persisted source chronology, but ACCP-007 never treats it as insertion order. Staged evidence may be imported long after its source timestamp, and several candidates may legitimately share one scan timestamp.
 
