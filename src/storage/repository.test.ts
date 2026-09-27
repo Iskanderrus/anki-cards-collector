@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackupDocument } from "../backup/format";
 import { DEFAULT_SETTINGS } from "../settings";
 import type { CaptureDraft } from "../core/types";
+import { deriveLearningValueDecision } from "../learning/value-decision";
 import { CollectorDatabase } from "./database";
 import { CaptureRepository } from "./repository";
 
@@ -1389,6 +1390,66 @@ describe("CaptureRepository", () => {
         (item) => item.lexicalUnit.id === ready.lexicalUnit.id,
       )!;
       expect(restored.lexicalUnit.status).toBe("inbox");
+    });
+  });
+
+  it("derives split learning value independently from each resulting identity", async () => {
+    const strongDraft = draft(
+      "banco",
+      "El banco aprobó el préstamo para nuestra casa después de revisar todos los datos.",
+    );
+    strongDraft.capturedAt = "2026-09-27T10:00:00.000Z";
+    const captured = await repository.capture(strongDraft);
+
+    const weakDraft = draft("banco", "banco");
+    weakDraft.capturedAt = "2026-09-27T10:01:00.000Z";
+    const withWeakEvidence = await repository.capture(weakDraft);
+    const weakOccurrenceId = withWeakEvidence.occurrences.find(
+      (occurrence) => occurrence.context === "banco",
+    )!.id;
+
+    const preview = await repository.previewSplit(captured.lexicalUnit.id, [weakOccurrenceId]);
+    const split = await repository.splitLexicalUnit({
+      sourceId: captured.lexicalUnit.id,
+      selectedOccurrenceIds: [weakOccurrenceId],
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    });
+
+    expect(split.source.lexicalUnit.status).toBe("inbox");
+    expect(split.created.lexicalUnit.status).toBe("inbox");
+    expect(split.source.lexicalUnit.id).not.toBe(split.created.lexicalUnit.id);
+    expect(deriveLearningValueDecision({ item: split.source }).kind).toBe("study");
+    expect(deriveLearningValueDecision({ item: split.created }).kind).toBe("archive");
+  });
+
+  it("recomputes learning value from the explicit merge survivor corpus", async () => {
+    const weakDraft = draft("banco", "banco");
+    weakDraft.capturedAt = "2026-09-27T11:00:00.000Z";
+    const weak = await repository.capture(weakDraft);
+
+    const strongDraft = draft(
+      "banca",
+      "La banca confirmó la transferencia después de revisar todos los datos del cliente.",
+    );
+    strongDraft.capturedAt = "2026-09-27T11:01:00.000Z";
+    const strong = await repository.capture(strongDraft);
+
+    const preview = await repository.previewMerge(weak.lexicalUnit.id, strong.lexicalUnit.id);
+    const merged = await repository.mergeLexicalUnits({
+      sourceId: weak.lexicalUnit.id,
+      targetId: strong.lexicalUnit.id,
+      expectedSnapshotToken: preview.snapshotToken,
+      canonicalText: "banco",
+      note: "",
+    });
+
+    expect(merged.item.lexicalUnit.status).toBe("inbox");
+    expect(merged.item.occurrences).toHaveLength(2);
+    expect(deriveLearningValueDecision({ item: merged.item })).toMatchObject({
+      kind: "improve",
+      reasonCode: "new-evidence-makes-studyable",
     });
   });
 
