@@ -1935,13 +1935,16 @@ function App(): React.ReactElement {
 
       if (combinedPreview.conflicts.length > 0) {
         setError(
-          `Backup has ${combinedPreview.conflicts.length} conflict${combinedPreview.conflicts.length === 1 ? "" : "s"} and cannot be restored yet.`,
+          `Restore was not applied. Your existing Collector data and settings are unchanged. Backup has ${combinedPreview.conflicts.length} conflict${combinedPreview.conflicts.length === 1 ? "" : "s"}; resolve them before restoring.`,
         );
       } else {
         setNotice("Backup validated. Review the dry-run counts before restoring.");
       }
     } catch (backupError) {
-      setError(backupError instanceof Error ? backupError.message : "Could not read backup.");
+      const detail = backupError instanceof Error ? backupError.message : "Could not read backup.";
+      setError(
+        `Restore was not applied. Your existing Collector data and settings are unchanged. Check the selected backup and try again. ${detail}`,
+      );
     } finally {
       setBusy(false);
     }
@@ -1963,7 +1966,9 @@ function App(): React.ReactElement {
       ? mergeSettingsForRestore(settings, pendingBackup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
       : { settings, conflicts: [] };
     if (settingsMerge.conflicts.length > 0) {
-      setError("Backup routing configuration conflicts with current local settings.");
+      setError(
+        "Restore was not applied. Your existing Collector data and settings are unchanged. Backup routing configuration conflicts with current local settings; review the routing settings before retrying.",
+      );
       setBusy(false);
       return;
     }
