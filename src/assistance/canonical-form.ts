@@ -280,7 +280,7 @@ class E2eCanonicalFormProvider implements CanonicalFormProvider {
     if (observed === "supersedeform") {
       this.supersedeRequests += 1;
       const first = this.supersedeRequests === 1;
-      await new Promise((resolve) => globalThis.setTimeout(resolve, first ? 350 : 25));
+      await new Promise((resolve) => globalThis.setTimeout(resolve, first ? 1200 : 25));
       return e2eSuggestion(first ? "oldlemma" : "newlemma");
     }
 
