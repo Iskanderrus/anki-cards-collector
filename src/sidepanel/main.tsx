@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createRoot } from "react-dom/client";
 import type { BackupDocument } from "../backup/format";
 import { parseBackup, serializeBackup } from "../backup/format";
+import { restoreAcrossCommitBoundary } from "../backup/restore-orchestration";
 import type {
   BatchCandidateEdit,
   BatchCaptureCandidate,
@@ -1968,18 +1969,55 @@ function App(): React.ReactElement {
     }
 
     const previousSettings = settings;
-    let settingsChanged = false;
 
     try {
-      if (pendingBackup.settings) {
-        await saveSettings(settingsMerge.settings);
-        settingsChanged = true;
+      const outcome = await restoreAcrossCommitBoundary({
+        prepareSettings: pendingBackup.settings
+          ? async () => {
+              await saveSettings(settingsMerge.settings);
+              setSettings(settingsMerge.settings);
+            }
+          : undefined,
+        restoreRepository: () => repository.restoreBackup(pendingBackup),
+        refreshCommittedState: async () => {
+          clearRestorePreview();
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLInputElement>("[data-restore-backup-input]")?.focus({
+              preventScroll: true,
+            });
+          });
+          await load();
+        },
+        compensateSettings: pendingBackup.settings
+          ? async () => {
+              await saveSettings(previousSettings);
+              setSettings(previousSettings);
+            }
+          : undefined,
+      });
+
+      if (outcome.kind === "precommit-failure") {
+        if (outcome.compensationError) {
+          setError(
+            "Restore was not applied. Your corpus data is unchanged, but Collector could not restore the previous routing settings. Reopen Settings before exporting.",
+          );
+          return;
+        }
+        const detail = outcome.error instanceof Error ? outcome.error.message : "";
+        setError(
+          `Restore was not applied. Your existing Collector data and settings are unchanged.${detail ? ` ${detail}` : ""}`,
+        );
+        return;
       }
 
-      const result = await repository.restoreBackup(pendingBackup);
-      clearRestorePreview();
-      await load();
+      if (outcome.kind === "committed-refresh-warning") {
+        setNotice(
+          "Restore completed. Collector could not refresh the interface. Your restored data is saved. Reload the extension or side panel to continue.",
+        );
+        return;
+      }
 
+      const result = outcome.result;
       const changed =
         result.lexicalUnitsAdded +
         result.lexicalUnitsUpdated +
@@ -1991,19 +2029,6 @@ function App(): React.ReactElement {
           ? "Backup is already fully represented in the local corpus."
           : `Backup restored: ${result.lexicalUnitsAdded} items added, ${result.lexicalUnitsUpdated} updated, ${result.occurrencesAdded} occurrences added.`,
       );
-    } catch (restoreError) {
-      if (settingsChanged) {
-        try {
-          await saveSettings(previousSettings);
-          setSettings(previousSettings);
-        } catch {
-          setError(
-            "Backup restore failed and Collector could not restore the previous routing settings. Reopen Settings before exporting.",
-          );
-          return;
-        }
-      }
-      setError(restoreError instanceof Error ? restoreError.message : "Backup restore failed.");
     } finally {
       setBusy(false);
     }
@@ -2816,6 +2841,7 @@ function App(): React.ReactElement {
               Restore JSON backup
               <input
                 type="file"
+                data-restore-backup-input
                 accept=".json,application/json"
                 disabled={busy}
                 onChange={(event) => {
