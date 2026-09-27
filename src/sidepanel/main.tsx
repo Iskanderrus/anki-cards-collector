@@ -54,6 +54,14 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { deriveLearningStudyContent } from "../learning/policy";
+import {
+  CanonicalFormRequestGate,
+  acceptCanonicalFormSuggestion,
+  createCanonicalFormProvider,
+  requestCanonicalFormAssistance,
+  type CanonicalFormAssistanceResult,
+  type CanonicalFormSuggestion,
+} from "../assistance/canonical-form";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
@@ -105,6 +113,17 @@ type ObservedFormsUiState =
   | { kind: "idle" }
   | { kind: "loading"; lexicalUnitId: string }
   | { kind: "live"; lexicalUnitId: string; groups: ObservedFormGroup[] }
+  | { kind: "error"; lexicalUnitId: string; error: string };
+
+type CanonicalAssistanceUiState =
+  | { kind: "idle" }
+  | { kind: "checking"; lexicalUnitId: string }
+  | {
+      kind: "resolved";
+      lexicalUnitId: string;
+      result: CanonicalFormAssistanceResult;
+      selectedCanonical?: string;
+    }
   | { kind: "error"; lexicalUnitId: string; error: string };
 
 interface MergeDialogState {
@@ -305,6 +324,8 @@ function stagedSummaryForCandidates(
   };
 }
 
+declare const __COLLECTOR_E2E__: boolean;
+
 interface EditDraft {
   canonicalText: string;
   language: string;
@@ -348,6 +369,7 @@ function App(): React.ReactElement {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [canonicalizationState, setCanonicalizationState] = useState<CanonicalizationUiState>({ kind: "idle" });
   const [observedFormsState, setObservedFormsState] = useState<ObservedFormsUiState>({ kind: "idle" });
+  const [canonicalAssistanceState, setCanonicalAssistanceState] = useState<CanonicalAssistanceUiState>({ kind: "idle" });
   const [mergeDialog, setMergeDialog] = useState<MergeDialogState | null>(null);
   const [splitDialog, setSplitDialog] = useState<SplitDialogState | null>(null);
   const [pendingBackup, setPendingBackup] = useState<BackupDocument | null>(null);
@@ -376,6 +398,11 @@ function App(): React.ReactElement {
   const deckAnalysisRequestId = useRef(0);
   const canonicalizationRequestId = useRef(0);
   const observedFormsRequestId = useRef(0);
+  const canonicalAssistanceGate = useRef(new CanonicalFormRequestGate());
+  const canonicalFormProvider = useMemo(
+    () => createCanonicalFormProvider(__COLLECTOR_E2E__),
+    [],
+  );
   const catalogService = useMemo(
     () => new AnkiCatalogService(
       new AnkiClient(),
@@ -516,6 +543,11 @@ function App(): React.ReactElement {
     () => items.find((item) => item.lexicalUnit.id === activeId) ?? null,
     [activeId, items],
   );
+
+  useEffect(() => {
+    canonicalAssistanceGate.current.invalidate();
+    setCanonicalAssistanceState({ kind: "idle" });
+  }, [activeId, activeItem?.lexicalUnit.updatedAt]);
 
   const reviewSessionItems = useMemo(
     () => reviewSessionIds
@@ -1142,6 +1174,8 @@ function App(): React.ReactElement {
   }
 
   function beginEdit(item: CollectedItem): void {
+    canonicalAssistanceGate.current.invalidate();
+    setCanonicalAssistanceState({ kind: "idle" });
     const proposal = deriveLearningStudyContent(item).proposal;
     const occurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
     setEditingId(item.lexicalUnit.id);
@@ -1207,6 +1241,95 @@ function App(): React.ReactElement {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function requestCanonicalAssistance(item: CollectedItem): Promise<void> {
+    const unit = item.lexicalUnit;
+    const derived = deriveLearningStudyContent(item);
+    const occurrence = derived.selectedOccurrence ?? latestOccurrence(item);
+    const requestId = canonicalAssistanceGate.current.start(unit.id);
+    setCanonicalAssistanceState({ kind: "checking", lexicalUnitId: unit.id });
+
+    const result = await requestCanonicalFormAssistance(canonicalFormProvider, {
+      lexicalUnitId: unit.id,
+      lexicalUnitUpdatedAt: unit.updatedAt,
+      language: unit.language,
+      observedForm: occurrence?.surfaceText ?? unit.canonicalText,
+      currentCanonical: unit.canonicalText,
+      ...(occurrence?.context ? { context: occurrence.context } : {}),
+      ...(occurrence?.id ? { occurrenceId: occurrence.id } : {}),
+    });
+
+    if (
+      !canonicalAssistanceGate.current.isCurrent(requestId, unit.id)
+      || activeIdRef.current !== unit.id
+    ) return;
+
+    setCanonicalAssistanceState({
+      kind: "resolved",
+      lexicalUnitId: unit.id,
+      result,
+    });
+  }
+
+  function dismissCanonicalAssistance(): void {
+    canonicalAssistanceGate.current.invalidate();
+    setCanonicalAssistanceState({ kind: "idle" });
+  }
+
+  async function useCanonicalSuggestion(
+    item: CollectedItem,
+    suggestion: CanonicalFormSuggestion,
+  ): Promise<void> {
+    const state = canonicalAssistanceState;
+    if (
+      state.kind !== "resolved"
+      || state.lexicalUnitId !== item.lexicalUnit.id
+      || (state.result.kind !== "suggestion" && state.result.kind !== "ambiguous")
+    ) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const accepted = await acceptCanonicalFormSuggestion(
+        repository,
+        state.result,
+        suggestion,
+      );
+      canonicalAssistanceGate.current.invalidate();
+      setCanonicalAssistanceState({ kind: "idle" });
+
+      const duplicateCount = accepted.preview.sameCanonicalCandidates.length;
+      setNotice(
+        duplicateCount > 0
+          ? `Canonical suggestion accepted. ${duplicateCount} same-canonical lexical unit${duplicateCount === 1 ? "" : "s"} remain separate; Merge is still explicit.`
+          : accepted.item.lexicalUnit.status === "inbox"
+            ? "Canonical suggestion accepted. Review the changed study content before marking it Ready again."
+            : "Canonical suggestion accepted. Collector identity and observed evidence are unchanged.",
+      );
+      selectActiveId(accepted.item.lexicalUnit.id);
+      await load(accepted.item.lexicalUnit.id);
+    } catch (acceptError) {
+      setCanonicalAssistanceState({
+        kind: "error",
+        lexicalUnitId: item.lexicalUnit.id,
+        error: acceptError instanceof Error
+          ? acceptError.message
+          : "Could not apply this canonical-form suggestion.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function selectAmbiguousCanonical(lexicalUnitId: string, canonical: string): void {
+    setCanonicalAssistanceState((current) => (
+      current.kind === "resolved" && current.lexicalUnitId === lexicalUnitId
+        ? { ...current, selectedCanonical: canonical }
+        : current
+    ));
   }
 
   function restoreIdentityActionFocus(): void {
@@ -2889,6 +3012,218 @@ function App(): React.ReactElement {
                     </details>
                   )}
               </section>
+
+              {!editing && (
+                <section
+                  className="canonical-assistance"
+                  aria-label="Canonical-form assistance"
+                >
+                  <div className="canonical-assistance-head">
+                    <strong>Canonical-form assistance</strong>
+                    <span className="pill">Advisory</span>
+                  </div>
+                  <div className="setting-help">
+                    Suggestions never rewrite observed evidence or merge lexical identities automatically.
+                  </div>
+
+                  {(canonicalAssistanceState.kind === "idle"
+                    || (
+                      canonicalAssistanceState.kind !== "idle"
+                      && "lexicalUnitId" in canonicalAssistanceState
+                      && canonicalAssistanceState.lexicalUnitId !== unit.id
+                    )) && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy}
+                      onClick={() => void requestCanonicalAssistance(item)}
+                    >
+                      Suggest canonical form
+                    </button>
+                  )}
+
+                  {canonicalAssistanceState.kind === "checking"
+                    && canonicalAssistanceState.lexicalUnitId === unit.id && (
+                    <div className="canonical-assistance-result">
+                      <div role="status" aria-live="polite">Checking canonical-form suggestions…</div>
+                      <div className="card-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={busy}
+                          onClick={() => void requestCanonicalAssistance(item)}
+                        >
+                          Check again
+                        </button>
+                        <button type="button" className="ghost" onClick={dismissCanonicalAssistance}>
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {canonicalAssistanceState.kind === "resolved"
+                    && canonicalAssistanceState.lexicalUnitId === unit.id && (() => {
+                    const assistanceResult = canonicalAssistanceState.result;
+
+                    if (assistanceResult.kind === "unsupported") {
+                      return (
+                        <div className="canonical-assistance-result">
+                          <div role="status" aria-live="polite">
+                            Canonical-form assistance is not available for {assistanceResult.language}.
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={busy}
+                            onClick={() => void requestCanonicalAssistance(item)}
+                          >
+                            Check again
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (assistanceResult.kind === "none") {
+                      return (
+                        <div className="canonical-assistance-result">
+                          <div role="status" aria-live="polite">
+                            No canonical-form suggestion is available. Keep the current canonical form or edit it manually.
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={busy}
+                            onClick={() => void requestCanonicalAssistance(item)}
+                          >
+                            Check again
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (assistanceResult.kind === "unavailable") {
+                      return (
+                        <div className="canonical-assistance-result">
+                          <div role="status" aria-live="polite">
+                            Canonical-form assistance is unavailable. Manual review and export remain available.
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={busy}
+                            onClick={() => void requestCanonicalAssistance(item)}
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    if (assistanceResult.kind === "suggestion") {
+                      const suggestion = assistanceResult.suggestion;
+                      return (
+                        <div className="canonical-assistance-result">
+                          <strong>Suggestion</strong>
+                          <div className="canonical-assistance-choice">
+                            <span dir="auto">{suggestion.proposedCanonical}</span>
+                            {suggestion.confidence && <span className="pill">{suggestion.confidence}</span>}
+                          </div>
+                          {suggestion.evidenceLabel && (
+                            <div className="setting-help">{suggestion.evidenceLabel}</div>
+                          )}
+                          <div className="card-actions">
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={busy}
+                              onClick={() => void useCanonicalSuggestion(item, suggestion)}
+                            >
+                              Use suggestion
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost"
+                              disabled={busy}
+                              onClick={dismissCanonicalAssistance}
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const selectedCanonical = canonicalAssistanceState.selectedCanonical;
+                    const selectedSuggestion = assistanceResult.suggestions.find(
+                      (candidate) => candidate.proposedCanonical === selectedCanonical,
+                    );
+                    return (
+                      <div className="canonical-assistance-result">
+                        <fieldset className="canonical-assistance-options">
+                          <legend>Possible canonical forms</legend>
+                          {assistanceResult.suggestions.map((suggestion) => (
+                            <label key={suggestion.proposedCanonical}>
+                              <input
+                                type="radio"
+                                name={`canonical-assistance-${unit.id}`}
+                                value={suggestion.proposedCanonical}
+                                checked={selectedCanonical === suggestion.proposedCanonical}
+                                onChange={() => selectAmbiguousCanonical(
+                                  unit.id,
+                                  suggestion.proposedCanonical,
+                                )}
+                              />
+                              <span dir="auto">{suggestion.proposedCanonical}</span>
+                              {suggestion.confidence && <span className="pill">{suggestion.confidence}</span>}
+                            </label>
+                          ))}
+                        </fieldset>
+                        <div className="setting-help">
+                          Ambiguity is preserved. Choose one deliberately or keep the current canonical form.
+                        </div>
+                        <div className="card-actions">
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy || !selectedSuggestion}
+                            onClick={() => {
+                              if (selectedSuggestion) {
+                                void useCanonicalSuggestion(item, selectedSuggestion);
+                              }
+                            }}
+                          >
+                            Use suggestion
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={busy}
+                            onClick={dismissCanonicalAssistance}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {canonicalAssistanceState.kind === "error"
+                    && canonicalAssistanceState.lexicalUnitId === unit.id && (
+                    <div className="canonical-assistance-result">
+                      <div role="status" aria-live="polite">{canonicalAssistanceState.error}</div>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy}
+                        onClick={() => void requestCanonicalAssistance(item)}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )}
 
               {editing ? (
                 <form
