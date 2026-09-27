@@ -1962,44 +1962,65 @@ function App(): React.ReactElement {
     setError("");
     setNotice("");
 
-    const settingsMerge = pendingBackup.settings
-      ? mergeSettingsForRestore(settings, pendingBackup.settings, items.length > 0 || Object.keys(exportBindings).length > 0)
-      : { settings, conflicts: [] };
-    if (settingsMerge.conflicts.length > 0) {
-      setError(
-        "Restore was not applied. Your existing Collector data and settings are unchanged. Backup routing configuration conflicts with current local settings; review the routing settings before retrying.",
-      );
-      setBusy(false);
-      return;
-    }
-
-    const previousSettings = settings;
-
     try {
-      const outcome = await restoreAcrossCommitBoundary({
-        prepareSettings: pendingBackup.settings
-          ? async () => {
-              await saveSettings(settingsMerge.settings);
-              setSettings(settingsMerge.settings);
-            }
-          : undefined,
-        restoreRepository: () => repository.restoreBackup(pendingBackup),
-        refreshCommittedState: async () => {
-          clearRestorePreview();
-          requestAnimationFrame(() => {
-            document.querySelector<HTMLInputElement>("[data-restore-backup-input]")?.focus({
-              preventScroll: true,
+      const run = settingsMutationQueue.current.then(async () => {
+        // Restore participates in the same serialization as normal settings
+        // edits. Re-read durable settings here so compensation never rolls
+        // back to a stale React snapshot and loses unrelated preferences.
+        const [currentSettings, currentItems, currentBindings] = await Promise.all([
+          loadSettings(),
+          repository.list(),
+          repository.listExportBindings(),
+        ]);
+        const settingsMerge = pendingBackup.settings
+          ? mergeSettingsForRestore(
+              currentSettings,
+              pendingBackup.settings,
+              currentItems.length > 0 || currentBindings.length > 0,
+            )
+          : { settings: currentSettings, conflicts: [] };
+
+        if (settingsMerge.conflicts.length > 0) {
+          return { kind: "settings-conflict" as const };
+        }
+
+        return restoreAcrossCommitBoundary({
+          prepareSettings: pendingBackup.settings
+            ? async () => {
+                await saveSettings(settingsMerge.settings);
+                setSettings(settingsMerge.settings);
+              }
+            : undefined,
+          restoreRepository: () => repository.restoreBackup(pendingBackup),
+          refreshCommittedState: async () => {
+            clearRestorePreview();
+            requestAnimationFrame(() => {
+              document.querySelector<HTMLInputElement>("[data-restore-backup-input]")?.focus({
+                preventScroll: true,
+              });
             });
-          });
-          await load();
-        },
-        compensateSettings: pendingBackup.settings
-          ? async () => {
-              await saveSettings(previousSettings);
-              setSettings(previousSettings);
-            }
-          : undefined,
+            await load();
+          },
+          compensateSettings: pendingBackup.settings
+            ? async () => {
+                await saveSettings(currentSettings);
+                setSettings(currentSettings);
+              }
+            : undefined,
+        });
       });
+
+      // Any settings edits requested while restore is busy queue behind this
+      // cross-store operation and will apply to its final durable state.
+      settingsMutationQueue.current = run.then(() => undefined, () => undefined);
+      const outcome = await run;
+
+      if (outcome.kind === "settings-conflict") {
+        setError(
+          "Restore was not applied. Your existing Collector data and settings are unchanged. Backup routing configuration conflicts with current local settings; review the routing settings before retrying.",
+        );
+        return;
+      }
 
       if (outcome.kind === "precommit-failure") {
         if (outcome.compensationError) {
@@ -2033,6 +2054,11 @@ function App(): React.ReactElement {
         changed === 0
           ? "Backup is already fully represented in the local corpus."
           : `Backup restored: ${result.lexicalUnitsAdded} items added, ${result.lexicalUnitsUpdated} updated, ${result.occurrencesAdded} occurrences added.`,
+      );
+    } catch (restoreError) {
+      const detail = restoreError instanceof Error ? restoreError.message : "Backup restore could not start.";
+      setError(
+        `Restore was not applied. Your existing Collector data and settings are unchanged. ${detail}`,
       );
     } finally {
       setBusy(false);
