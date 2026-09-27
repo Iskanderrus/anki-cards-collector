@@ -1448,12 +1448,9 @@ describe("CaptureRepository", () => {
     expect(merged.survivingLexicalUnitId).toBe(weak.lexicalUnit.id);
     expect(merged.item.lexicalUnit.status).toBe("inbox");
     expect(merged.item.occurrences).toHaveLength(2);
-    expect(deriveLearningValueDecision({
-      item: merged.item,
-      previousItem: weak,
-    })).toMatchObject({
-      kind: "improve",
-      reasonCode: "new-evidence-makes-studyable",
+    expect(deriveLearningValueDecision({ item: merged.item })).toMatchObject({
+      kind: "study",
+      reasonCode: "current-useful-evidence",
     });
   });
 
