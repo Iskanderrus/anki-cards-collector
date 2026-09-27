@@ -1445,9 +1445,13 @@ describe("CaptureRepository", () => {
       note: "",
     });
 
+    expect(merged.survivingLexicalUnitId).toBe(weak.lexicalUnit.id);
     expect(merged.item.lexicalUnit.status).toBe("inbox");
     expect(merged.item.occurrences).toHaveLength(2);
-    expect(deriveLearningValueDecision({ item: merged.item })).toMatchObject({
+    expect(deriveLearningValueDecision({
+      item: merged.item,
+      previousItem: weak,
+    })).toMatchObject({
       kind: "improve",
       reasonCode: "new-evidence-makes-studyable",
     });
