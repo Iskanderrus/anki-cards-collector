@@ -3028,8 +3028,7 @@ function App(): React.ReactElement {
 
                   {(canonicalAssistanceState.kind === "idle"
                     || (
-                      canonicalAssistanceState.kind !== "idle"
-                      && "lexicalUnitId" in canonicalAssistanceState
+                      "lexicalUnitId" in canonicalAssistanceState
                       && canonicalAssistanceState.lexicalUnitId !== unit.id
                     )) && (
                     <button
