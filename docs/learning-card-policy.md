@@ -63,6 +63,8 @@ The learning-value layer has four explicit outcomes:
 
 The decision reuses ACCP-002 occurrence quality and the ACCP-005 effective study-content signature. It does not define another occurrence scorer or another card renderer.
 
+Event explanations use an actual before/after corpus boundary. While the focused side panel is open, it retains the preceding loaded item when learning-relevant evidence changes and compares that item with the reload. `capturedAt` remains source chronology only; it is never interpreted as insertion order. If no real before-state is available, the UI reports only the current Study/Archive recommendation and does not invent Evidence only/Improve history.
+
 Recommendation is derived, not persisted. It never changes `LexicalUnit.id`, export bindings, Anki note identity, or status automatically. Ready and Archive remain explicit human workflow actions, and ACCP-005 remains the fail-closed gate for whether Ready can be approved at all.
 
 An equivalent repeated occurrence may therefore produce:
