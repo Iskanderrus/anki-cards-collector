@@ -3422,8 +3422,7 @@ try {
   const assistance = assistanceCard.locator(".canonical-assistance");
   const suggestCanonical = assistance.getByRole("button", { name: "Suggest canonical form" });
   await suggestCanonical.click({ trial: true });
-  await suggestCanonical.focus();
-  await panel.keyboard.press("Enter");
+  await suggestCanonical.press("Enter");
   await assistance.getByText("Suggestion", { exact: true }).waitFor();
   await assistance.getByRole("status").filter({ hasText: /Suggestion available/i }).waitFor();
   assert.match(await assistance.innerText(), /estar/);
