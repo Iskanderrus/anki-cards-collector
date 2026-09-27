@@ -48,6 +48,34 @@ Recency contributes no quality points. It breaks equal-quality ties; occurrence 
 
 The detail view shows the selected observed form, selected context, selection number/count, and the score explanation.
 
+## Learning-value layer
+
+ACCP-007 adds a separate derived decision above this card-content policy.
+
+`deriveLearningStudyContent()` still answers **what card could be made**. `deriveLearningValueDecision()` answers **whether the current evidence should cause or maintain study burden**.
+
+The learning-value layer has four explicit outcomes:
+
+- **Study** — the current corpus supports one useful study item but does not justify an improvement/redundancy claim;
+- **Improve** — the ACCP-002-selected occurrence is strictly stronger than the other independently studyable occurrence already persisted for that lexical unit;
+- **Evidence only** — removing the selected occurrence still leaves the same ACCP-005 effective study content, so equivalent evidence exists without extra study burden;
+- **Archive for now** — current ACCP-005 content is not studyable enough to recommend a card.
+
+The decision reuses ACCP-002 occurrence quality and the ACCP-005 effective study-content signature. It does not define another occurrence scorer or another card renderer.
+
+The classifier is corpus-relative rather than event-relative. It compares the current selected occurrence with a deterministic counterfactual corpus formed by removing that selected occurrence and deriving ACCP-005 again. `capturedAt` remains source chronology and is used only by ACCP-002's documented deterministic selection tie-break; ACCP-007 never interprets it or UUID order as mutation order.
+
+Recommendation is derived from persisted local corpus state, not side-panel memory. The same unchanged corpus therefore produces the same Study / Improve / Evidence only / Archive result after side-panel or browser recreation. It never changes `LexicalUnit.id`, export bindings, Anki note identity, or status automatically. Ready and Archive remain explicit human workflow actions, and ACCP-005 remains the fail-closed gate for whether Ready can be approved at all.
+
+An equivalent repeated occurrence may therefore produce:
+
+```text
+recommendation = Evidence only
+status         = Ready
+```
+
+when the user already approved the unchanged study content. A stronger selected occurrence can deterministically produce Improve whenever the persisted corpus also contains a weaker studyable alternative; existing ACCP-005 behavior still returns changed Ready content to Inbox.
+
 ## Policy-v2 decision table
 
 | Unit | Evidence | Decision |

@@ -5,6 +5,8 @@ import type { CollectedItem } from "../core/types";
 import { BatchCapturePipeline } from "./batch";
 import { CollectorDatabase } from "../storage/database";
 import { CaptureRepository } from "../storage/repository";
+import { deriveLearningValueDecision } from "../learning/value-decision";
+import { learningStudyContentSignature } from "../learning/policy";
 
 function evidence(
   surfaceText: string,
@@ -106,6 +108,97 @@ describe("BatchCapturePipeline", () => {
     expect(result.unchangedCandidateIds).toEqual(["existing:0001"]);
     expect(result.committed.map((entry) => entry.candidateId)).toEqual(["existing:0002"]);
     expect((await repository.list())[0]?.occurrences).toHaveLength(2);
+  });
+
+  it("derives Improve from the persisted corpus when delayed staged evidence is older but stronger", async () => {
+    const existing = await repository.capture({
+      text: "policy evidence",
+      context: "policy evidence appears in a controlled sentence with enough surrounding words.",
+      language: "he",
+      capturedAt: "2026-09-27T10:01:00.000Z",
+      source: evidence(
+        "policy evidence",
+        "policy evidence appears in a controlled sentence with enough surrounding words.",
+      ).source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+    const before = (await repository.list()).find(
+      (item) => item.lexicalUnit.id === existing.lexicalUnit.id,
+    )!;
+
+    const staged = await pipeline.stageBatch("delayed-older-stronger", [
+      evidence(
+        "policy evidence",
+        "Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.",
+        "2026-09-27T10:00:00.000Z",
+      ),
+    ]);
+    expect(staged.candidates[0]?.disposition).toBe("repeated-evidence");
+
+    const result = await pipeline.commit({
+      candidateIds: [staged.candidates[0]!.id],
+    });
+    const after = result.committed[0]!.item;
+
+    expect(after.lexicalUnit.status).toBe("inbox");
+    expect(learningStudyContentSignature(before))
+      .not.toBe(learningStudyContentSignature(after));
+
+    expect(deriveLearningValueDecision({ item: after })).toMatchObject({
+      kind: "improve",
+      reasonCode: "selected-evidence-improved",
+    });
+  });
+
+  it("derives Improve deterministically for same-timestamp multi-evidence commit", async () => {
+    const existing = await repository.capture({
+      text: "policy evidence",
+      context: "policy evidence appears in a controlled sentence with enough surrounding words.",
+      language: "he",
+      capturedAt: "2026-09-27T10:01:00.000Z",
+      source: evidence(
+        "policy evidence",
+        "policy evidence appears in a controlled sentence with enough surrounding words.",
+      ).source,
+    });
+    await repository.setStatus(existing.lexicalUnit.id, "ready");
+    const before = (await repository.list()).find(
+      (item) => item.lexicalUnit.id === existing.lexicalUnit.id,
+    )!;
+
+    const scanTime = "2026-09-27T10:00:00.000Z";
+    const staged = await pipeline.stageBatch("same-scan-time", [
+      evidence(
+        "policy evidence",
+        "Today the policy evidence appears in another useful controlled sentence.",
+        scanTime,
+      ),
+      evidence(
+        "policy evidence",
+        "Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.",
+        scanTime,
+      ),
+    ]);
+    expect(staged.candidates).toHaveLength(2);
+    expect(staged.candidates.every(
+      (candidate) => candidate.disposition === "repeated-evidence",
+    )).toBe(true);
+
+    const result = await pipeline.commit({
+      candidateIds: staged.candidates.map((candidate) => candidate.id),
+    });
+    const after = result.committed.at(-1)!.item;
+
+    expect(after.occurrences).toHaveLength(3);
+    expect(after.lexicalUnit.status).toBe("inbox");
+    const beforeOccurrenceIds = new Set(before.occurrences.map((occurrence) => occurrence.id));
+    expect(new Set(
+      after.occurrences
+        .filter((occurrence) => !beforeOccurrenceIds.has(occurrence.id))
+        .map((occurrence) => occurrence.capturedAt),
+    )).toEqual(new Set([scanTime]));
+
+    expect(deriveLearningValueDecision({ item: after }).kind).toBe("improve");
   });
 
   it("treats a unique exact occurrence as already represented despite surface ambiguity", async () => {

@@ -27,6 +27,7 @@ The following work is already part of the current baseline:
 - **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
 - **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation;
 - **ACCP-005** — learning-card policy v2 with authoritative study-content derivation, content-sensitive Ready invalidation, and review/export parity.
+- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth.
 
 ---
 
@@ -90,26 +91,25 @@ ACCP-005 is now baseline behavior. Word/chunk/sentence decisions use one authori
 
 ## Gate F — optional assistance and learning-value decisions
 
-### ACCP-006 — morphology/canonical-form assistance — current merge gate
+### ACCP-006 — morphology/canonical-form assistance — completed
 
-Depends on completed ACCP-003, ACCP-004, ACCP-005, and ACCP-012.
+ACCP-006 is now baseline behavior. Canonical-form suggestions are advisory, provider output is ephemeral, and lexical identity changes only through explicit acceptance using the existing canonical-edit path.
 
-This gate adds advisory canonical-form suggestions inside deliberate review. Provider output is ephemeral and cannot mutate lexical identity without explicit user acceptance through the existing canonical-edit path.
+### ACCP-007 — learning-value decision — current/final linear gate
 
-### ACCP-007 — learning-value decision
+Depends on completed ACCP-002, ACCP-004, ACCP-005, ACCP-006, and ACCP-012.
 
-Depends on completed ACCP-002, ACCP-004, and ACCP-005.
+This gate adds a deterministic local recommendation for Study, Improve, Evidence only, or Archive for now. Recommendation stays separate from Inbox/Ready/Archived workflow state and does not authorize export.
 
 ---
 
 ## Recommended linear merge sequence
 
-From the current baseline, when one linear order is needed:
+From the current baseline, the remaining documented linear gate is:
 
-1. ACCP-006 — morphology assistance
-2. ACCP-007 — learning-value decision
+1. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, ACCP-012, ACCP-004, and ACCP-005 are now baseline work. ACCP-006 is the current Gate F implementation/merge target; after it merges, ACCP-007 becomes next.
+ACCP-006 is part of the completed baseline. After ACCP-007 merges, the currently documented linear implementation sequence is complete. Future implementation work should be selected from validated product defects or explicit roadmap decisions rather than inventing another ticket merely to keep this sequence non-empty.
 
 ---
 

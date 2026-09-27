@@ -458,6 +458,32 @@ summary:focus-visible {
 .item-export-result.warning { border: 1px solid #b54708; }
 .item-export-result.success { border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); }
 
+.learning-value {
+  display: grid;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, CanvasText 3%, transparent);
+}
+.learning-value-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.learning-value p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.learning-value-evidence-only {
+  border-style: dashed;
+}
+.learning-value-archive {
+  border-color: color-mix(in srgb, #b54708 55%, Canvas);
+}
+
 .learning-proposal {
   display: grid;
   gap: 8px;

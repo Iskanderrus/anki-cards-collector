@@ -387,6 +387,9 @@ const server = createServer((request, response) => {
           <p id="policy-upgrade-first">policy evidence appears in a controlled sentence with enough surrounding words.</p>
           <p id="policy-upgrade-strong">Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.</p>
           <p id="policy-weak-chunk">weak chunk</p>
+          <p id="learning-value-override">The learning override phrase appears in a controlled sentence with enough surrounding words.</p>
+          <p id="learning-chronology-first">chronology evidence appears in a controlled sentence with enough surrounding words.</p>
+          <p id="learning-same-time-first">same time evidence appears in a controlled sentence with enough surrounding words.</p>
           <p id="policy-unbounded-sentence">although rain continues we still walk outside every morning</p>
           <p id="assist-estar-base">Quiero estar en casa para estudiar con calma esta tarde.</p>
           <p id="assist-estoy">Hoy estoy en casa y tengo bastante tiempo para estudiar español.</p>
@@ -3336,6 +3339,11 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   remediationCard = await cardForTerm(panel, "recapture approval");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Learning value[\s\S]*Study[\s\S]*Current corpus supports one useful study card/i,
+    "ACCP007_CURRENT_USEFUL_EVIDENCE: useful current material should recommend Study without fabricating event history.",
+  );
   await remediationCard.getByRole("button", { name: "Ready" }).click();
   await remediationCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   await ensureQueue(panel);
@@ -3355,6 +3363,22 @@ try {
     await remediationCard.locator(".occurrence-selection").innerText(),
     /Selected occurrence 2 of 2/,
     "Equal-quality equivalent evidence should use the deterministic newer-occurrence tie break without changing study content.",
+  );
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
+    "ACCP007_EQUIVALENT_REPEAT: equivalent evidence should not add study burden.",
+  );
+
+  markE2eStage("accp007-evidence-only-reopen-stability");
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
+    "The same persisted corpus must remain Evidence only after side-panel recreation.",
   );
 
   markE2eStage("accp005-stronger-evidence-invalidates-ready");
@@ -3388,6 +3412,22 @@ try {
     false,
     "The changed strong proposal should require explicit re-approval.",
   );
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than other studyable evidence/i,
+    "ACCP007_BETTER_EVIDENCE: stronger selected evidence should explain the Improve recommendation.",
+  );
+
+  markE2eStage("accp007-improve-reopen-stability");
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  remediationCard = await cardForTerm(panel, "policy evidence");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than other studyable evidence/i,
+    "The same persisted corpus must remain Improve after side-panel recreation.",
+  );
 
   markE2eStage("accp005-weak-context-fails-closed");
   await ensureQueue(panel);
@@ -3404,6 +3444,183 @@ try {
     await weakPolicyCard.getByRole("button", { name: "Ready" }).isDisabled(),
     true,
     "Weak chunk context must not silently become a production card.",
+  );
+  assert.match(
+    await weakPolicyCard.locator(".learning-value").innerText(),
+    /Archive for now[\s\S]*does not support a useful study card yet/i,
+    "ACCP007_WEAK_EVIDENCE: weak material should recommend Archive without automatically changing status.",
+  );
+  await weakPolicyCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+
+  markE2eStage("accp007-keyboard-human-override");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#learning-value-override", "learning override");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let learningOverrideCard = await cardForTerm(panel, "learning override");
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Learning value[\s\S]*Study/i,
+    "A first useful item should recommend Study.",
+  );
+  const archiveOverrideButton = learningOverrideCard.getByRole("button", { name: "Archive" });
+  await archiveOverrideButton.focus();
+  await panel.keyboard.press("r");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.match(
+    await learningOverrideCard.locator(".card-head > .pill").innerText(),
+    /inbox/i,
+    "Review shortcuts must not fire while an explicit override control owns focus.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("a");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "archived" }).waitFor();
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Study/i,
+    "Archiving is an explicit human override and must not rewrite the derived recommendation.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("i");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  await ensureQueue(panel);
+
+  await selectText(contentPage, "#learning-value-override", "learning override");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await panel.locator(".notice", { hasText: /Added another occurrence/ }).waitFor();
+  learningOverrideCard = await cardForTerm(panel, "learning override");
+  assert.match(
+    await learningOverrideCard.locator(".learning-value").innerText(),
+    /Evidence only/i,
+    "An equivalent repeat should recommend Evidence only while remaining overridable.",
+  );
+  await learningOverrideCard.focus();
+  await panel.keyboard.press("r");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assert.equal(
+    await learningOverrideCard.locator(".learning-value").getByText("Evidence only", { exact: true }).count(),
+    1,
+    "Ready approval must not mutate the derived evidence-only recommendation.",
+  );
+
+  markE2eStage("accp007-delayed-staged-older-stronger");
+  await clearActiveCaptureProfile(panel);
+  await setCaptureLanguage(panel, "es");
+  await selectText(contentPage, "#learning-chronology-first", "chronology evidence");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let chronologyCard = await cardForTerm(panel, "chronology evidence");
+  await chronologyCard.getByRole("button", { name: "Ready" }).click();
+  await chronologyCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  const delayedChronologyBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp007-delayed-chronology",
+      evidence: [{
+        surfaceText: "chronology evidence",
+        context: "Before lunch the chronology evidence appears in a controlled sentence with enough surrounding words today.",
+        language: "es",
+        source: e2eBatchSource,
+        capturedAt: "2026-09-27T09:00:00.000Z",
+      }],
+    },
+    "ACCP-007 delayed older stronger staged evidence",
+  );
+  assert.equal(delayedChronologyBatch?.ok, true, delayedChronologyBatch?.error);
+  assert.equal(
+    delayedChronologyBatch.batch.candidates[0]?.disposition,
+    "repeated-evidence",
+  );
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const delayedChronologyRow = stagedReview.locator(".staged-review-row").filter({
+    hasText: "chronology evidence",
+  });
+  await delayedChronologyRow.getByRole("checkbox").check();
+  await stagedReview.getByRole("button", { name: /Import 1 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "1 occurrence added to existing units",
+  }).waitFor();
+
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
+  chronologyCard = await cardForTerm(panel, "chronology evidence");
+  await chronologyCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.match(
+    await chronologyCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than other studyable evidence/i,
+    "Delayed staged evidence must compare against the real pre-import state even when capturedAt is older.",
+  );
+
+  markE2eStage("accp007-same-timestamp-multi-evidence");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#learning-same-time-first", "same time evidence");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let sameTimeCard = await cardForTerm(panel, "same time evidence");
+  await sameTimeCard.getByRole("button", { name: "Ready" }).click();
+  await sameTimeCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  await ensureQueue(panel);
+
+  const sameTimeBatch = await sendPanelMessage(
+    panel,
+    {
+      type: "E2E_REPLACE_STAGED_BATCH",
+      batchId: "accp007-same-timestamp",
+      evidence: [
+        {
+          surfaceText: "same time evidence",
+          context: "Today the same time evidence appears in another useful controlled sentence.",
+          language: "es",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-27T09:10:00.000Z",
+        },
+        {
+          surfaceText: "same time evidence",
+          context: "Before lunch the same time evidence appears in a controlled sentence with enough surrounding words today.",
+          language: "es",
+          source: e2eBatchSource,
+          capturedAt: "2026-09-27T09:10:00.000Z",
+        },
+      ],
+    },
+    "ACCP-007 same-timestamp staged evidence",
+  );
+  assert.equal(sameTimeBatch?.ok, true, sameTimeBatch?.error);
+  assert.equal(sameTimeBatch.batch.candidates.length, 2);
+  assert.equal(
+    sameTimeBatch.batch.candidates.every(
+      (candidate) => candidate.disposition === "repeated-evidence",
+    ),
+    true,
+  );
+
+  await panel.getByRole("button", { name: /^Staged/ }).click();
+  const sameTimeRows = stagedReview.locator(".staged-review-row").filter({
+    hasText: "same time evidence",
+  });
+  await sameTimeRows.nth(1).waitFor();
+  assert.equal(await sameTimeRows.count(), 2);
+  await sameTimeRows.nth(0).getByRole("checkbox").check();
+  await sameTimeRows.nth(1).getByRole("checkbox").check();
+  await stagedReview.getByRole("button", { name: /Import 2 selected to Inbox/ }).click();
+  await stagedReview.locator(".staged-import-result", {
+    hasText: "2 occurrences added to existing units",
+  }).waitFor();
+
+  await panel.getByRole("button", { name: "Inbox", exact: true }).click();
+  sameTimeCard = await cardForTerm(panel, "same time evidence");
+  await sameTimeCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.match(
+    await sameTimeCard.getAttribute("aria-label"),
+    /3 occurrences/,
+  );
+  assert.match(
+    await sameTimeCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than other studyable evidence/i,
+    "Same-timestamp batch evidence must use the real pre-batch snapshot, not UUID ordering.",
   );
 
   markE2eStage("accp005-sentence-without-target-fails-closed");

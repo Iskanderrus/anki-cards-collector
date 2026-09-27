@@ -54,6 +54,7 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { deriveLearningStudyContent } from "../learning/policy";
+import { deriveLearningValueDecision } from "../learning/value-decision";
 import {
   CanonicalFormRequestGate,
   acceptCanonicalFormSuggestion,
@@ -2024,6 +2025,11 @@ function App(): React.ReactElement {
       return target.closest(".canonical-assistance button, .canonical-assistance input") !== null;
     }
 
+    function isReviewActionControlTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.closest(".card-actions button") !== null;
+    }
+
     function focusItem(id: string): void {
       selectActiveId(id);
       requestAnimationFrame(() => {
@@ -2046,6 +2052,7 @@ function App(): React.ReactElement {
         || splitDialog !== null
         || isTypingTarget(event.target)
         || isAssistanceControlTarget(event.target)
+        || isReviewActionControlTarget(event.target)
       ) return;
 
       if (
@@ -2933,6 +2940,7 @@ function App(): React.ReactElement {
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = deriveLearningStudyContent(item).proposal;
+          const learningValue = deriveLearningValueDecision({ item });
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
@@ -3392,6 +3400,20 @@ function App(): React.ReactElement {
                       <span>{proposal.occurrenceSelection.reason}</span>
                     </div>
                   )}
+
+                  <section
+                    className={`learning-value learning-value-${learningValue.kind}`}
+                    aria-labelledby={`learning-value-${unit.id}`}
+                  >
+                    <div className="learning-value-head">
+                      <strong id={`learning-value-${unit.id}`}>Learning value</strong>
+                      <span className="pill">{learningValue.label}</span>
+                    </div>
+                    <p>{learningValue.reason}</p>
+                    <span className="setting-help">
+                      Recommendation only. Ready and Archive remain explicit choices.
+                    </span>
+                  </section>
 
                   <div className={`learning-proposal${proposal.recommended ? "" : " blocked"}`}>
                     <div className="proposal-head">

@@ -127,6 +127,32 @@ The proposal is intentionally not stored. Editing the source material recomputes
 
 See [learning-card policy](learning-card-policy.md).
 
+### Learning-value recommendation
+
+ACCP-007 is a pure learning-value layer between lexical identity and ACCP-005 study-content construction.
+
+```text
+LexicalUnit / owned Occurrences
+        ↓
+ACCP-007 learning-value recommendation
+        ↓
+ACCP-005 derived study content
+        ↓
+explicit Ready
+        ↓
+existing export pipeline
+```
+
+The decision boundary consumes only local accepted persisted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm.
+
+For a studyable item, ACCP-007 removes the current ACCP-002-selected occurrence to form a deterministic counterfactual corpus and derives ACCP-005 again. Equivalent effective study content means `evidence-only`; a strictly higher selected-occurrence quality than the other studyable evidence means `improve`; otherwise the useful corpus remains `study`. Non-studyable content is `archive`.
+
+This boundary deliberately does not derive mutation order from `Occurrence.capturedAt`, occurrence UUIDs, or side-panel session memory. `capturedAt` may still participate in ACCP-002's documented tie-break because it is persisted source chronology, but ACCP-007 never treats it as insertion order. Staged evidence may be imported long after its source timestamp, and several candidates may legitimately share one scan timestamp.
+
+The four outcomes are `study`, `improve`, `evidence-only`, and `archive`. They are guidance, not workflow statuses. No outcome automatically mutates Inbox/Ready/Archived, and no outcome calls Anki.
+
+Learning-value decisions and reason text are not persisted because they are fully reproducible from the persisted `CollectedItem`. IndexedDB and backup schemas therefore remain unchanged, and the same corpus yields the same recommendation after side-panel/browser recreation. Existing Ready invalidation remains owned by the ACCP-005 effective study-content signature; explicit merge/split approval boundaries remain owned by ACCP-004.
+
 ### Canonical-form assistance
 
 Canonical-form assistance is an advisory application boundary above the corpus repository. Providers receive normalized language, observed form, current canonical form, and at most bounded local context; they return provider-neutral suggestions only. Provider responses are ephemeral and are never stored as lexical truth.
