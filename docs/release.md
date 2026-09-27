@@ -6,13 +6,14 @@ The repository produces a validated **ZIP upload package**. The Chrome Web Store
 
 Requirements:
 
-- Node.js 22.23.3\n- npm 11.6.0
+- Node.js 22.23.3
+- npm 11.6.0
 - the system `zip` command
 
 Run:
 
 ```bash
-npm install
+npm ci
 npm run package:store
 ```
 
@@ -25,7 +26,9 @@ The command:
 
 The package script normalizes file timestamps and feeds a sorted file list to `zip -X`. CI proves reproducibility by checking out the same commit into two independent workspaces, running `npm ci` and `npm run package:store` in each, and requiring byte-identical ZIP SHA-256 hashes.
 
-Dependency maintenance may use `npm install`; canonical verification and release packaging must use `npm ci` so `package.json`/lockfile drift fails closed.\n\n## CI artifacts
+Dependency maintenance may use `npm install`; canonical verification and release packaging must use `npm ci` so `package.json`/lockfile drift fails closed.
+
+## CI artifacts
 
 Every pull request and push to `main` runs the normal code checks, real Chromium E2E tests, and store-package build.
 
