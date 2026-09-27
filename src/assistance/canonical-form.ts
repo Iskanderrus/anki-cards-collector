@@ -260,6 +260,7 @@ function e2eSuggestion(
 
 class E2eCanonicalFormProvider implements CanonicalFormProvider {
   private supersedeRequests = 0;
+  private releaseSupersededRequest: ((result: CanonicalFormProviderResult) => void) | null = null;
 
   supports(language: string): boolean {
     return localCanonicalFormProvider.supports(language);
@@ -279,9 +280,18 @@ class E2eCanonicalFormProvider implements CanonicalFormProvider {
 
     if (observed === "supersedeform") {
       this.supersedeRequests += 1;
-      const first = this.supersedeRequests === 1;
-      await new Promise((resolve) => globalThis.setTimeout(resolve, first ? 1200 : 25));
-      return e2eSuggestion(first ? "oldlemma" : "newlemma");
+      if (this.supersedeRequests === 1) {
+        return await new Promise<CanonicalFormProviderResult>((resolve) => {
+          this.releaseSupersededRequest = resolve;
+        });
+      }
+
+      const releaseSupersededRequest = this.releaseSupersededRequest;
+      this.releaseSupersededRequest = null;
+      globalThis.setTimeout(() => {
+        releaseSupersededRequest?.(e2eSuggestion("oldlemma"));
+      }, 100);
+      return e2eSuggestion("newlemma");
     }
 
     return localCanonicalFormProvider.suggest(input);
