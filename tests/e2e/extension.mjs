@@ -3439,6 +3439,15 @@ try {
     /Learning value[\s\S]*Study/i,
     "A first useful item should recommend Study.",
   );
+  const archiveOverrideButton = learningOverrideCard.getByRole("button", { name: "Archive" });
+  await archiveOverrideButton.focus();
+  await panel.keyboard.press("r");
+  await learningOverrideCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.match(
+    await learningOverrideCard.locator(".card-head > .pill").innerText(),
+    /inbox/i,
+    "Review shortcuts must not fire while an explicit override control owns focus.",
+  );
   await learningOverrideCard.focus();
   await panel.keyboard.press("a");
   await learningOverrideCard.locator(".card-head > .pill", { hasText: "archived" }).waitFor();
