@@ -199,8 +199,12 @@ describe("BatchCapturePipeline", () => {
 
     expect(after.occurrences).toHaveLength(3);
     expect(after.lexicalUnit.status).toBe("inbox");
-    expect(new Set(after.occurrences.slice(1).map((occurrence) => occurrence.capturedAt)))
-      .toEqual(new Set([scanTime]));
+    const beforeOccurrenceIds = new Set(before.occurrences.map((occurrence) => occurrence.id));
+    expect(new Set(
+      after.occurrences
+        .filter((occurrence) => !beforeOccurrenceIds.has(occurrence.id))
+        .map((occurrence) => occurrence.capturedAt),
+    )).toEqual(new Set([scanTime]));
 
     const baselines = reconcileLearningValueBaselines([before], [after], {});
     expect(baselines[after.lexicalUnit.id]?.occurrences.map((occurrence) => occurrence.id))
