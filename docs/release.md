@@ -6,7 +6,7 @@ The repository produces a validated **ZIP upload package**. The Chrome Web Store
 
 Requirements:
 
-- Node.js 22+
+- Node.js 22.23.3\n- npm 11.6.0
 - the system `zip` command
 
 Run:
