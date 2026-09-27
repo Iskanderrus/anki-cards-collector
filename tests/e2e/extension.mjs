@@ -3579,6 +3579,7 @@ try {
   const sameTimeRows = stagedReview.locator(".staged-review-row").filter({
     hasText: "same time evidence",
   });
+  await sameTimeRows.nth(1).waitFor();
   assert.equal(await sameTimeRows.count(), 2);
   await sameTimeRows.nth(0).getByRole("checkbox").check();
   await sameTimeRows.nth(1).getByRole("checkbox").check();
