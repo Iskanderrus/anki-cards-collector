@@ -76,6 +76,10 @@ export function deriveLearningValueDecision(
   }
 
   const previousItem = input.previousItem ?? previousEvidenceItem(item);
+  if (previousItem && previousItem.lexicalUnit.id !== item.lexicalUnit.id) {
+    throw new Error("Learning-value comparison must stay within one lexical unit.");
+  }
+
   if (!previousItem || previousItem.occurrences.length === 0) {
     return decision(
       "study",
@@ -83,10 +87,6 @@ export function deriveLearningValueDecision(
       "first-useful-evidence",
       "First useful evidence supports one review card.",
     );
-  }
-
-  if (previousItem.lexicalUnit.id !== item.lexicalUnit.id) {
-    throw new Error("Learning-value comparison must stay within one lexical unit.");
   }
 
   const previous = deriveLearningStudyContent(previousItem);
