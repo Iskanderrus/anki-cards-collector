@@ -3421,8 +3421,8 @@ try {
   const assistedId = await assistanceCard.getAttribute("data-card-id");
   const assistance = assistanceCard.locator(".canonical-assistance");
   const suggestCanonical = assistance.getByRole("button", { name: "Suggest canonical form" });
-  await suggestCanonical.focus();
-  await panel.keyboard.press("Enter");
+  await panel.waitForTimeout(50);
+  await suggestCanonical.press("Enter");
   await assistance.getByText("Suggestion", { exact: true }).waitFor();
   await assistance.getByRole("status").filter({ hasText: /Suggestion available/i }).waitFor();
   assert.match(await assistance.innerText(), /estar/);
@@ -3440,7 +3440,16 @@ try {
     "Canonical-form assistance accessibility violations:\n"
       + JSON.stringify(assistanceA11y.violations, null, 2),
   );
-  await assistance.getByRole("button", { name: "Use suggestion" }).click();
+  const useSuggestion = assistance.getByRole("button", { name: "Use suggestion" });
+  await useSuggestion.focus();
+  await panel.keyboard.press("r");
+  assert.match(
+    await assistanceCard.locator(".card-head > .pill").innerText(),
+    /inbox/i,
+    "Review shortcuts must not fire while focus is inside assistance controls.",
+  );
+  assert.equal(await assistanceCard.locator(".term").innerText(), "estoy");
+  await useSuggestion.press("Enter");
   assistanceCard = panel.locator(`[data-card-id="${assistedId}"]`);
   await assistanceCard.locator(".term", { hasText: /^estar$/ }).waitFor();
   assert.equal(
@@ -3474,7 +3483,7 @@ try {
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
   assert.match(await assistancePanel.innerText(), /querer/);
-  await assistancePanel.getByRole("button", { name: "Dismiss" }).click();
+  await assistancePanel.getByRole("button", { name: "Dismiss" }).press("Enter");
   assert.equal(await assistanceCard.getAttribute("data-card-id"), rejectId);
   assert.equal(await assistanceCard.locator(".term").innerText(), "quiero");
   assert.equal(await assistanceCard.locator(".card-head > .pill").innerText(), rejectStatus);
@@ -3541,7 +3550,10 @@ try {
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText(/assistance is unavailable/i).waitFor();
-  await assistancePanel.getByRole("button", { name: "Retry" }).waitFor();
+  const retryAssistance = assistancePanel.getByRole("button", { name: "Retry" });
+  await retryAssistance.waitFor();
+  await retryAssistance.press("Enter");
+  await assistancePanel.getByText(/assistance is unavailable/i).waitFor();
   await assistanceCard.getByRole("button", { name: "Edit" }).click();
   await assistanceCard.locator(".editor").waitFor();
   await assistanceCard.getByRole("button", { name: "Cancel" }).click();
