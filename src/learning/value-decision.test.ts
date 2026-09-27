@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { CollectedItem, Occurrence, ReviewStatus } from "../core/types";
-import { deriveLearningStudyContent } from "./policy";
+import {
+  deriveLearningStudyContent,
+  learningStudyContentSignature,
+} from "./policy";
 import {
   deriveLearningValueDecision,
-  previousEvidenceItem,
+  reconcileLearningValueBaselines,
 } from "./value-decision";
 
 interface OccurrenceInput {
   id: string;
   surfaceText: string;
   context: string;
-  minute: number;
+  minute?: number;
+  capturedAt?: string;
   sourceUrl?: string;
 }
 
@@ -18,6 +22,7 @@ const at = (minute: number) =>
   `2026-09-27T10:${String(minute).padStart(2, "0")}:00Z`;
 
 function occurrence(unitId: string, input: OccurrenceInput): Occurrence {
+  const capturedAt = input.capturedAt ?? at(input.minute ?? 0);
   return {
     id: input.id,
     lexicalUnitId: unitId,
@@ -30,7 +35,7 @@ function occurrence(unitId: string, input: OccurrenceInput): Occurrence {
       url: input.sourceUrl ?? "https://example.com/article",
       title: "Example",
     },
-    capturedAt: at(input.minute),
+    capturedAt,
   };
 }
 
@@ -64,6 +69,35 @@ function item(
   };
 }
 
+function equivalentRepeat(
+  options: { status?: ReviewStatus } = {},
+): { before: CollectedItem; after: CollectedItem } {
+  const before = item(
+    "aunque",
+    [{
+      id: "first",
+      surfaceText: "aunque",
+      context: "Aunque llueva, voy a caminar por el parque esta tarde.",
+      minute: 0,
+    }],
+    options,
+  );
+  const after: CollectedItem = {
+    ...before,
+    lexicalUnit: { ...before.lexicalUnit },
+    occurrences: [
+      ...before.occurrences,
+      occurrence(before.lexicalUnit.id, {
+        id: "repeat",
+        surfaceText: "aunque",
+        context: "Aunque llueva, voy a caminar por el parque esta tarde.",
+        minute: 1,
+      }),
+    ],
+  };
+  return { before, after };
+}
+
 describe("learning-value decision", () => {
   it.each([
     [
@@ -72,7 +106,6 @@ describe("learning-value decision", () => {
         id: "word",
         surfaceText: "aunque",
         context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-        minute: 0,
       }]),
     ],
     [
@@ -81,7 +114,6 @@ describe("learning-value decision", () => {
         id: "chunk",
         surfaceText: "tener ganas de",
         context: "Después del trabajo solemos decir tener ganas de caminar por el centro tranquilo.",
-        minute: 0,
       }]),
     ],
     [
@@ -90,12 +122,28 @@ describe("learning-value decision", () => {
         id: "sentence",
         surfaceText: "quiero aprender español porque pienso vivir allí pronto",
         context: "Hoy quiero aprender español porque pienso vivir allí pronto con mi familia.",
-        minute: 0,
       }]),
     ],
-  ])("recommends Study for first useful %s evidence", (_name, value) => {
+  ])("describes a cold/current useful %s snapshot as Study without inventing history", (_name, value) => {
     expect(deriveLearningStudyContent(value).proposal.recommended).toBe(true);
     expect(deriveLearningValueDecision({ item: value })).toMatchObject({
+      kind: "study",
+      reasonCode: "current-useful-evidence",
+    });
+  });
+
+  it("can describe first useful evidence when a real empty before-state is supplied", () => {
+    const current = item("aunque", [{
+      id: "first",
+      surfaceText: "aunque",
+      context: "Aunque llueva, voy a caminar por el parque esta tarde.",
+    }]);
+    const previous: CollectedItem = {
+      lexicalUnit: { ...current.lexicalUnit },
+      occurrences: [],
+    };
+
+    expect(deriveLearningValueDecision({ item: current, previousItem: previous })).toMatchObject({
       kind: "study",
       reasonCode: "first-useful-evidence",
     });
@@ -106,7 +154,6 @@ describe("learning-value decision", () => {
       id: "weak",
       surfaceText: "aunque",
       context: "aunque",
-      minute: 0,
     }]);
 
     expect(deriveLearningStudyContent(weak).proposal.recommended).toBe(false);
@@ -118,79 +165,81 @@ describe("learning-value decision", () => {
     });
   });
 
-  it("treats an equivalent repeat as evidence only", () => {
-    const repeated = item("aunque", [
-      {
-        id: "first",
-        surfaceText: "aunque",
-        context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-        minute: 0,
-      },
-      {
-        id: "repeat",
-        surfaceText: "aunque",
-        context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-        minute: 1,
-      },
-    ]);
+  it("rejects a cross-identity comparison before a weak-current archive early return", () => {
+    const weakCurrent = item("aunque", [{
+      id: "weak",
+      surfaceText: "aunque",
+      context: "aunque",
+    }], { id: "unit-a" });
+    const otherIdentity = item("aunque", [{
+      id: "other",
+      surfaceText: "aunque",
+      context: "Aunque llueva, voy a caminar por el parque esta tarde.",
+    }], { id: "unit-b" });
 
-    expect(deriveLearningValueDecision({ item: repeated })).toMatchObject({
+    expect(() => deriveLearningValueDecision({
+      item: weakCurrent,
+      previousItem: otherIdentity,
+    })).toThrow("within one lexical unit");
+  });
+
+  it("treats an equivalent repeat as evidence only when the real before-state is supplied", () => {
+    const { before, after } = equivalentRepeat();
+
+    expect(deriveLearningValueDecision({ item: after, previousItem: before })).toMatchObject({
       kind: "evidence-only",
       reasonCode: "effective-study-content-unchanged",
     });
   });
 
   it("does not treat occurrence count alone as extra study burden", () => {
-    const once = item("aunque", [{
-      id: "first",
-      surfaceText: "aunque",
-      context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-      minute: 0,
-    }]);
-    const twice = {
-      ...once,
+    const { before, after } = equivalentRepeat();
+
+    expect(after.occurrences).toHaveLength(2);
+    expect(deriveLearningValueDecision({ item: after, previousItem: before }).kind)
+      .toBe("evidence-only");
+  });
+
+  it("does not fabricate Evidence only from a cold multi-occurrence snapshot", () => {
+    const { after } = equivalentRepeat();
+
+    expect(deriveLearningValueDecision({ item: after })).toMatchObject({
+      kind: "study",
+      reasonCode: "current-useful-evidence",
+    });
+  });
+
+  it("recommends Improve when stronger selected context changes the effective proposal", () => {
+    const previous = item(
+      "tener ganas de",
+      [{
+        id: "weak",
+        surfaceText: "tener ganas de",
+        context: "tener ganas de",
+        minute: 0,
+      }],
+      { note: "feel like doing something" },
+    );
+    const improved: CollectedItem = {
+      ...previous,
+      lexicalUnit: { ...previous.lexicalUnit },
       occurrences: [
-        ...once.occurrences,
-        occurrence(once.lexicalUnit.id, {
-          id: "repeat",
-          surfaceText: "aunque",
-          context: "Aunque llueva, voy a caminar por el parque esta tarde.",
+        ...previous.occurrences,
+        occurrence(previous.lexicalUnit.id, {
+          id: "strong",
+          surfaceText: "tener ganas de",
+          context: "Después del trabajo solemos decir tener ganas de caminar por el centro tranquilo.",
           minute: 1,
         }),
       ],
     };
 
-    expect(twice.occurrences).toHaveLength(2);
-    expect(deriveLearningValueDecision({ item: twice }).kind).toBe("evidence-only");
-  });
-
-  it("recommends Improve when stronger selected context changes the effective proposal", () => {
-    const improved = item(
-      "tener ganas de",
-      [
-        {
-          id: "weak",
-          surfaceText: "tener ganas de",
-          context: "tener ganas de",
-          minute: 0,
-        },
-        {
-          id: "strong",
-          surfaceText: "tener ganas de",
-          context: "Después del trabajo solemos decir tener ganas de caminar por el centro tranquilo.",
-          minute: 1,
-        },
-      ],
-      { note: "feel like doing something" },
-    );
-
-    const previous = previousEvidenceItem(improved)!;
     const previousSelection = deriveLearningStudyContent(previous).proposal.occurrenceSelection!;
     const currentSelection = deriveLearningStudyContent(improved).proposal.occurrenceSelection!;
 
     expect(currentSelection.occurrence.id).toBe("strong");
     expect(currentSelection.score).toBeGreaterThan(previousSelection.score);
-    expect(deriveLearningValueDecision({ item: improved })).toMatchObject({
+    expect(deriveLearningValueDecision({ item: improved, previousItem: previous })).toMatchObject({
       kind: "improve",
       reasonCode: "selected-evidence-improved",
     });
@@ -201,7 +250,6 @@ describe("learning-value decision", () => {
       id: "weak",
       surfaceText: "aunque",
       context: "aunque",
-      minute: 0,
     }]);
     const after = {
       ...before,
@@ -221,55 +269,44 @@ describe("learning-value decision", () => {
   });
 
   it("keeps one lexical and Anki identity when evidence improves", () => {
-    const value = item(
+    const before = item(
       "aunque",
-      [
-        {
-          id: "first",
-          surfaceText: "aunque",
-          context: "Aunque llueva, voy a caminar.",
-          minute: 0,
-        },
-        {
+      [{
+        id: "first",
+        surfaceText: "aunque",
+        context: "Aunque llueva, voy a caminar.",
+        minute: 0,
+      }],
+      { id: "stable-unit", status: "ready", ankiNoteId: 4242 },
+    );
+    const after: CollectedItem = {
+      ...before,
+      lexicalUnit: { ...before.lexicalUnit, status: "inbox" },
+      occurrences: [
+        ...before.occurrences,
+        occurrence(before.lexicalUnit.id, {
           id: "better",
           surfaceText: "aunque",
           context: "Aunque llueva, voy a caminar por el parque durante toda la tarde.",
           minute: 1,
-        },
+        }),
       ],
-      { id: "stable-unit", status: "ready", ankiNoteId: 4242 },
-    );
+    };
 
-    const result = deriveLearningValueDecision({ item: value });
+    const result = deriveLearningValueDecision({ item: after, previousItem: before });
     expect(["study", "improve"]).toContain(result.kind);
-    expect(value.lexicalUnit).toMatchObject({
+    expect(after.lexicalUnit).toMatchObject({
       id: "stable-unit",
       ankiNoteId: 4242,
     });
   });
 
   it("preserves Ready as user state for an equivalent repeat", () => {
-    const ready = item(
-      "aunque",
-      [
-        {
-          id: "first",
-          surfaceText: "aunque",
-          context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-          minute: 0,
-        },
-        {
-          id: "repeat",
-          surfaceText: "aunque",
-          context: "Aunque llueva, voy a caminar por el parque esta tarde.",
-          minute: 1,
-        },
-      ],
-      { status: "ready" },
-    );
+    const { before, after } = equivalentRepeat({ status: "ready" });
 
-    expect(deriveLearningValueDecision({ item: ready }).kind).toBe("evidence-only");
-    expect(ready.lexicalUnit.status).toBe("ready");
+    expect(deriveLearningValueDecision({ item: after, previousItem: before }).kind)
+      .toBe("evidence-only");
+    expect(after.lexicalUnit.status).toBe("ready");
   });
 
   it("derives same-canonical identities independently", () => {
@@ -279,7 +316,6 @@ describe("learning-value decision", () => {
         id: "financial",
         surfaceText: "banco",
         context: "El banco aprobó el préstamo para nuestra casa ayer.",
-        minute: 0,
       }],
       { id: "bank-financial", note: "financial institution" },
     );
@@ -289,7 +325,6 @@ describe("learning-value decision", () => {
         id: "river",
         surfaceText: "banco",
         context: "banco",
-        minute: 0,
       }],
       { id: "bank-river" },
     );
@@ -307,7 +342,6 @@ describe("learning-value decision", () => {
         id: "financial",
         surfaceText: "banco",
         context: "El banco aprobó el préstamo para nuestra casa ayer.",
-        minute: 0,
       }],
       { id: "unit-a", note: "financial institution" },
     );
@@ -317,7 +351,6 @@ describe("learning-value decision", () => {
         id: "river",
         surfaceText: "banco",
         context: "banco",
-        minute: 1,
       }],
       { id: "unit-b" },
     );
@@ -349,7 +382,7 @@ describe("learning-value decision", () => {
     expect(deriveLearningValueDecision({ item: survivor }).kind).not.toBe("archive");
   });
 
-  it("returns identical decisions for equivalent restored corpus state", () => {
+  it("returns identical snapshot decisions for equivalent restored corpus state", () => {
     const original = item("aunque", [
       {
         id: "first",
@@ -386,5 +419,92 @@ describe("learning-value decision", () => {
 
     expect(() => deriveLearningValueDecision({ item: current, previousItem: previous }))
       .toThrow("within one lexical unit");
+  });
+
+  it("uses the actual loaded before-state for delayed older-but-stronger evidence", () => {
+    const before = item("policy evidence", [{
+      id: "existing",
+      surfaceText: "policy evidence",
+      context: "policy evidence appears in a controlled sentence with enough surrounding words.",
+      capturedAt: "2026-09-27T10:01:00Z",
+    }], { status: "ready" });
+    const after: CollectedItem = {
+      ...before,
+      lexicalUnit: { ...before.lexicalUnit, status: "inbox" },
+      occurrences: [
+        ...before.occurrences,
+        occurrence(before.lexicalUnit.id, {
+          id: "delayed-strong",
+          surfaceText: "policy evidence",
+          context: "Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.",
+          capturedAt: "2026-09-27T10:00:00Z",
+        }),
+      ],
+    };
+
+    const baselines = reconcileLearningValueBaselines([before], [after], {});
+    expect(baselines[before.lexicalUnit.id]).toBe(before);
+    expect(learningStudyContentSignature(before))
+      .not.toBe(learningStudyContentSignature(after));
+    expect(deriveLearningValueDecision({
+      item: after,
+      previousItem: baselines[before.lexicalUnit.id],
+    })).toMatchObject({
+      kind: "improve",
+      reasonCode: "selected-evidence-improved",
+    });
+  });
+
+  it("does not use UUID order as mutation order for same-timestamp multi-evidence loads", () => {
+    const before = item("policy evidence", [{
+      id: "existing",
+      surfaceText: "policy evidence",
+      context: "policy evidence appears in a controlled sentence with enough surrounding words.",
+      capturedAt: "2026-09-27T10:01:00Z",
+    }], { status: "ready" });
+    const sameTimestamp = "2026-09-27T10:00:00Z";
+    const after: CollectedItem = {
+      ...before,
+      lexicalUnit: { ...before.lexicalUnit, status: "inbox" },
+      occurrences: [
+        ...before.occurrences,
+        occurrence(before.lexicalUnit.id, {
+          id: "zzzz-random",
+          surfaceText: "policy evidence",
+          context: "Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.",
+          capturedAt: sameTimestamp,
+        }),
+        occurrence(before.lexicalUnit.id, {
+          id: "aaaa-random",
+          surfaceText: "policy evidence",
+          context: "Today the policy evidence appears in another useful sentence.",
+          capturedAt: sameTimestamp,
+        }),
+      ],
+    };
+
+    const baselines = reconcileLearningValueBaselines([before], [after], {});
+    expect(baselines[before.lexicalUnit.id]?.occurrences.map((value) => value.id))
+      .toEqual(["existing"]);
+    expect(deriveLearningValueDecision({
+      item: after,
+      previousItem: baselines[before.lexicalUnit.id],
+    }).kind).toBe("improve");
+  });
+
+  it("retains a mutation baseline across status-only reloads", () => {
+    const { before, after } = equivalentRepeat();
+    const baselines = reconcileLearningValueBaselines([before], [after], {});
+    const readyAfter: CollectedItem = {
+      ...after,
+      lexicalUnit: { ...after.lexicalUnit, status: "ready", updatedAt: at(2) },
+    };
+
+    const retained = reconcileLearningValueBaselines([after], [readyAfter], baselines);
+    expect(retained[readyAfter.lexicalUnit.id]).toBe(before);
+    expect(deriveLearningValueDecision({
+      item: readyAfter,
+      previousItem: retained[readyAfter.lexicalUnit.id],
+    }).kind).toBe("evidence-only");
   });
 });
