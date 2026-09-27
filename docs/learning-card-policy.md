@@ -48,6 +48,32 @@ Recency contributes no quality points. It breaks equal-quality ties; occurrence 
 
 The detail view shows the selected observed form, selected context, selection number/count, and the score explanation.
 
+## Learning-value layer
+
+ACCP-007 adds a separate derived decision above this card-content policy.
+
+`deriveLearningStudyContent()` still answers **what card could be made**. `deriveLearningValueDecision()` answers **whether the current evidence should cause or maintain study burden**.
+
+The learning-value layer has four explicit outcomes:
+
+- **Study** — first/current useful evidence supports one study item;
+- **Improve** — stronger/newly usable evidence materially improves that item;
+- **Evidence only** — retain the encounter without increasing study burden because effective study content is unchanged;
+- **Archive for now** — current ACCP-005 content is not studyable enough to recommend a card.
+
+The decision reuses ACCP-002 occurrence quality and the ACCP-005 effective study-content signature. It does not define another occurrence scorer or another card renderer.
+
+Recommendation is derived, not persisted. It never changes `LexicalUnit.id`, export bindings, Anki note identity, or status automatically. Ready and Archive remain explicit human workflow actions, and ACCP-005 remains the fail-closed gate for whether Ready can be approved at all.
+
+An equivalent repeated occurrence may therefore produce:
+
+```text
+recommendation = Evidence only
+status         = Ready
+```
+
+when the user already approved the unchanged study content. A stronger occurrence that changes effective study content keeps the existing ACCP-005 behavior: Ready returns to Inbox, while ACCP-007 explains the event as Improve.
+
 ## Policy-v2 decision table
 
 | Unit | Evidence | Decision |
