@@ -3638,7 +3638,12 @@ try {
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText(/Checking/i).waitFor();
-  await assistancePanel.getByRole("button", { name: "Check again" }).click();
+  const checkAgain = assistancePanel.getByRole("button", { name: "Check again" });
+  await checkAgain.waitFor();
+  // This regression deliberately starts request B while request A is still pending.
+  // React may replace the checking subtree while Playwright is waiting for pointer
+  // stability, so dispatch the native click as soon as the current button is attached.
+  await checkAgain.evaluate((button) => button.click());
   await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
   assert.match(await assistancePanel.innerText(), /newlemma/);
   await panel.waitForTimeout(1300);
