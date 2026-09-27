@@ -3424,6 +3424,7 @@ try {
   await suggestCanonical.focus();
   await panel.keyboard.press("Enter");
   await assistance.getByText("Suggestion", { exact: true }).waitFor();
+  await assistance.getByRole("status").filter({ hasText: /Suggestion available/i }).waitFor();
   assert.match(await assistance.innerText(), /estar/);
   assert.match(
     await assistanceCard.locator(".canonical-evidence").innerText(),
@@ -3508,6 +3509,9 @@ try {
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText("Possible canonical forms", { exact: true }).waitFor();
+  await assistancePanel.getByRole("status").filter({
+    hasText: /Multiple possible canonical forms are available/i,
+  }).waitFor();
   const ambiguousChoices = assistancePanel.locator('input[type="radio"]');
   assert.equal(await ambiguousChoices.count(), 2);
   assert.equal(
