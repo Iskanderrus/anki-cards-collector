@@ -15,9 +15,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.3
+          cache: npm
       - run: npm install --global npm@11.6.0
-      - run: npm install
+      - name: Verify pinned Node/npm toolchain
+        run: |
+          test "$(node --version)" = "v22.23.3"
+          test "$(npm --version)" = "11.6.0"
+      - name: Verify npm ci rejects lockfile drift
+        run: |
+          PROBE="$(mktemp -d)"
+          cp package.json package-lock.json "$PROBE/"
+          node --input-type=module - "$PROBE/package.json" <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const path = process.argv[2];
+          const pkg = JSON.parse(readFileSync(path, "utf8"));
+          pkg.dependencies.react = "19.1.0";
+          writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+          NODE
+          if (cd "$PROBE" && npm ci --ignore-scripts --dry-run); then
+            echo "npm ci unexpectedly accepted a package.json/package-lock.json mismatch" >&2
+            exit 1
+          fi
+          rm -rf "$PROBE"
+      - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run check
 
   browser:
@@ -27,9 +49,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.3
+          cache: npm
       - run: npm install --global npm@11.6.0
-      - run: npm install
+      - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build:e2e
       - run: xvfb-run -a npm run test:e2e
@@ -38,7 +61,8 @@ jobs:
           name: store-screenshot
           path: artifacts/store/screenshot-1.png
           if-no-files-found: error
-      - run: npm run build
+      - name: Build and validate actual release configuration
+        run: npm run check:release
       - run: xvfb-run -a node tests/e2e/assistance-production-smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
@@ -59,12 +83,58 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.3
+          cache: npm
       - run: npm install --global npm@11.6.0
-      - run: npm install
+      - run: npm ci
       - run: npm run package:store
       - uses: actions/upload-artifact@v4
         with:
           name: chrome-web-store-package
           path: release/*
           if-no-files-found: error
+
+  reproducible-package:
+    needs: [check, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout build A
+        uses: actions/checkout@v4
+        with:
+          path: build-a
+      - name: Checkout build B
+        uses: actions/checkout@v4
+        with:
+          path: build-b
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+      - run: npm install --global npm@11.6.0
+      - name: Clean build A
+        working-directory: build-a
+        run: |
+          npm ci
+          npm run package:store
+      - name: Clean build B
+        working-directory: build-b
+        run: |
+          npm ci
+          npm run package:store
+      - name: Verify byte-identical store ZIPs
+        run: |
+          ZIP_A="$(find build-a/release -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          ZIP_B="$(find build-b/release -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$ZIP_A"
+          test -n "$ZIP_B"
+          BUILD_A_SHA256="$(sha256sum "$ZIP_A" | awk '{print $1}')"
+          BUILD_B_SHA256="$(sha256sum "$ZIP_B" | awk '{print $1}')"
+          PACKAGE_SIZE="$(stat -c '%s' "$ZIP_A")"
+          PACKAGE_FILES="$(unzip -Z1 "$ZIP_A" | wc -l | tr -d ' ')"
+          echo "BUILD_A_SHA256=$BUILD_A_SHA256"
+          echo "BUILD_B_SHA256=$BUILD_B_SHA256"
+          echo "REPRODUCIBLE=$([ "$BUILD_A_SHA256" = "$BUILD_B_SHA256" ] && echo YES || echo NO)"
+          echo "PACKAGE_SIZE=$PACKAGE_SIZE"
+          echo "PACKAGE_FILES=$PACKAGE_FILES"
+          echo "NODE_VERSION=$(node --version)"
+          echo "NPM_VERSION=$(npm --version)"
+          test "$BUILD_A_SHA256" = "$BUILD_B_SHA256"
