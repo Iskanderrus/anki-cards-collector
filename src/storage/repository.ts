@@ -18,6 +18,7 @@ export interface EditLexicalUnitInput {
   canonicalText: string;
   language: string;
   note: string;
+  expectedUpdatedAt?: string;
   occurrenceId?: string;
   surfaceText?: string;
   context?: string;
@@ -813,6 +814,14 @@ export class CaptureRepository {
       async () => {
         const current = await this.database.lexicalUnits.get(id);
         if (!current) throw new Error("Collected item no longer exists.");
+        if (
+          changes.expectedUpdatedAt !== undefined
+          && current.updatedAt !== changes.expectedUpdatedAt
+        ) {
+          throw new Error(
+            "Canonical edit is stale because the lexical unit changed. Review the current item before saving.",
+          );
+        }
 
         const currentOccurrences = await this.database.occurrences
           .where("lexicalUnitId")
