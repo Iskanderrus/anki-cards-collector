@@ -4171,6 +4171,18 @@ try {
     hasText: "Backup validated. Review the dry-run counts before restoring.",
   }).waitFor();
 
+  const accp024UnrelatedSourceUrlMode =
+    accp024PrecommitBaseSettings.sourceUrlMode === "none" ? "query" : "none";
+  await panel.evaluate(async ({ sourceUrlMode }) => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    await chrome.storage.local.set({
+      collectorSettings: {
+        ...stored.collectorSettings,
+        sourceUrlMode,
+      },
+    });
+  }, { sourceUrlMode: accp024UnrelatedSourceUrlMode });
+
   await panel.evaluate(async ({ unitId }) => {
     await new Promise((resolve, reject) => {
       const openRequest = indexedDB.open("anki-cards-collector");
@@ -4246,8 +4258,11 @@ try {
   });
   assert.deepEqual(
     accp024PrecommitFailureState.settings,
-    accp024PrecommitBaseSettings,
-    "Pre-commit compensation must restore all prior settings without losing unrelated preferences.",
+    {
+      ...accp024PrecommitBaseSettings,
+      sourceUrlMode: accp024UnrelatedSourceUrlMode,
+    },
+    "Pre-commit compensation must restore the latest durable settings without losing an unrelated preference changed after preview.",
   );
   assert.equal(
     accp024PrecommitFailureState.hasBackupOnlyProfile,
@@ -4295,6 +4310,15 @@ try {
   await panel.locator(".notice", { hasText: "Backup restored: 1 items added" }).waitFor();
   await ensureQueue(panel);
   await (await queueRowForTerm(panel, "accp24precommit")).waitFor();
+  const accp024RetrySettings = await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return stored.collectorSettings;
+  });
+  assert.equal(
+    accp024RetrySettings.sourceUrlMode,
+    accp024UnrelatedSourceUrlMode,
+    "A safe retry must preserve the unrelated durable setting that changed after preview.",
+  );
 
   markE2eStage("complete");
   console.log("Browser extension capture, compact queue/detail, canonicalization, canonical-form assistance, keyboard, accessibility, and permission checks passed.");
