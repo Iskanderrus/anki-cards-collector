@@ -1,4 +1,4 @@
-import type { CollectedItem, Occurrence } from "../core/types";
+import type { CollectedItem } from "../core/types";
 import {
   deriveLearningStudyContent,
   learningStudyContentSignature,
@@ -11,6 +11,7 @@ export type LearningValueDecisionKind =
   | "archive";
 
 export type LearningValueReasonCode =
+  | "current-useful-evidence"
   | "first-useful-evidence"
   | "current-evidence-not-studyable"
   | "new-evidence-makes-studyable"
@@ -28,28 +29,14 @@ export interface LearningValueDecision {
 export interface LearningValueDecisionInput {
   item: CollectedItem;
   /**
-   * Optional semantic "before" state for mutation-level comparisons.
-   * Review UI normally omits this and derives the previous evidence boundary
-   * from the current lexical unit's local occurrence history.
+   * The real semantic state immediately before the mutation being explained.
+   * Omit it when no trustworthy before-state is available; the decision then
+   * describes only the current snapshot and never fabricates event history.
    */
   previousItem?: CollectedItem;
 }
 
-function occurrenceChronology(left: Occurrence, right: Occurrence): number {
-  return left.capturedAt.localeCompare(right.capturedAt) || left.id.localeCompare(right.id);
-}
-
-export function previousEvidenceItem(item: CollectedItem): CollectedItem | null {
-  if (item.occurrences.length <= 1) return null;
-
-  const newest = [...item.occurrences].sort(occurrenceChronology).at(-1);
-  if (!newest) return null;
-
-  return {
-    lexicalUnit: item.lexicalUnit,
-    occurrences: item.occurrences.filter((occurrence) => occurrence.id !== newest.id),
-  };
-}
+export type LearningValueBaselines = Record<string, CollectedItem>;
 
 function decision(
   kind: LearningValueDecisionKind,
@@ -60,10 +47,82 @@ function decision(
   return { kind, label, reasonCode, reason };
 }
 
+/**
+ * Signature for inputs that can change learning-value semantics.
+ *
+ * Workflow status, timestamps on the lexical unit, and Anki linkage are
+ * deliberately excluded. Occurrences are sorted by stable identity, not by
+ * capturedAt, because capturedAt is source chronology rather than ingestion
+ * order.
+ */
+export function learningEvidenceSignature(item: CollectedItem): string {
+  return JSON.stringify({
+    lexicalUnit: {
+      id: item.lexicalUnit.id,
+      contentKey: item.lexicalUnit.contentKey,
+      canonicalText: item.lexicalUnit.canonicalText,
+      normalizedCanonicalText: item.lexicalUnit.normalizedCanonicalText,
+      language: item.lexicalUnit.language,
+      note: item.lexicalUnit.note,
+    },
+    occurrences: [...item.occurrences]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((occurrence) => ({
+        id: occurrence.id,
+        lexicalUnitId: occurrence.lexicalUnitId,
+        surfaceText: occurrence.surfaceText,
+        normalizedSurfaceText: occurrence.normalizedSurfaceText,
+        context: occurrence.context,
+        source: occurrence.source,
+        capturedAt: occurrence.capturedAt,
+      })),
+  });
+}
+
+/**
+ * Preserve the actual pre-mutation item snapshot across side-panel reloads.
+ *
+ * A status-only reload keeps the existing baseline. A learning-relevant corpus
+ * mutation replaces it with the immediately preceding loaded snapshot. New
+ * identities have no before-state. Removed identities are discarded.
+ */
+export function reconcileLearningValueBaselines(
+  previousItems: readonly CollectedItem[],
+  currentItems: readonly CollectedItem[],
+  existing: LearningValueBaselines,
+): LearningValueBaselines {
+  const previousById = new Map(
+    previousItems.map((item) => [item.lexicalUnit.id, item]),
+  );
+  const next: LearningValueBaselines = {};
+
+  for (const item of currentItems) {
+    const id = item.lexicalUnit.id;
+    const previous = previousById.get(id);
+    if (
+      previous
+      && learningEvidenceSignature(previous) !== learningEvidenceSignature(item)
+    ) {
+      next[id] = previous;
+      continue;
+    }
+
+    const retained = existing[id];
+    if (retained) next[id] = retained;
+  }
+
+  return next;
+}
+
 export function deriveLearningValueDecision(
   input: LearningValueDecisionInput,
 ): LearningValueDecision {
-  const { item } = input;
+  const { item, previousItem } = input;
+
+  if (previousItem && previousItem.lexicalUnit.id !== item.lexicalUnit.id) {
+    throw new Error("Learning-value comparison must stay within one lexical unit.");
+  }
+
   const current = deriveLearningStudyContent(item);
 
   if (!current.proposal.recommended) {
@@ -75,12 +134,16 @@ export function deriveLearningValueDecision(
     );
   }
 
-  const previousItem = input.previousItem ?? previousEvidenceItem(item);
-  if (previousItem && previousItem.lexicalUnit.id !== item.lexicalUnit.id) {
-    throw new Error("Learning-value comparison must stay within one lexical unit.");
+  if (!previousItem) {
+    return decision(
+      "study",
+      "Study",
+      "current-useful-evidence",
+      "Current evidence supports one useful study card.",
+    );
   }
 
-  if (!previousItem || previousItem.occurrences.length === 0) {
+  if (previousItem.occurrences.length === 0) {
     return decision(
       "study",
       "Study",
@@ -120,7 +183,7 @@ export function deriveLearningValueDecision(
       "improve",
       "Improve",
       "selected-evidence-improved",
-      "This occurrence provides stronger selected context than the evidence currently used for the card.",
+      "This mutation adds stronger selected context than the prior study evidence.",
     );
   }
 
