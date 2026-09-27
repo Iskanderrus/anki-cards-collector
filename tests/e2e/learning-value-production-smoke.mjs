@@ -126,6 +126,11 @@ async function capture(contentPage, panel, selector, phrase) {
 async function screenshot(panel, name) {
   await mkdir("artifacts/accp007", { recursive: true });
   await panel.setViewportSize({ width: 640, height: 600 });
+  const learningValue = panel.locator(".learning-value").first();
+  await learningValue.waitFor();
+  await learningValue.evaluate((node) => {
+    node.scrollIntoView({ block: "center", inline: "nearest" });
+  });
   await panel.screenshot({
     path: `artifacts/accp007/${name}.png`,
     fullPage: false,
