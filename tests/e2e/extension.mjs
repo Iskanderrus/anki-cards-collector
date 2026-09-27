@@ -3517,12 +3517,14 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   assistanceCard = await cardForTerm(panel, "hago");
+  const readyInvalidationId = await assistanceCard.getAttribute("data-card-id");
   await assistanceCard.getByRole("button", { name: "Ready" }).click();
   await assistanceCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
   await assistancePanel.getByRole("button", { name: "Use suggestion" }).click();
+  assistanceCard = panel.locator(`[data-card-id="${readyInvalidationId}"]`);
   await assistanceCard.locator(".term", { hasText: /^hacer$/ }).waitFor();
   await assistanceCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
   assert.equal(
