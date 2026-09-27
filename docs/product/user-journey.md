@@ -169,4 +169,4 @@ This journey does not include:
 - silent Ready promotion;
 - silent Staged-to-Anki export;
 - silent movement of existing Anki cards between decks;
-- merge/split, card-policy v2, morphology assistance, or learning-value decisions owned by later tickets.
+- automatic learning-value decisions or other later-ticket autonomous learning policy.
