@@ -3341,7 +3341,7 @@ try {
   remediationCard = await cardForTerm(panel, "recapture approval");
   assert.match(
     await remediationCard.locator(".learning-value").innerText(),
-    /Learning value[\s\S]*Study[\s\S]*Current evidence supports one useful study card/i,
+    /Learning value[\s\S]*Study[\s\S]*Current corpus supports one useful study card/i,
     "ACCP007_CURRENT_USEFUL_EVIDENCE: useful current material should recommend Study without fabricating event history.",
   );
   await remediationCard.getByRole("button", { name: "Ready" }).click();
@@ -3366,8 +3366,19 @@ try {
   );
   assert.match(
     await remediationCard.locator(".learning-value").innerText(),
-    /Evidence only[\s\S]*adds evidence, but the current study card is unchanged/i,
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
     "ACCP007_EQUIVALENT_REPEAT: equivalent evidence should not add study burden.",
+  );
+
+  markE2eStage("accp007-evidence-only-reopen-stability");
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  remediationCard = await cardForTerm(panel, "recapture approval");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
+    "The same persisted corpus must remain Evidence only after side-panel recreation.",
   );
 
   markE2eStage("accp005-stronger-evidence-invalidates-ready");
@@ -3403,8 +3414,19 @@ try {
   );
   assert.match(
     await remediationCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger selected context/i,
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
     "ACCP007_BETTER_EVIDENCE: stronger selected evidence should explain the Improve recommendation.",
+  );
+
+  markE2eStage("accp007-improve-reopen-stability");
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  remediationCard = await cardForTerm(panel, "policy evidence");
+  assert.match(
+    await remediationCard.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    "The same persisted corpus must remain Improve after side-panel recreation.",
   );
 
   markE2eStage("accp005-weak-context-fails-closed");
@@ -3528,7 +3550,7 @@ try {
   await chronologyCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
   assert.match(
     await chronologyCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger selected context/i,
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
     "Delayed staged evidence must compare against the real pre-import state even when capturedAt is older.",
   );
 
@@ -3597,7 +3619,7 @@ try {
   );
   assert.match(
     await sameTimeCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger selected context/i,
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
     "Same-timestamp batch evidence must use the real pre-batch snapshot, not UUID ordering.",
   );
 
