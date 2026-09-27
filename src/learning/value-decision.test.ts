@@ -80,7 +80,7 @@ describe("learning-value decision", () => {
       item("tener ganas de", [{
         id: "chunk",
         surfaceText: "tener ganas de",
-        context: "Después del trabajo suelo tener ganas de caminar por el centro tranquilo.",
+        context: "Después del trabajo solemos decir tener ganas de caminar por el centro tranquilo.",
         minute: 0,
       }]),
     ],
@@ -171,13 +171,13 @@ describe("learning-value decision", () => {
         {
           id: "weak",
           surfaceText: "tener ganas de",
-          context: "Hoy tengo ganas de salir.",
+          context: "Hoy puedo decir tener ganas de salir.",
           minute: 0,
         },
         {
           id: "strong",
           surfaceText: "tener ganas de",
-          context: "Después del trabajo suelo tener ganas de caminar por el centro tranquilo.",
+          context: "Después del trabajo solemos decir tener ganas de caminar por el centro tranquilo.",
           minute: 1,
         },
       ],
