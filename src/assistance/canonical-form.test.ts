@@ -256,6 +256,27 @@ describe("ACCP-006 corpus safety", () => {
     expect(JSON.stringify(after)).toBe(before);
   });
 
+  it("rejects a candidate that was not offered by the provider result", async () => {
+    const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
+    const result = await requestCanonicalFormAssistance(localCanonicalFormProvider, {
+      lexicalUnitId: captured.lexicalUnit.id,
+      lexicalUnitUpdatedAt: captured.lexicalUnit.updatedAt,
+      language: captured.lexicalUnit.language,
+      observedForm: captured.occurrences[0]!.surfaceText,
+      currentCanonical: captured.lexicalUnit.canonicalText,
+    });
+    if (result.kind !== "suggestion") throw new Error("Expected one suggestion.");
+
+    await expect(
+      acceptCanonicalFormSuggestion(repository, result, {
+        ...result.suggestion,
+        proposedCanonical: "ser",
+      }),
+    ).rejects.toThrow(/no longer valid/i);
+
+    expect((await repository.list())[0]?.lexicalUnit.canonicalText).toBe("tengo");
+  });
+
   it("accepts through the canonical edit path while preserving lexical identity, observed evidence and export binding", async () => {
     const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
