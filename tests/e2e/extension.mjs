@@ -4033,11 +4033,21 @@ try {
     "Post-commit refresh failure must not compensate the restored profile out of settings.",
   );
   assert.equal(accp024CommittedState.databaseState.unit?.id, accp024UnitId);
+  assert.equal(
+    accp024CommittedState.databaseState.unit?.status,
+    "ready",
+    "The restored review state must survive a post-commit refresh failure.",
+  );
   assert.equal(accp024CommittedState.databaseState.occurrence?.id, accp024OccurrenceId);
   assert.equal(
     accp024CommittedState.databaseState.binding?.profileId,
     accp024ProfileId,
     "The committed export binding must retain the backup-introduced profile id.",
+  );
+  assert.equal(
+    accp024CommittedState.databaseState.binding?.state,
+    "reserved",
+    "The committed export binding state must remain intact after refresh failure.",
   );
 
   const accp024WarningA11y = await new AxeBuilder({ page: panel })
@@ -4199,13 +4209,18 @@ try {
       openRequest.onerror = () => reject(openRequest.error);
       openRequest.onsuccess = () => {
         const db = openRequest.result;
-        const transaction = db.transaction(["lexicalUnits", "occurrences"], "readonly");
+        const transaction = db.transaction(
+          ["lexicalUnits", "occurrences", "exportBindings"],
+          "readonly",
+        );
         const unitRequest = transaction.objectStore("lexicalUnits").get(unitId);
         const occurrenceRequest = transaction.objectStore("occurrences").get(occurrenceId);
+        const bindingRequest = transaction.objectStore("exportBindings").get(unitId);
         transaction.oncomplete = () => {
           const result = {
             unit: unitRequest.result ?? null,
             occurrence: occurrenceRequest.result ?? null,
+            binding: bindingRequest.result ?? null,
           };
           db.close();
           resolve(result);
@@ -4218,6 +4233,7 @@ try {
       };
     });
     return {
+      settings: stored.collectorSettings,
       hasBackupOnlyProfile: stored.collectorSettings.exportProfiles.some(
         (profile) => profile.id === profileId,
       ),
@@ -4228,10 +4244,20 @@ try {
     occurrenceId: accp024PrecommitOccurrenceId,
     profileId: accp024PrecommitProfileId,
   });
+  assert.deepEqual(
+    accp024PrecommitFailureState.settings,
+    accp024PrecommitBaseSettings,
+    "Pre-commit compensation must restore all prior settings without losing unrelated preferences.",
+  );
   assert.equal(
     accp024PrecommitFailureState.hasBackupOnlyProfile,
     false,
     "A pre-commit repository failure must compensate the preparatory backup-only profile.",
+  );
+  assert.equal(
+    accp024PrecommitFailureState.databaseState.binding?.profileId,
+    "accp024-conflicting-local-profile",
+    "A pre-commit repository failure must leave the pre-existing export binding untouched.",
   );
   assert.equal(
     accp024PrecommitFailureState.databaseState.unit,
