@@ -23,9 +23,9 @@ The command:
 3. creates `release/anki-cards-collector-<version>.zip` with `manifest.json` at the archive root;
 4. creates a matching `.sha256` checksum.
 
-The package script normalizes file timestamps and feeds a sorted file list to `zip -X` so repeated builds from the same sources are stable.
+The package script normalizes file timestamps and feeds a sorted file list to `zip -X`. CI proves reproducibility by checking out the same commit into two independent workspaces, running `npm ci` and `npm run package:store` in each, and requiring byte-identical ZIP SHA-256 hashes.
 
-## CI artifacts
+Dependency maintenance may use `npm install`; canonical verification and release packaging must use `npm ci` so `package.json`/lockfile drift fails closed.\n\n## CI artifacts
 
 Every pull request and push to `main` runs the normal code checks, real Chromium E2E tests, and store-package build.
 
