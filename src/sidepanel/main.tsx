@@ -3123,7 +3123,9 @@ function App(): React.ReactElement {
                       const suggestion = assistanceResult.suggestion;
                       return (
                         <div className="canonical-assistance-result">
-                          <strong>Suggestion</strong>
+                          <div role="status" aria-live="polite">
+                            <strong>Suggestion</strong> available.
+                          </div>
                           <div className="canonical-assistance-choice">
                             <span dir="auto">{suggestion.proposedCanonical}</span>
                             {suggestion.confidence && <span className="pill">{suggestion.confidence}</span>}
@@ -3159,6 +3161,9 @@ function App(): React.ReactElement {
                     );
                     return (
                       <div className="canonical-assistance-result">
+                        <div role="status" aria-live="polite">
+                          Multiple possible canonical forms are available. Choose one deliberately.
+                        </div>
                         <fieldset className="canonical-assistance-options">
                           <legend>Possible canonical forms</legend>
                           {assistanceResult.suggestions.map((suggestion) => (
