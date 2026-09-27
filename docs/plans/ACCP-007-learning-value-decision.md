@@ -35,7 +35,7 @@ No new persistent recommendation or override state is required. Backup v4 and In
 
 Inputs are the persisted local `CollectedItem` only. ACCP-007 is corpus-relative, not event-relative.
 
-The current ACCP-002-selected occurrence is compared with a deterministic counterfactual corpus formed by removing that selected occurrence and deriving ACCP-005 again from the remaining persisted occurrences. This asks whether the current best evidence is equivalent to, stronger than, or merely different from the best alternative evidence already present in the same lexical unit.
+The current ACCP-002-selected occurrence is compared with a deterministic counterfactual corpus formed by removing that selected occurrence and deriving ACCP-005 again from the remaining persisted occurrences. This asks whether the current best evidence is equivalent to, stronger than, or merely different from the other studyable evidence already present in the same lexical unit.
 
 `capturedAt` remains source chronology and participates only in ACCP-002's documented deterministic selection tie-break. ACCP-007 never interprets it, UUID order, or side-panel session state as ingestion/mutation order.
 
@@ -59,12 +59,12 @@ The current accepted corpus state is authoritative. Unaccepted ACCP-006 suggesti
 | current ACCP-005 proposal is non-recommended | **Archive for now** | current corpus does not support a useful study card |
 | current proposal is useful and has no studyable alternative occurrence | **Study** | current corpus supports one useful study card |
 | removing the selected occurrence leaves the same ACCP-005 effective signature | **Evidence only** | equivalent persisted evidence already supports the same study card |
-| selected occurrence has strictly higher ACCP-002 quality than the best studyable alternative | **Improve** | the selected evidence is materially stronger than the best alternative in this corpus |
+| selected occurrence has strictly higher ACCP-002 quality than the other studyable evidence | **Improve** | the selected evidence is materially stronger than the other studyable evidence in this corpus |
 | alternative study content exists but is different without a strict quality improvement | **Study** | useful study content exists, but no deterministic improvement claim is justified |
 
 Occurrence count by itself never creates a new card or an Improve recommendation.
 
-The fallback `Study` rule is deliberate: different content is not labelled “Improve” unless the current selected occurrence is strictly stronger than the best studyable alternative.
+The fallback `Study` rule is deliberate: different content is not labelled “Improve” unless the current selected occurrence is strictly stronger than the other studyable evidence.
 
 ## Repeated evidence
 
@@ -80,7 +80,7 @@ That outcome:
 
 ## Better evidence
 
-When the current ACCP-002 selected occurrence has strictly higher quality than the best studyable alternative occurrence in the persisted corpus, the recommendation is `improve`.
+When the current ACCP-002 selected occurrence has strictly higher quality than the other independently studyable occurrence in the persisted corpus, the recommendation is `improve`.
 
 Existing ACCP-005 invalidation remains authoritative: if the effective study signature changed, a previously Ready item returns to Inbox and must be explicitly approved again.
 
@@ -159,7 +159,7 @@ Coverage includes:
 - learner-note-supported current corpus;
 - exact/equivalent repeat;
 - Evidence only stability after side-panel/browser recreation;
-- stronger selected evidence against the best studyable alternative;
+- stronger selected evidence against the other studyable evidence;
 - delayed staged import whose stronger evidence has an older `capturedAt`;
 - same-timestamp multi-evidence staged commit without UUID-as-mutation-order behavior;
 - Study fallback when the alternative evidence is not independently studyable;
