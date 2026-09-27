@@ -544,11 +544,6 @@ function App(): React.ReactElement {
     [activeId, items],
   );
 
-  useEffect(() => {
-    canonicalAssistanceGate.current.invalidate();
-    setCanonicalAssistanceState({ kind: "idle" });
-  }, [activeId, activeItem?.lexicalUnit.updatedAt]);
-
   const reviewSessionItems = useMemo(
     () => reviewSessionIds
       .map((id) => items.find((item) => item.lexicalUnit.id === id))
@@ -649,6 +644,10 @@ function App(): React.ReactElement {
   }, [editDraft?.canonicalText, editDraft?.language, editingId]);
 
   function selectActiveId(id: string | null): void {
+    if (activeIdRef.current !== id) {
+      canonicalAssistanceGate.current.invalidate();
+      setCanonicalAssistanceState({ kind: "idle" });
+    }
     activeIdRef.current = id;
     setActiveId(id);
   }
