@@ -3483,6 +3483,7 @@ try {
   );
 
   markE2eStage("accp007-delayed-staged-older-stronger");
+  await clearActiveCaptureProfile(panel);
   await setCaptureLanguage(panel, "es");
   await selectText(contentPage, "#learning-chronology-first", "chronology evidence");
   await contentPage.bringToFront();
