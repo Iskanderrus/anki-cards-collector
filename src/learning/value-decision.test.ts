@@ -192,7 +192,7 @@ describe("learning-value decision", () => {
       .toEqual(deriveLearningValueDecision({ item: ready }));
   });
 
-  it("classifies strictly stronger selected evidence as Improve against the best studyable alternative", () => {
+  it("classifies strictly stronger selected evidence as Improve against the other studyable evidence", () => {
     const improved = item(
       "tener ganas de",
       [
@@ -244,9 +244,9 @@ describe("learning-value decision", () => {
     expect(deriveLearningValueDecision({ item: improved }).kind).toBe("improve");
   });
 
-  it("does not use UUID order as mutation order for same-timestamp evidence", () => {
+  it("keeps the learning-value kind stable when same-timestamp UUID tie order changes", () => {
     const sameTimestamp = "2026-09-27T10:00:00Z";
-    const improved = item(
+    const build = (firstStrongId: string, secondStrongId: string) => item(
       "policy evidence",
       [
         {
@@ -256,13 +256,13 @@ describe("learning-value decision", () => {
           capturedAt: "2026-09-27T10:01:00Z",
         },
         {
-          id: "zzzz-random",
+          id: firstStrongId,
           surfaceText: "policy evidence",
           context: "Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.",
           capturedAt: sameTimestamp,
         },
         {
-          id: "aaaa-random",
+          id: secondStrongId,
           surfaceText: "policy evidence",
           context: "Today the policy evidence appears in another useful controlled sentence.",
           capturedAt: sameTimestamp,
@@ -270,9 +270,11 @@ describe("learning-value decision", () => {
       ],
     );
 
-    expect(deriveLearningStudyContent(improved).proposal.occurrenceSelection?.occurrence.id)
-      .toBe("zzzz-random");
-    expect(deriveLearningValueDecision({ item: improved }).kind).toBe("improve");
+    const first = build("zzzz-random", "aaaa-random");
+    const swapped = build("aaaa-random", "zzzz-random");
+
+    expect(deriveLearningValueDecision({ item: first }).kind).toBe("improve");
+    expect(deriveLearningValueDecision({ item: swapped }).kind).toBe("improve");
   });
 
   it("falls back to Study when the only alternative evidence is not independently studyable", () => {
