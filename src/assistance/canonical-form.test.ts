@@ -99,6 +99,23 @@ describe("ACCP-006 canonical-form assistance provider boundary", () => {
     expect(result).toMatchObject({ kind: "unsupported", language: "sr" });
   });
 
+  it("turns provider capability-check exceptions into non-blocking unavailability", async () => {
+    const provider: CanonicalFormProvider = {
+      supports: () => {
+        throw new Error("capability check exploded");
+      },
+      suggest: async () => ({ kind: "none" }),
+    };
+    const result = await requestCanonicalFormAssistance(provider, {
+      lexicalUnitId: "unit-a",
+      lexicalUnitUpdatedAt: "2026-09-27T00:00:00.000Z",
+      language: "es",
+      observedForm: "tengo",
+      currentCanonical: "tengo",
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "provider-error" });
+  });
+
   it("turns provider exceptions into non-blocking unavailability", async () => {
     const provider: CanonicalFormProvider = {
       supports: () => true,
