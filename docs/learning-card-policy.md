@@ -56,16 +56,16 @@ ACCP-007 adds a separate derived decision above this card-content policy.
 
 The learning-value layer has four explicit outcomes:
 
-- **Study** — first/current useful evidence supports one study item;
-- **Improve** — stronger/newly usable evidence materially improves that item;
-- **Evidence only** — retain the encounter without increasing study burden because effective study content is unchanged;
+- **Study** — the current corpus supports one useful study item but does not justify an improvement/redundancy claim;
+- **Improve** — the ACCP-002-selected occurrence is strictly stronger than the best studyable alternative occurrence already persisted for that lexical unit;
+- **Evidence only** — removing the selected occurrence still leaves the same ACCP-005 effective study content, so equivalent evidence exists without extra study burden;
 - **Archive for now** — current ACCP-005 content is not studyable enough to recommend a card.
 
 The decision reuses ACCP-002 occurrence quality and the ACCP-005 effective study-content signature. It does not define another occurrence scorer or another card renderer.
 
-Event explanations use an actual before/after corpus boundary. While the focused side panel is open, it retains the preceding loaded item when learning-relevant evidence changes and compares that item with the reload. `capturedAt` remains source chronology only; it is never interpreted as insertion order. If no real before-state is available, the UI reports only the current Study/Archive recommendation and does not invent Evidence only/Improve history.
+The classifier is corpus-relative rather than event-relative. It compares the current selected occurrence with a deterministic counterfactual corpus formed by removing that selected occurrence and deriving ACCP-005 again. `capturedAt` remains source chronology and is used only by ACCP-002's documented deterministic selection tie-break; ACCP-007 never interprets it or UUID order as mutation order.
 
-Recommendation is derived, not persisted. It never changes `LexicalUnit.id`, export bindings, Anki note identity, or status automatically. Ready and Archive remain explicit human workflow actions, and ACCP-005 remains the fail-closed gate for whether Ready can be approved at all.
+Recommendation is derived from persisted local corpus state, not side-panel memory. The same unchanged corpus therefore produces the same Study / Improve / Evidence only / Archive result after side-panel or browser recreation. It never changes `LexicalUnit.id`, export bindings, Anki note identity, or status automatically. Ready and Archive remain explicit human workflow actions, and ACCP-005 remains the fail-closed gate for whether Ready can be approved at all.
 
 An equivalent repeated occurrence may therefore produce:
 
@@ -74,7 +74,7 @@ recommendation = Evidence only
 status         = Ready
 ```
 
-when the user already approved the unchanged study content. A stronger occurrence that changes effective study content keeps the existing ACCP-005 behavior: Ready returns to Inbox, while ACCP-007 explains the event as Improve.
+when the user already approved the unchanged study content. A stronger selected occurrence can deterministically produce Improve whenever the persisted corpus also contains a weaker studyable alternative; existing ACCP-005 behavior still returns changed Ready content to Inbox.
 
 ## Policy-v2 decision table
 
