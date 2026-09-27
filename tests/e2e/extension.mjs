@@ -388,6 +388,16 @@ const server = createServer((request, response) => {
           <p id="policy-upgrade-strong">Before lunch the policy evidence appears in a controlled sentence with enough surrounding words today.</p>
           <p id="policy-weak-chunk">weak chunk</p>
           <p id="policy-unbounded-sentence">although rain continues we still walk outside every morning</p>
+          <p id="assist-estar-base">Quiero estar en casa para estudiar con calma esta tarde.</p>
+          <p id="assist-estoy">Hoy estoy en casa y tengo bastante tiempo para estudiar español.</p>
+          <p id="assist-quiero">Cada semana quiero practicar español con conversaciones más largas.</p>
+          <p id="assist-hago">Cada mañana hago ejercicios de español antes de empezar el trabajo.</p>
+          <p id="assist-fui">Ayer fui al centro para comprar libros y practicar español.</p>
+          <p id="assist-unavailable">The providerunavailable form appears in a controlled assistance failure context.</p>
+          <p id="assist-delay">The delayform appears in a controlled delayed provider context.</p>
+          <p id="assist-second">The secondassist form appears in a separate controlled review context.</p>
+          <p id="assist-supersede">The supersedeform appears in a controlled request supersession context.</p>
+          <p id="assist-sr">Danas imam dovoljno vremena da učim srpski kod kuće.</p>
           <p id="exported-merge-target">exported merge target appears in a controlled sentence.</p>
           <p id="exported-merge-source">exported merge source appears in a controlled sentence.</p>
           <p id="merge-conflict-a">merge conflict alpha appears in a controlled sentence.</p>
@@ -3396,8 +3406,206 @@ try {
     "An unbounded sentence must remain non-recommended until remediated.",
   );
 
+  markE2eStage("accp006-one-suggestion-same-canonical");
+  await setCaptureLanguage(panel, "es");
+
+  await selectText(contentPage, "#assist-estar-base", "estar");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "estar")).waitFor();
+
+  await selectText(contentPage, "#assist-estoy", "estoy");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  let assistanceCard = await cardForTerm(panel, "estoy");
+  const assistedId = await assistanceCard.getAttribute("data-card-id");
+  const assistance = assistanceCard.locator(".canonical-assistance");
+  const suggestCanonical = assistance.getByRole("button", { name: "Suggest canonical form" });
+  await suggestCanonical.focus();
+  await panel.keyboard.press("Enter");
+  await assistance.getByText("Suggestion", { exact: true }).waitFor();
+  assert.match(await assistance.innerText(), /estar/);
+  assert.match(
+    await assistanceCard.locator(".canonical-evidence").innerText(),
+    /estoy/i,
+    "Observed evidence must remain visible while a canonical suggestion is pending.",
+  );
+  const assistanceA11y = await new AxeBuilder({ page: panel })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  assert.equal(
+    assistanceA11y.violations.length,
+    0,
+    "Canonical-form assistance accessibility violations:\n"
+      + JSON.stringify(assistanceA11y.violations, null, 2),
+  );
+  await assistance.getByRole("button", { name: "Use suggestion" }).click();
+  assistanceCard = panel.locator(`[data-card-id="${assistedId}"]`);
+  await assistanceCard.locator(".term", { hasText: /^estar$/ }).waitFor();
+  assert.equal(
+    await assistanceCard.getAttribute("data-card-id"),
+    assistedId,
+    "Accepting assistance must preserve lexical identity.",
+  );
+  assert.match(
+    await assistanceCard.locator(".canonical-evidence").innerText(),
+    /estoy/i,
+    "Accepting assistance must not rewrite observed evidence.",
+  );
+  await ensureQueue(panel);
+  const assistedSameCanonicalRows = panel.locator(".queue-row").filter({
+    has: panel.locator(".term", { hasText: /^estar$/ }),
+  });
+  assert.equal(
+    await assistedSameCanonicalRows.count(),
+    2,
+    "Accepting a same-canonical suggestion must leave the two lexical IDs separate.",
+  );
+
+  markE2eStage("accp006-reject-no-mutation");
+  await selectText(contentPage, "#assist-quiero", "quiero");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "quiero");
+  const rejectId = await assistanceCard.getAttribute("data-card-id");
+  const rejectStatus = await assistanceCard.locator(".card-head > .pill").innerText();
+  let assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
+  assert.match(await assistancePanel.innerText(), /querer/);
+  await assistancePanel.getByRole("button", { name: "Dismiss" }).click();
+  assert.equal(await assistanceCard.getAttribute("data-card-id"), rejectId);
+  assert.equal(await assistanceCard.locator(".term").innerText(), "quiero");
+  assert.equal(await assistanceCard.locator(".card-head > .pill").innerText(), rejectStatus);
+  assert.match(await assistanceCard.locator(".canonical-evidence").innerText(), /quiero/i);
+
+  markE2eStage("accp006-ready-invalidation");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#assist-hago", "hago");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "hago");
+  await assistanceCard.getByRole("button", { name: "Ready" }).click();
+  await assistanceCard.locator(".card-head > .pill", { hasText: "ready" }).waitFor();
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
+  await assistancePanel.getByRole("button", { name: "Use suggestion" }).click();
+  await assistanceCard.locator(".term", { hasText: /^hacer$/ }).waitFor();
+  await assistanceCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
+  assert.equal(
+    await assistanceCard.getByRole("button", { name: "Ready" }).count(),
+    1,
+    "A canonical-changing accepted suggestion must require explicit Ready approval again.",
+  );
+
+  markE2eStage("accp006-ambiguous-keyboard");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#assist-fui", "fui");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "fui");
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText("Possible canonical forms", { exact: true }).waitFor();
+  const ambiguousChoices = assistancePanel.locator('input[type="radio"]');
+  assert.equal(await ambiguousChoices.count(), 2);
+  assert.equal(
+    await assistancePanel.locator('input[type="radio"]:checked').count(),
+    0,
+    "Ambiguous assistance must not preselect a canonical form.",
+  );
+  await ambiguousChoices.first().focus();
+  await panel.keyboard.press("Space");
+  assert.equal(
+    await assistancePanel.locator('input[type="radio"]:checked').count(),
+    1,
+    "An ambiguous alternative must be chosen deliberately.",
+  );
+  const useAmbiguous = assistancePanel.getByRole("button", { name: "Use suggestion" });
+  await useAmbiguous.focus();
+  await panel.keyboard.press("Enter");
+  await assistanceCard.locator(".term", { hasText: /^ir$/ }).waitFor();
+  assert.match(await assistanceCard.locator(".canonical-evidence").innerText(), /fui/i);
+
+  markE2eStage("accp006-provider-unavailable-nonblocking");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#assist-unavailable", "providerunavailable");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "providerunavailable");
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText(/assistance is unavailable/i).waitFor();
+  await assistancePanel.getByRole("button", { name: "Retry" }).waitFor();
+  await assistanceCard.getByRole("button", { name: "Edit" }).click();
+  await assistanceCard.locator(".editor").waitFor();
+  await assistanceCard.getByRole("button", { name: "Cancel" }).click();
+  assert.equal(
+    await panel.getByRole("button", { name: /^Export Ready/ }).count(),
+    1,
+    "Provider failure must not remove the normal export path.",
+  );
+
+  markE2eStage("accp006-unsupported-language");
+  await setCaptureLanguage(panel, "sr");
+  await selectText(contentPage, "#assist-sr", "imam");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "imam");
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText(/not available for sr/i).waitFor();
+  assert.equal(
+    await assistancePanel.getByRole("alert").count(),
+    0,
+    "Unsupported language is normal absence, not an application failure.",
+  );
+
+  markE2eStage("accp006-late-response-isolation");
+  await setCaptureLanguage(panel, "es");
+  await selectText(contentPage, "#assist-delay", "delayform");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  await selectText(contentPage, "#assist-second", "secondassist");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "delayform");
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText(/Checking/i).waitFor();
+  await ensureQueue(panel);
+  const secondAssistanceCard = await cardForTerm(panel, "secondassist");
+  await panel.waitForTimeout(500);
+  const secondAssistancePanel = secondAssistanceCard.locator(".canonical-assistance");
+  assert.doesNotMatch(
+    await secondAssistancePanel.innerText(),
+    /delaylemma|Suggestion/,
+    "A delayed response for A must not attach itself to the newly active B.",
+  );
+  assert.equal(await secondAssistanceCard.locator(".term").innerText(), "secondassist");
+
+  markE2eStage("accp006-request-supersession");
+  await ensureQueue(panel);
+  await selectText(contentPage, "#assist-supersede", "supersedeform");
+  await contentPage.bringToFront();
+  await clickPanelButton(panel, "Collect");
+  assistanceCard = await cardForTerm(panel, "supersedeform");
+  assistancePanel = assistanceCard.locator(".canonical-assistance");
+  await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
+  await assistancePanel.getByText(/Checking/i).waitFor();
+  await assistancePanel.getByRole("button", { name: "Check again" }).click();
+  await assistancePanel.getByText("Suggestion", { exact: true }).waitFor();
+  assert.match(await assistancePanel.innerText(), /newlemma/);
+  await panel.waitForTimeout(500);
+  assert.doesNotMatch(
+    await assistancePanel.innerText(),
+    /oldlemma/,
+    "The first request must not overwrite the second request when it returns late.",
+  );
+
   markE2eStage("complete");
-  console.log("Browser extension capture, compact queue/detail, canonicalization, keyboard, accessibility, and permission checks passed.");
+  console.log("Browser extension capture, compact queue/detail, canonicalization, canonical-form assistance, keyboard, accessibility, and permission checks passed.");
 } finally {
   clearTimeout(e2eWatchdog);
   await context?.close().catch(() => undefined);
