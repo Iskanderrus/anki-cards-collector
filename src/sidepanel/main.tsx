@@ -54,7 +54,11 @@ import {
 } from "../anki/deck-analysis";
 import { downloadText, toTsv } from "../anki/export";
 import { deriveLearningStudyContent } from "../learning/policy";
-import { deriveLearningValueDecision } from "../learning/value-decision";
+import {
+  deriveLearningValueDecision,
+  reconcileLearningValueBaselines,
+  type LearningValueBaselines,
+} from "../learning/value-decision";
 import {
   CanonicalFormRequestGate,
   acceptCanonicalFormSuggestion,
@@ -377,6 +381,8 @@ function App(): React.ReactElement {
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
+  const itemsRef = useRef<CollectedItem[]>([]);
+  const learningValueBaselinesRef = useRef<LearningValueBaselines>({});
   const loadRequestId = useRef(0);
   const restoreExportFocusRef = useRef(false);
   const identityActionFocusRef = useRef<HTMLElement | null>(null);
@@ -454,6 +460,12 @@ function App(): React.ReactElement {
 
     if (requestId !== loadRequestId.current) return;
 
+    learningValueBaselinesRef.current = reconcileLearningValueBaselines(
+      itemsRef.current,
+      loadedItems,
+      learningValueBaselinesRef.current,
+    );
+    itemsRef.current = loadedItems;
     setItems(loadedItems);
     setExportBindings(Object.fromEntries(
       completedBindings.map((binding) => [binding.lexicalUnitId, binding]),
@@ -2940,7 +2952,10 @@ function App(): React.ReactElement {
           const active = activeId === unit.id;
           const exportOutcome = exportOutcomes[unit.id];
           const proposal = deriveLearningStudyContent(item).proposal;
-          const learningValue = deriveLearningValueDecision({ item });
+          const learningValue = deriveLearningValueDecision({
+            item,
+            previousItem: learningValueBaselinesRef.current[unit.id],
+          });
           const selectedOccurrence = proposal.occurrenceSelection?.occurrence ?? latestOccurrence(item);
           const binding = exportBindings[unit.id];
           const route = resolvedRoute(item);
