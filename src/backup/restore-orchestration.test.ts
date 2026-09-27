@@ -30,15 +30,17 @@ describe("restoreAcrossCommitBoundary", () => {
     expect(compensateSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("does not compensate when preparatory settings persistence itself fails", async () => {
+  it("does not enter repository restore or compensate when preparatory settings persistence fails", async () => {
+    const restoreRepository = vi.fn(async () => ({ restored: true }));
+    const refreshCommittedState = vi.fn(async () => undefined);
     const compensateSettings = vi.fn(async () => undefined);
 
     const outcome = await restoreAcrossCommitBoundary({
       prepareSettings: async () => {
         throw new Error("settings persistence failed");
       },
-      restoreRepository: vi.fn(async () => ({ restored: true })),
-      refreshCommittedState: vi.fn(async () => undefined),
+      restoreRepository,
+      refreshCommittedState,
       compensateSettings,
     });
 
@@ -46,6 +48,8 @@ describe("restoreAcrossCommitBoundary", () => {
       kind: "precommit-failure",
       error: expect.objectContaining({ message: "settings persistence failed" }),
     });
+    expect(restoreRepository).not.toHaveBeenCalled();
+    expect(refreshCommittedState).not.toHaveBeenCalled();
     expect(compensateSettings).not.toHaveBeenCalled();
   });
 
