@@ -5,10 +5,7 @@ import type { CollectedItem } from "../core/types";
 import { BatchCapturePipeline } from "./batch";
 import { CollectorDatabase } from "../storage/database";
 import { CaptureRepository } from "../storage/repository";
-import {
-  deriveLearningValueDecision,
-  reconcileLearningValueBaselines,
-} from "../learning/value-decision";
+import { deriveLearningValueDecision } from "../learning/value-decision";
 import { learningStudyContentSignature } from "../learning/policy";
 
 function evidence(
@@ -113,7 +110,7 @@ describe("BatchCapturePipeline", () => {
     expect((await repository.list())[0]?.occurrences).toHaveLength(2);
   });
 
-  it("uses the real pre-commit state when delayed staged evidence is older but stronger", async () => {
+  it("derives Improve from the persisted corpus when delayed staged evidence is older but stronger", async () => {
     const existing = await repository.capture({
       text: "policy evidence",
       context: "policy evidence appears in a controlled sentence with enough surrounding words.",
@@ -147,18 +144,13 @@ describe("BatchCapturePipeline", () => {
     expect(learningStudyContentSignature(before))
       .not.toBe(learningStudyContentSignature(after));
 
-    const baselines = reconcileLearningValueBaselines([before], [after], {});
-    expect(baselines[after.lexicalUnit.id]).toBe(before);
-    expect(deriveLearningValueDecision({
-      item: after,
-      previousItem: baselines[after.lexicalUnit.id],
-    })).toMatchObject({
+    expect(deriveLearningValueDecision({ item: after })).toMatchObject({
       kind: "improve",
       reasonCode: "selected-evidence-improved",
     });
   });
 
-  it("uses one real pre-batch state for same-timestamp multi-evidence commit", async () => {
+  it("derives Improve deterministically for same-timestamp multi-evidence commit", async () => {
     const existing = await repository.capture({
       text: "policy evidence",
       context: "policy evidence appears in a controlled sentence with enough surrounding words.",
@@ -206,13 +198,7 @@ describe("BatchCapturePipeline", () => {
         .map((occurrence) => occurrence.capturedAt),
     )).toEqual(new Set([scanTime]));
 
-    const baselines = reconcileLearningValueBaselines([before], [after], {});
-    expect(baselines[after.lexicalUnit.id]?.occurrences.map((occurrence) => occurrence.id))
-      .toEqual(before.occurrences.map((occurrence) => occurrence.id));
-    expect(deriveLearningValueDecision({
-      item: after,
-      previousItem: baselines[after.lexicalUnit.id],
-    }).kind).toBe("improve");
+    expect(deriveLearningValueDecision({ item: after }).kind).toBe("improve");
   });
 
   it("treats a unique exact occurrence as already represented despite surface ambiguity", async () => {
