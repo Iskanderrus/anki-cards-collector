@@ -350,7 +350,14 @@ export async function acceptCanonicalFormSuggestion(
 
   const canonical = normalizeText(suggestion.proposedCanonical);
   const language = normalizeLanguage(suggestion.language);
-  if (!canonical || language !== snapshot.language) {
+  const offeredSuggestions = result.kind === "suggestion"
+    ? [result.suggestion]
+    : result.suggestions;
+  const wasOffered = offeredSuggestions.some((candidate) => (
+    normalizeLanguage(candidate.language) === language
+    && normalizeIdentityText(candidate.proposedCanonical) === normalizeIdentityText(canonical)
+  ));
+  if (!canonical || language !== snapshot.language || !wasOffered) {
     throw new Error("This canonical-form suggestion is no longer valid.");
   }
 
