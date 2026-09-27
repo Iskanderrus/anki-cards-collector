@@ -98,7 +98,7 @@ The decisions and their consequences are recorded in the ADRs instead of being h
 
 Requirements:
 
-- Node.js 22+
+- Node.js 22.23.3\n- npm 11.6.0
 - a recent Chromium-based browser with Side Panel support
 - Anki + [AnkiConnect](https://ankiweb.net/shared/info/2055492159) for direct export (optional)
 
