@@ -168,7 +168,7 @@ try {
   let card = await capture(contentPage, panel, "#first", "Aunque");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Learning value[\s\S]*Study[\s\S]*First useful evidence supports one review card/i,
+    /Learning value[\s\S]*Study[\s\S]*Current evidence supports one useful study card/i,
   );
   assert.match(await card.locator(".card-head > .pill").innerText(), /inbox/i);
   assert.equal(await card.getByRole("button", { name: "Ready" }).isDisabled(), false);
