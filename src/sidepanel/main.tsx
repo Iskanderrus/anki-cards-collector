@@ -2019,6 +2019,11 @@ function App(): React.ReactElement {
       return target.closest("button, a[href], summary") !== null;
     }
 
+    function isAssistanceControlTarget(target: EventTarget | null): boolean {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.closest(".canonical-assistance button, .canonical-assistance input") !== null;
+    }
+
     function focusItem(id: string): void {
       selectActiveId(id);
       requestAnimationFrame(() => {
@@ -2040,6 +2045,7 @@ function App(): React.ReactElement {
         || mergeDialog !== null
         || splitDialog !== null
         || isTypingTarget(event.target)
+        || isAssistanceControlTarget(event.target)
       ) return;
 
       if (
