@@ -66,6 +66,8 @@ The session is only a presentation over existing item state:
 
 Ready remains the explicit approval boundary for Anki export.
 
+Canonical-form assistance is optional inside focused review. The user explicitly requests a suggestion; Collector never runs it as a blocking capture step. A suggestion is visibly separate from the current canonical form and observed evidence. Dismiss changes nothing. **Use suggestion** applies the proposed canonical through the normal edit path, preserves observed evidence and Collector identity, and returns changed Ready study content to Inbox. Ambiguous suggestions require an explicit choice, while unsupported/unavailable assistance leaves manual Edit and export workflow intact.
+
 ## Staged material
 
 Staged is separate from Inbox.
