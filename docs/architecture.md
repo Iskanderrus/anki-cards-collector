@@ -127,6 +127,28 @@ The proposal is intentionally not stored. Editing the source material recomputes
 
 See [learning-card policy](learning-card-policy.md).
 
+### Learning-value recommendation
+
+ACCP-007 is a pure learning-value layer between lexical identity and ACCP-005 study-content construction.
+
+```text
+LexicalUnit / owned Occurrences
+        ↓
+ACCP-007 learning-value recommendation
+        ↓
+ACCP-005 derived study content
+        ↓
+explicit Ready
+        ↓
+existing export pipeline
+```
+
+The decision boundary consumes only local accepted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm. For event-level comparisons it can compare explicit semantic before/after states; normal focused review derives the previous evidence boundary from local occurrence history.
+
+The four outcomes are `study`, `improve`, `evidence-only`, and `archive`. They are guidance, not workflow statuses. No outcome automatically mutates Inbox/Ready/Archived, and no outcome calls Anki.
+
+Learning-value decisions, reason text, and comparison state are not persisted. IndexedDB and backup schemas therefore remain unchanged. Existing Ready invalidation remains owned by the ACCP-005 effective study-content signature; explicit merge/split approval boundaries remain owned by ACCP-004.
+
 ### Canonical-form assistance
 
 Canonical-form assistance is an advisory application boundary above the corpus repository. Providers receive normalized language, observed form, current canonical form, and at most bounded local context; they return provider-neutral suggestions only. Provider responses are ephemeral and are never stored as lexical truth.
