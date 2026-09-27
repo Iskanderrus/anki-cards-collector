@@ -27,7 +27,8 @@ The following work is already part of the current baseline:
 - **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
 - **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation;
 - **ACCP-005** — learning-card policy v2 with authoritative study-content derivation, content-sensitive Ready invalidation, and review/export parity.
-- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth;\n- **ACCP-007** — deterministic learning-value decisions with explicit recommendation/override separation.
+- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth;
+- **ACCP-007** — deterministic learning-value decisions with explicit recommendation/override separation.
 
 ---
 
