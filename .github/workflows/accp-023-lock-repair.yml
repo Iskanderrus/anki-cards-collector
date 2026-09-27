@@ -1,0 +1,41 @@
+name: ACCP-023 lockfile optional-deps repair
+
+on:
+  push:
+    branches:
+      - accp-023-reproducible-release-build
+
+permissions:
+  contents: write
+
+jobs:
+  repair-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: accp-023-reproducible-release-build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+      - run: npm install --global npm@11.6.0
+      - name: Regenerate lock from a truly empty install state
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install --ignore-scripts
+      - name: Prove the regenerated lock supports a clean install
+        run: |
+          rm -rf node_modules
+          npm ci --ignore-scripts
+          npm test
+      - name: Commit repaired lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "package-lock.json unchanged"
+            exit 0
+          fi
+          git commit -m "ACCP-023: retain platform optional dependencies in lockfile"
+          git push origin HEAD:accp-023-reproducible-release-build
