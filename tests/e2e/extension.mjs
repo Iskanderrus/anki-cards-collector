@@ -552,6 +552,24 @@ async function setCaptureLanguage(panel, language) {
   await ensureQueue(panel);
 }
 
+async function clearActiveCaptureProfile(panel) {
+  await panel.evaluate(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    const current = stored.collectorSettings;
+    if (!current) throw new Error("Collector settings are missing.");
+    const next = { ...current };
+    delete next.captureProfileId;
+    await chrome.storage.local.set({ collectorSettings: next });
+  });
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await panel.waitForFunction(async () => {
+    const stored = await chrome.storage.local.get("collectorSettings");
+    return !stored.collectorSettings?.captureProfileId;
+  });
+  await ensureQueue(panel);
+}
+
 async function termCount(panel) {
   await ensureQueue(panel);
   return panel.locator(".queue-row .term").count();
@@ -3407,6 +3425,10 @@ try {
   );
 
   markE2eStage("accp006-one-suggestion-same-canonical");
+  // ACCP-018 intentionally leaves an active Serbian capture profile. ACCP-006
+  // needs controlled unit languages, so clear that profile override once and
+  // let the explicit legacy fallback drive the remaining synthetic captures.
+  await clearActiveCaptureProfile(panel);
   await setCaptureLanguage(panel, "es");
 
   await selectText(contentPage, "#assist-estar-base", "estar");
