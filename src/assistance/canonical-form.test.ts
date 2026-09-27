@@ -231,6 +231,31 @@ describe("ACCP-006 corpus safety", () => {
     expect(JSON.stringify(await repository.list())).toBe(before);
   });
 
+  it("preserves Ready state when a suggestion is dismissed without acceptance", async () => {
+    const captured = await repository.capture(draft("tengo", "Tengo tiempo para estudiar esta tarde."));
+    await repository.setStatus(captured.lexicalUnit.id, "ready");
+    const current = (await repository.list()).find(
+      (item) => item.lexicalUnit.id === captured.lexicalUnit.id,
+    )!;
+    const before = JSON.stringify(current);
+
+    const result = await requestCanonicalFormAssistance(localCanonicalFormProvider, {
+      lexicalUnitId: current.lexicalUnit.id,
+      lexicalUnitUpdatedAt: current.lexicalUnit.updatedAt,
+      language: current.lexicalUnit.language,
+      observedForm: current.occurrences[0]!.surfaceText,
+      currentCanonical: current.lexicalUnit.canonicalText,
+      context: current.occurrences[0]!.context,
+    });
+
+    expect(result.kind).toBe("suggestion");
+    const after = (await repository.list()).find(
+      (item) => item.lexicalUnit.id === captured.lexicalUnit.id,
+    )!;
+    expect(after.lexicalUnit.status).toBe("ready");
+    expect(JSON.stringify(after)).toBe(before);
+  });
+
   it("accepts through the canonical edit path while preserving lexical identity, observed evidence and export binding", async () => {
     const captured = await repository.capture(draft("tengo", "Tengo tiempo."));
     await repository.setExportBinding({
