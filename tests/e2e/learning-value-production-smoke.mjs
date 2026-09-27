@@ -168,7 +168,7 @@ try {
   let card = await capture(contentPage, panel, "#first", "Aunque");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Learning value[\s\S]*Study[\s\S]*Current evidence supports one useful study card/i,
+    /Learning value[\s\S]*Study[\s\S]*Current corpus supports one useful study card/i,
   );
   assert.match(await card.locator(".card-head > .pill").innerText(), /inbox/i);
   assert.equal(await card.getByRole("button", { name: "Ready" }).isDisabled(), false);
@@ -184,11 +184,21 @@ try {
   card = await cardForTerm(panel, "Aunque");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Evidence only[\s\S]*adds evidence, but the current study card is unchanged/i,
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
   );
   assert.match(await card.locator(".card-head > .pill").innerText(), /ready/i);
   assert.match(await card.getAttribute("aria-label"), /2 occurrences/);
   await screenshot(panel, "evidence-only");
+
+  // Same persisted corpus must produce the same decision after side-panel recreation.
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  card = await cardForTerm(panel, "Aunque");
+  assert.match(
+    await card.locator(".learning-value").innerText(),
+    /Evidence only[\s\S]*already contains equivalent evidence for the same study card/i,
+  );
   await ensureQueue(panel);
   assert.equal(
     await panel.locator(".queue-row").filter({
@@ -211,11 +221,20 @@ try {
   card = await cardForTerm(panel, "policy evidence");
   assert.match(
     await card.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger selected context/i,
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
   );
   assert.match(await card.locator(".card-head > .pill").innerText(), /inbox/i);
   assert.equal(await card.getByRole("button", { name: "Ready" }).isDisabled(), false);
   await screenshot(panel, "improve");
+
+  await panel.reload();
+  await panel.locator("h1").waitFor();
+  await ensureQueue(panel);
+  card = await cardForTerm(panel, "policy evidence");
+  assert.match(
+    await card.locator(".learning-value").innerText(),
+    /Improve[\s\S]*stronger than the best alternative evidence/i,
+  );
 
   // Weak material: recommendation is Archive for now, but no automatic Archive occurs.
   card = await capture(contentPage, panel, "#weak", "weak chunk");
