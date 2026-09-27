@@ -3539,6 +3539,7 @@ try {
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
   assistanceCard = await cardForTerm(panel, "fui");
+  const ambiguousAssistanceId = await assistanceCard.getAttribute("data-card-id");
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
   await assistancePanel.getByText("Possible canonical forms", { exact: true }).waitFor();
@@ -3562,6 +3563,7 @@ try {
   const useAmbiguous = assistancePanel.getByRole("button", { name: "Use suggestion" });
   await useAmbiguous.focus();
   await panel.keyboard.press("Enter");
+  assistanceCard = panel.locator(`[data-card-id="${ambiguousAssistanceId}"]`);
   await assistanceCard.locator(".term", { hasText: /^ir$/ }).waitFor();
   assert.match(await assistanceCard.locator(".canonical-evidence").innerText(), /fui/i);
 
