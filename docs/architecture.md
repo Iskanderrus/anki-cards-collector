@@ -143,15 +143,15 @@ explicit Ready
 existing export pipeline
 ```
 
-The decision boundary consumes only local accepted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm. Event-level comparison requires a real semantic before/after state.
+The decision boundary consumes only local accepted persisted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm.
 
-The focused side panel keeps the last accepted loaded `CollectedItem` snapshot in memory. When a learning-relevant reload changes that item, the old snapshot becomes the ACCP-007 baseline for the new item. Status-only reloads preserve an existing baseline. A later learning mutation replaces it. Cold/reopened review has no mutation baseline and therefore reports only current Study/Archive state.
+For a studyable item, ACCP-007 removes the current ACCP-002-selected occurrence to form a deterministic counterfactual corpus and derives ACCP-005 again. Equivalent effective study content means `evidence-only`; a strictly higher selected-occurrence quality than the best studyable alternative means `improve`; otherwise the useful corpus remains `study`. Non-studyable content is `archive`.
 
-This boundary deliberately does not derive mutation order from `Occurrence.capturedAt` or occurrence UUIDs. Staged evidence may be imported long after its source timestamp, and several candidates may legitimately share one scan timestamp.
+This boundary deliberately does not derive mutation order from `Occurrence.capturedAt`, occurrence UUIDs, or side-panel session memory. `capturedAt` may still participate in ACCP-002's documented tie-break because it is persisted source chronology, but ACCP-007 never treats it as insertion order. Staged evidence may be imported long after its source timestamp, and several candidates may legitimately share one scan timestamp.
 
 The four outcomes are `study`, `improve`, `evidence-only`, and `archive`. They are guidance, not workflow statuses. No outcome automatically mutates Inbox/Ready/Archived, and no outcome calls Anki.
 
-Learning-value decisions, reason text, and comparison state are not persisted. IndexedDB and backup schemas therefore remain unchanged. Existing Ready invalidation remains owned by the ACCP-005 effective study-content signature; explicit merge/split approval boundaries remain owned by ACCP-004.
+Learning-value decisions and reason text are not persisted because they are fully reproducible from the persisted `CollectedItem`. IndexedDB and backup schemas therefore remain unchanged, and the same corpus yields the same recommendation after side-panel/browser recreation. Existing Ready invalidation remains owned by the ACCP-005 effective study-content signature; explicit merge/split approval boundaries remain owned by ACCP-004.
 
 ### Canonical-form assistance
 
