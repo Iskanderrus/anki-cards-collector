@@ -93,18 +93,30 @@ export function deriveLearningValueDecision(
       );
     }
 
-    const alternativeSelection = alternative.proposal.occurrenceSelection;
-    if (
-      alternativeSelection
-      && currentSelection.score > alternativeSelection.score
-    ) {
-      return decision(
-        "improve",
-        "Improve",
-        "selected-evidence-improved",
-        "The selected evidence is stronger than the best alternative evidence in this corpus.",
+  }
+
+  const hasWeakerStudyableAlternative = item.occurrences
+    .filter((occurrence) => occurrence.id !== currentSelection.occurrence.id)
+    .some((occurrence) => {
+      const alternative = deriveLearningStudyContent({
+        lexicalUnit: item.lexicalUnit,
+        occurrences: [occurrence],
+      });
+      const alternativeSelection = alternative.proposal.occurrenceSelection;
+      return (
+        alternative.proposal.recommended
+        && alternativeSelection !== undefined
+        && currentSelection.score > alternativeSelection.score
       );
-    }
+    });
+
+  if (hasWeakerStudyableAlternative) {
+    return decision(
+      "improve",
+      "Improve",
+      "selected-evidence-improved",
+      "The selected evidence is stronger than other studyable evidence in this corpus.",
+    );
   }
 
   return decision(
