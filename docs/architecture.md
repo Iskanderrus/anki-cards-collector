@@ -143,7 +143,11 @@ explicit Ready
 existing export pipeline
 ```
 
-The decision boundary consumes only local accepted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm. For event-level comparisons it can compare explicit semantic before/after states; normal focused review derives the previous evidence boundary from local occurrence history.
+The decision boundary consumes only local accepted corpus state. It reuses ACCP-002 selected-occurrence quality and ACCP-005 studyability/signatures instead of duplicating either algorithm. Event-level comparison requires a real semantic before/after state.
+
+The focused side panel keeps the last accepted loaded `CollectedItem` snapshot in memory. When a learning-relevant reload changes that item, the old snapshot becomes the ACCP-007 baseline for the new item. Status-only reloads preserve an existing baseline. A later learning mutation replaces it. Cold/reopened review has no mutation baseline and therefore reports only current Study/Archive state.
+
+This boundary deliberately does not derive mutation order from `Occurrence.capturedAt` or occurrence UUIDs. Staged evidence may be imported long after its source timestamp, and several candidates may legitimately share one scan timestamp.
 
 The four outcomes are `study`, `improve`, `evidence-only`, and `archive`. They are guidance, not workflow statuses. No outcome automatically mutates Inbox/Ready/Archived, and no outcome calls Anki.
 
