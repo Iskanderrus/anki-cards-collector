@@ -3609,9 +3609,11 @@ try {
   await selectText(contentPage, "#assist-delay", "delayform");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "delayform")).waitFor();
   await selectText(contentPage, "#assist-second", "secondassist");
   await contentPage.bringToFront();
   await clickPanelButton(panel, "Collect");
+  await (await queueRowForTerm(panel, "secondassist")).waitFor();
   assistanceCard = await cardForTerm(panel, "delayform");
   assistancePanel = assistanceCard.locator(".canonical-assistance");
   await assistancePanel.getByRole("button", { name: "Suggest canonical form" }).click();
