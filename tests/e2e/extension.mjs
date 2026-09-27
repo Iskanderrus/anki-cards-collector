@@ -3414,7 +3414,7 @@ try {
   );
   assert.match(
     await remediationCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
     "ACCP007_BETTER_EVIDENCE: stronger selected evidence should explain the Improve recommendation.",
   );
 
@@ -3425,7 +3425,7 @@ try {
   remediationCard = await cardForTerm(panel, "policy evidence");
   assert.match(
     await remediationCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
     "The same persisted corpus must remain Improve after side-panel recreation.",
   );
 
@@ -3550,7 +3550,7 @@ try {
   await chronologyCard.locator(".card-head > .pill", { hasText: "inbox" }).waitFor();
   assert.match(
     await chronologyCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
     "Delayed staged evidence must compare against the real pre-import state even when capturedAt is older.",
   );
 
@@ -3619,7 +3619,7 @@ try {
   );
   assert.match(
     await sameTimeCard.locator(".learning-value").innerText(),
-    /Improve[\s\S]*stronger than the best alternative evidence/i,
+    /Improve[\s\S]*stronger than other studyable evidence/i,
     "Same-timestamp batch evidence must use the real pre-batch snapshot, not UUID ordering.",
   );
 
