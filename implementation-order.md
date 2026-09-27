@@ -25,7 +25,8 @@ The following work is already part of the current baseline:
 - **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
 - **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics;
 - **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
-- **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation.
+- **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation;
+- **ACCP-005** — learning-card policy v2 with authoritative study-content derivation, content-sensitive Ready invalidation, and review/export parity.
 
 ---
 
@@ -81,19 +82,19 @@ ACCP-012 is now baseline behavior. Sequential Inbox review, live destination pre
 
 ACCP-004 is now baseline behavior. Lexical-unit ID is primary, canonical/content keys are non-unique lookup data, and merge/split are explicit transactional operations with retained Collector/Anki identity semantics.
 
-### ACCP-005 — learning-card policy v2 — current merge gate
+### ACCP-005 — learning-card policy v2 — completed
 
-Depends on completed ACCP-002, ACCP-003, and ACCP-004.
-
-This gate refines word/chunk/sentence decisions around one authoritative selected occurrence, makes Ready approval content-sensitive, and preserves exact review/export study-content parity without persisting derived proposals.
+ACCP-005 is now baseline behavior. Word/chunk/sentence decisions use one authoritative study-content derivation, Ready approval is content-sensitive, and review/export parity is enforced without persisting derived proposals.
 
 ---
 
 ## Gate F — optional assistance and learning-value decisions
 
-### ACCP-006 — morphology/canonical-form assistance
+### ACCP-006 — morphology/canonical-form assistance — current merge gate
 
-Depends on ACCP-003 and ACCP-004.
+Depends on completed ACCP-003, ACCP-004, ACCP-005, and ACCP-012.
+
+This gate adds advisory canonical-form suggestions inside deliberate review. Provider output is ephemeral and cannot mutate lexical identity without explicit user acceptance through the existing canonical-edit path.
 
 ### ACCP-007 — learning-value decision
 
@@ -105,11 +106,10 @@ Depends on completed ACCP-002, ACCP-004, and ACCP-005.
 
 From the current baseline, when one linear order is needed:
 
-1. ACCP-005 — learning-card policy v2
-2. ACCP-006 — morphology assistance
-3. ACCP-007 — learning-value decision
+1. ACCP-006 — morphology assistance
+2. ACCP-007 — learning-value decision
 
-ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, ACCP-012, and ACCP-004 are now baseline work. ACCP-005 is the current Gate E implementation/merge target.
+ACCP-019, ACCP-020, ACCP-013, ACCP-014, ACCP-017, ACCP-011, ACCP-003, ACCP-018, ACCP-021, ACCP-022, ACCP-012, ACCP-004, and ACCP-005 are now baseline work. ACCP-006 is the current Gate F implementation/merge target; after it merges, ACCP-007 becomes next.
 
 ---
 

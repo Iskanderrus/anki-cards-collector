@@ -127,6 +127,18 @@ The proposal is intentionally not stored. Editing the source material recomputes
 
 See [learning-card policy](learning-card-policy.md).
 
+### Canonical-form assistance
+
+Canonical-form assistance is an advisory application boundary above the corpus repository. Providers receive normalized language, observed form, current canonical form, and at most bounded local context; they return provider-neutral suggestions only. Provider responses are ephemeral and are never stored as lexical truth.
+
+The production provider is intentionally conservative and local. Unknown/unsupported forms are ordinary absence, not review failures. Capture, manual review, Ready state, TSV, and Anki export do not depend on provider availability.
+
+Explicit acceptance reuses `previewCanonicalization()` plus `CaptureRepository.update()`. The assisted update carries the lexical-unit `updatedAt` snapshot into the repository transaction, so a late provider result cannot overwrite a newer edit. `LexicalUnit.id`, occurrences, and export bindings retain their existing identity semantics; same-canonical units remain separate until an explicit ACCP-004 Merge.
+
+UI request ownership is lexical-ID + request-sequence based rather than canonical-text based. Switching items, editing the active item, or issuing a newer request invalidates older visible results.
+
+No provider state, cache, or provenance blob is persisted, and ACCP-006 adds no storage schema or network permission.
+
 ### Read-only Anki deck evidence
 
 `DeckAnalysisService` sits above the AnkiConnect client as a read-only evidence boundary.

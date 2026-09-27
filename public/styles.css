@@ -603,6 +603,60 @@ summary:focus-visible {
   background: color-mix(in srgb, #b42318 5%, Canvas);
 }
 
+.canonical-assistance {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, CanvasText 3%, transparent);
+}
+.canonical-assistance-head,
+.canonical-assistance-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.canonical-assistance-head > strong,
+.canonical-assistance-choice > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.canonical-assistance-result {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.canonical-assistance-options {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.canonical-assistance-options legend {
+  margin-bottom: 7px;
+  padding: 0;
+  font-weight: 650;
+}
+.canonical-assistance-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  border-radius: 8px;
+  background: Canvas;
+}
+.canonical-assistance-options input {
+  width: auto;
+  margin: 0;
+}
+
 .other-occurrences,
 .more-actions {
   border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
