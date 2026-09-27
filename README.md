@@ -136,7 +136,7 @@ Tests currently focus on the parts where accidental regressions are expensive: t
 npm run package:store
 ```
 
-This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
+This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. Release builds use explicit production React semantics and the pinned Node 22.23.3 / npm 11.6.0 toolchain. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
 
 The repository does not contain Chrome Web Store credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
 
