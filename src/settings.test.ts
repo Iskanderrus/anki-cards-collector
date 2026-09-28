@@ -1,12 +1,114 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LEGACY_DEFAULT_PROFILE_ID } from "./core/types";
 import {
   DEFAULT_SETTINGS,
   assignLanguageRoute,
   captureLanguageForSettings,
+  loadSettings,
   mergeSettingsForRestore,
   migrateSettings,
+  saveSettings,
 } from "./settings";
+
+describe("settings storage concurrency", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not let a stale reader overwrite settings committed after its get", async () => {
+    const settingsA = migrateSettings({
+      defaultLanguage: "es",
+      sourceUrlMode: "sanitized",
+      exportProfiles: [{
+        id: "local",
+        name: "Local",
+        deckName: "Local Deck",
+        modelName: "Collector Basic",
+        mode: "collector-managed",
+      }],
+      languageRoutes: [],
+      fallbackProfileId: "local",
+    });
+    const settingsB = migrateSettings({
+      ...settingsA,
+      exportProfiles: [
+        ...settingsA.exportProfiles,
+        {
+          id: "restored",
+          name: "Restored",
+          deckName: "Restored Deck",
+          modelName: "Collector Basic",
+          mode: "collector-managed",
+        },
+      ],
+      languageRoutes: [{ language: "he", profileId: "restored" }],
+    });
+
+    let durable: unknown = structuredClone(settingsA);
+    let releaseStaleGet!: () => void;
+    const staleGetReleased = new Promise<void>((resolve) => {
+      releaseStaleGet = resolve;
+    });
+    let markStaleGetStarted!: () => void;
+    const staleGetStarted = new Promise<void>((resolve) => {
+      markStaleGetStarted = resolve;
+    });
+    let firstGet = true;
+
+    const get = vi.fn(async () => {
+      const captured = structuredClone(durable);
+      if (firstGet) {
+        firstGet = false;
+        markStaleGetStarted();
+        await staleGetReleased;
+      }
+      return { collectorSettings: captured };
+    });
+    const set = vi.fn(async (value: { collectorSettings?: unknown }) => {
+      durable = structuredClone(value.collectorSettings);
+    });
+
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: { get, set },
+      },
+    });
+
+    const staleReader = loadSettings();
+    await staleGetStarted;
+
+    // This models restore's preparatory settings commit B while another
+    // extension context still holds a stale read of A.
+    await saveSettings(settingsB);
+    releaseStaleGet();
+    expect(await staleReader).toEqual(settingsA);
+
+    expect(durable).toEqual(settingsB);
+    expect(set).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps ordinary settings reads side-effect free while still migrating in memory", async () => {
+    const legacy = {
+      defaultLanguage: "HE",
+      deckName: "Hebrew RU",
+      modelName: "Collector Hebrew",
+      sourceUrlMode: "query",
+    };
+    const set = vi.fn(async () => undefined);
+
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({ collectorSettings: legacy })),
+          set,
+        },
+      },
+    });
+
+    expect(await loadSettings()).toEqual(migrateSettings(legacy));
+    expect(set).not.toHaveBeenCalled();
+  });
+});
 
 describe("settings migration", () => {
   it("preserves a legacy user model but routes new cards through Collector Basic in the same deck", () => {
