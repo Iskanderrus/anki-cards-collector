@@ -103,6 +103,8 @@ Inspect the **actual candidate ZIP** for Manifest V3, version, permission/host b
 
 That exact accepted ZIP is the one that must later be rebuilt by the Release workflow and submitted to Chrome Web Store. A checksum mismatch blocks publication.
 
+Operational checklist: [ACCP-025 release-candidate acceptance](manual-accp025-release-candidate-acceptance.md).
+
 ## Bounded real acceptance
 
 Use the exact frozen candidate head, production build, synthetic study material, a clean disposable Chromium profile, real Anki Desktop + AnkiConnect, and disposable Anki notes/decks where needed.
