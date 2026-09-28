@@ -145,3 +145,6 @@ jobs:
       - name: Adversarial packaging reproducibility
         working-directory: build-a
         run: npm run check:package-reproducibility
+      - name: Deterministic ZIP UTF-8/EFS regression
+        working-directory: build-a
+        run: npm run check:deterministic-zip-utf8

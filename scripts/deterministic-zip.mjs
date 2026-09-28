@@ -30,7 +30,8 @@ export function buildDeterministicZip(entries) {
     const compressed = deflateRawSync(data, { level: 9 });
     const compressionMethod = 8;
     const versionNeeded = 20;
-    const flags = 0;
+    // Filenames are stored as UTF-8; EFS (bit 11) declares that to ZIP readers.
+    const flags = 0x0800;
     const externalAttrs = (((FIXED_FILE_MODE & 0xffff) * 65536) >>> 0);
 
     const localHeader = Buffer.alloc(30);
