@@ -14,11 +14,14 @@ Please keep these boundaries in mind:
 
 ## Local check
 
+Canonical clean verification:
+
 ```bash
-npm install
+npm ci
 npm run check
 ```
 
+Use `npm install` only when deliberately changing dependencies, then commit the resulting `package-lock.json` update.
 A PR should explain the user-visible problem, the trade-off made, and how it was tested. An ADR is appropriate when the change creates a durable architectural constraint; it is not required for ordinary refactoring or UI polish.
 
 ## Work item naming

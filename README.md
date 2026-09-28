@@ -98,12 +98,13 @@ The decisions and their consequences are recorded in the ADRs instead of being h
 
 Requirements:
 
-- Node.js 22+
+- Node.js 22.23.3
+- npm 11.6.0
 - a recent Chromium-based browser with Side Panel support
 - Anki + [AnkiConnect](https://ankiweb.net/shared/info/2055492159) for direct export (optional)
 
 ```bash
-npm install
+npm ci
 npm run check
 ```
 
@@ -117,6 +118,8 @@ Then:
 The extension only requests localhost host access for AnkiConnect. Page access is provided at the moment of an explicit user action through `activeTab` + `scripting`.
 
 ## Development
+
+The canonical clean verification path uses the committed lockfile with `npm ci`. Use `npm install` only when deliberately changing dependencies and commit the resulting `package-lock.json` update.
 
 ```bash
 npm run typecheck
@@ -136,7 +139,7 @@ Tests currently focus on the parts where accidental regressions are expensive: t
 npm run package:store
 ```
 
-This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
+This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. Release builds use explicit production React semantics and the pinned Node 22.23.3 / npm 11.6.0 toolchain. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
 
 The repository does not contain Chrome Web Store credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
 

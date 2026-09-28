@@ -59,11 +59,12 @@ import { deriveLearningValueDecision } from "../learning/value-decision";
 import {
   CanonicalFormRequestGate,
   acceptCanonicalFormSuggestion,
-  createCanonicalFormProvider,
+  localCanonicalFormProvider,
   requestCanonicalFormAssistance,
   type CanonicalFormAssistanceResult,
   type CanonicalFormSuggestion,
 } from "../assistance/canonical-form";
+import { createE2eCanonicalFormProvider } from "../assistance/canonical-form-e2e";
 import { mappedProfileIsConfigured } from "../anki/mapping";
 import { dismissOnboarding, loadOnboardingState } from "../onboarding";
 import { ReviewQueue } from "./queue";
@@ -402,7 +403,9 @@ function App(): React.ReactElement {
   const observedFormsRequestId = useRef(0);
   const canonicalAssistanceGate = useRef(new CanonicalFormRequestGate());
   const canonicalFormProvider = useMemo(
-    () => createCanonicalFormProvider(__COLLECTOR_E2E__),
+    () => (__COLLECTOR_E2E__
+      ? createE2eCanonicalFormProvider()
+      : localCanonicalFormProvider),
     [],
   );
   const catalogService = useMemo(

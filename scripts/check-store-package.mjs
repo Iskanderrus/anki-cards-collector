@@ -109,10 +109,50 @@ assert.ok(files.includes("background.js"), "background.js is missing.");
 assert.ok(files.includes("content.js"), "content.js is missing.");
 assert.ok(files.includes("sidepanel.js"), "sidepanel.js is missing.");
 
-const background = await readFile(join(dist, "background.js"), "utf8");
+const expectedStoreFiles = [
+  "background.js",
+  "content.js",
+  "icons/icon128.png",
+  "icons/icon16.png",
+  "icons/icon32.png",
+  "icons/icon48.png",
+  "manifest.json",
+  "sidepanel.html",
+  "sidepanel.js",
+  "styles.css",
+];
+sameStrings(files, expectedStoreFiles, "Store package file allowlist changed unexpectedly.");
+
+const jsBundles = ["background.js", "content.js", "sidepanel.js"];
+const forbiddenSignatures = [
+  "E2E_CONTEXT_MENU_CLICK",
+  "E2eCanonicalFormProvider",
+  "e2e-fixture",
+  "Deterministic browser-test fixture.",
+  "Synthetic provider failure.",
+  "delaylemma",
+  "oldlemma",
+  "newlemma",
+  "createE2eCanonicalFormProvider",
+  "react.development.js",
+  "react-dom.development.js",
+  "scheduler.development.js",
+];
+
+for (const bundleName of jsBundles) {
+  const source = await readFile(join(dist, bundleName), "utf8");
+  for (const signature of forbiddenSignatures) {
+    assert.ok(
+      !source.includes(signature),
+      `Store ${bundleName} must not contain forbidden signature: ${signature}`,
+    );
+  }
+}
+
+const sidepanel = await readFile(join(dist, "sidepanel.js"), "utf8");
 assert.ok(
-  !background.includes("E2E_CONTEXT_MENU_CLICK"),
-  "Store background bundle must not contain the E2E context-menu hook.",
+  !sidepanel.includes("react.development") && !sidepanel.includes("scheduler.development"),
+  "Store sidepanel bundle must use the production React runtime.",
 );
 
 console.log(`Store package validation passed for ${files.length} files (v${manifest.version}).`);

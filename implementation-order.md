@@ -27,7 +27,8 @@ The following work is already part of the current baseline:
 - **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
 - **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation;
 - **ACCP-005** — learning-card policy v2 with authoritative study-content derivation, content-sensitive Ready invalidation, and review/export parity.
-- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth.
+- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth;
+- **ACCP-007** — deterministic learning-value decisions with explicit recommendation/override separation.
 
 ---
 
@@ -95,21 +96,23 @@ ACCP-005 is now baseline behavior. Word/chunk/sentence decisions use one authori
 
 ACCP-006 is now baseline behavior. Canonical-form suggestions are advisory, provider output is ephemeral, and lexical identity changes only through explicit acceptance using the existing canonical-edit path.
 
-### ACCP-007 — learning-value decision — current/final linear gate
+### ACCP-007 — learning-value decision — completed
 
-Depends on completed ACCP-002, ACCP-004, ACCP-005, ACCP-006, and ACCP-012.
-
-This gate adds a deterministic local recommendation for Study, Improve, Evidence only, or Archive for now. Recommendation stays separate from Inbox/Ready/Archived workflow state and does not authorize export.
+ACCP-007 is now baseline behavior. Deterministic local learning-value recommendations remain separate from Inbox/Ready/Archived workflow state and do not authorize export.
 
 ---
 
-## Recommended linear merge sequence
+## Phase 1 feature sequence: complete
 
-From the current baseline, the remaining documented linear gate is:
+The documented Phase 1 product-feature sequence is complete after ACCP-007.
 
-1. ACCP-007 — learning-value decision
+## Release-readiness remediation
 
-ACCP-006 is part of the completed baseline. After ACCP-007 merges, the currently documented linear implementation sequence is complete. Future implementation work should be selected from validated product defects or explicit roadmap decisions rather than inventing another ticket merely to keep this sequence non-empty.
+1. ACCP-023 — reproducible production build
+2. ACCP-024 — restore post-commit consistency
+3. ACCP-025 — public truth + durable distribution
+
+ACCP-023 and ACCP-024 are independent P2 remediation gates and may proceed in parallel. ACCP-025 depends on both remediation gates plus final release-candidate acceptance.
 
 ---
 

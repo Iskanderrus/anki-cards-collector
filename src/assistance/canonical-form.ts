@@ -242,66 +242,6 @@ export const localCanonicalFormProvider: CanonicalFormProvider = {
   },
 };
 
-function e2eSuggestion(
-  proposedCanonical: string,
-  language = "es",
-): CanonicalFormProviderResult {
-  return {
-    kind: "suggestions",
-    suggestions: [{
-      proposedCanonical,
-      language,
-      confidence: "high",
-      category: "e2e-fixture",
-      evidenceLabel: "Deterministic browser-test fixture.",
-    }],
-  };
-}
-
-class E2eCanonicalFormProvider implements CanonicalFormProvider {
-  private supersedeRequests = 0;
-  private releaseSupersededRequest: ((result: CanonicalFormProviderResult) => void) | null = null;
-
-  supports(language: string): boolean {
-    return localCanonicalFormProvider.supports(language);
-  }
-
-  async suggest(input: CanonicalFormProviderInput): Promise<CanonicalFormProviderResult> {
-    const observed = normalizeIdentityText(input.observedForm);
-
-    if (observed === "providerunavailable") {
-      throw new Error("Synthetic provider failure.");
-    }
-
-    if (observed === "delayform") {
-      await new Promise((resolve) => globalThis.setTimeout(resolve, 350));
-      return e2eSuggestion("delaylemma");
-    }
-
-    if (observed === "supersedeform") {
-      this.supersedeRequests += 1;
-      if (this.supersedeRequests === 1) {
-        return await new Promise<CanonicalFormProviderResult>((resolve) => {
-          this.releaseSupersededRequest = resolve;
-        });
-      }
-
-      const releaseSupersededRequest = this.releaseSupersededRequest;
-      this.releaseSupersededRequest = null;
-      globalThis.setTimeout(() => {
-        releaseSupersededRequest?.(e2eSuggestion("oldlemma"));
-      }, 100);
-      return e2eSuggestion("newlemma");
-    }
-
-    return localCanonicalFormProvider.suggest(input);
-  }
-}
-
-export function createCanonicalFormProvider(e2eMode = false): CanonicalFormProvider {
-  return e2eMode ? new E2eCanonicalFormProvider() : localCanonicalFormProvider;
-}
-
 export class CanonicalFormRequestGate {
   private sequence = 0;
   private activeLexicalUnitId: string | null = null;

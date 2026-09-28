@@ -14,7 +14,10 @@
     "test:e2e": "node tests/e2e/extension.mjs",
     "check": "npm run typecheck && npm test && npm run check:manual-migration-helper && npm run build && node scripts/check-built.mjs",
     "check:store": "node scripts/check-store-package.mjs",
-    "package:store": "npm run build:release && npm run check:store && node scripts/package-release.mjs",
+    "check:release": "npm run build:release && npm run check:store",
+    "package:store": "npm run check:release && node scripts/package-release.mjs",
+    "check:package-reproducibility": "node scripts/check-package-reproducibility.mjs",
+    "check:deterministic-zip-utf8": "node scripts/check-deterministic-zip-utf8.mjs",
     "check:manual-migration-helper": "node scripts/manual-migration-check.mjs self-test"
   },
   "dependencies": {
@@ -32,5 +35,10 @@
     "playwright": "^1.55.0",
     "typescript": "^5.8.3",
     "vitest": "5.0.1"
+  },
+  "packageManager": "npm@11.6.0",
+  "engines": {
+    "node": "22.23.3",
+    "npm": "11.6.0"
   }
 }
