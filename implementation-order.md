@@ -1,154 +1,78 @@
 # Implementation order
 
-This file is the dependency-aware execution order for current Collector work.
+This file records the current dependency-aware execution state for Anki Cards Collector.
 
-It is intentionally stricter than issue-number order. Some work can run in parallel; later work should not be built on UI/data assumptions that are about to be replaced.
+Historical ticket plans under `docs/plans/` remain implementation records. They are not an active backlog.
 
-## Completed foundation
+## Phase 1 feature sequence: COMPLETE
 
-The following work is already part of the current baseline:
+The Phase 1 product-feature sequence is complete.
 
-- **ACCP-001** — canonical lexical units vs observed forms, including real v1 -> v2 migration acceptance;
-- **ACCP-002** — deterministic best-occurrence selection with review/TSV/Anki parity;
-- **ACCP-008** — correct browser fetch binding for real AnkiConnect export;
-- **ACCP-009** — stale/deleted Anki note recovery using real AnkiConnect behavior;
-- **ACCP-010** — final extension brand/icon asset system;
-- **ACCP-015** — UX/export planning baseline and repository implementation order;
-- **ACCP-016** — read-only live Anki catalog with real-Anki acceptance and persistent stale metadata;
-- **ACCP-019** — source-agnostic staged batch capture, deterministic dedupe/classification, and transactional corpus commit;
-- **ACCP-020** — opt-in Duolingo visible lesson backfill with MV3-safe staged/session lifecycle;
-- **ACCP-013** — safe multi-deck language routing with pinned export bindings and explicit Anki destination lifecycle;
-- **ACCP-017** — bounded read-only deck/model analysis with representative existing-card previews and real-Anki acceptance;
-- **ACCP-011** — compact queue, focused review detail, and dedicated Settings navigation shell;
-- **ACCP-003** — explicit canonicalization review and identity-safe canonical rename; ACCP-004 supersedes canonical-equality-driven consolidation with explicit merge;
-- **ACCP-014** — mapped export through existing user-owned Anki note types with fail-closed validation;
-- **ACCP-018** — guided language export-profile setup from live Anki metadata with real-Anki acceptance;
-- **ACCP-021** — selected-only staged backfill review/import with transactional ownership revalidation and committed-success recovery semantics;
-- **ACCP-022** — explicit staged refresh/reclassification with durable staged identity and stale-snapshot recovery.
-- **ACCP-012** — onboarding/user journey with sequential Inbox review, live export preview, and identity-safe review-session reconciliation;
-- **ACCP-005** — learning-card policy v2 with authoritative study-content derivation, content-sensitive Ready invalidation, and review/export parity.
-- **ACCP-006** — advisory canonical-form assistance with explicit acceptance, request supersession, and no provider-owned lexical truth;
-- **ACCP-007** — deterministic learning-value decisions with explicit recommendation/override separation.
+Completed product work includes:
 
----
+- lexical-unit / occurrence identity, migrations, explicit canonical review, merge, and split;
+- deterministic best-evidence selection, study-content/card policy, optional advisory canonical assistance, and learning-value recommendations;
+- compact queue, focused review, onboarding, and explicit Ready authorization;
+- local-first generic capture plus opt-in visible-DOM Duolingo staging/backfill;
+- staged review/import, durable staged identity, worker reconstruction, and refresh/reclassification recovery;
+- live Anki deck/model/note-type discovery and bounded inspection;
+- language-aware routing, export profiles, mapped existing user-owned note types, and guided setup;
+- idempotent Anki update/recovery with pinned external identity;
+- JSON backup/restore, migration coverage, Chromium E2E/accessibility, and Chrome Web Store packaging.
 
-## Gate A — completed low-coupling groundwork
+The original motivating flow is implemented:
 
-ACCP-019 now provides the staged candidate/commit boundary required by source-specific backfill work. Source adapters can produce evidence without writing directly to the corpus.
+```text
+visible language material
+  -> Staged or direct capture
+  -> Inbox
+  -> deterministic study-content + recommendation
+  -> explicit Ready
+  -> routed/mapped Anki export
+```
 
----
-
-## Gate B — completed destination discovery evidence
-
-ACCP-017 is now baseline work alongside ACCP-013 and ACCP-016.
-
-## Gate C — interaction shell and canonical review
-
-### ACCP-011 — sidebar redesign — completed
-
-The compact queue + focused detail/settings shell is now baseline UI.
-
-### ACCP-003 — canonicalization workflow — completed
-
-Canonical/observed review and identity-safe rename are baseline behavior. ACCP-004 supersedes canonicalization-induced consolidation with deliberate explicit merge.
-
----
-
-## Gate D — existing Anki models, guided setup, and backfill review
-
-### ACCP-014 — existing note type mapping — completed
-
-ACCP-014 is now baseline behavior: mapped user-owned note types are pinned by live deck/model IDs, validated before writes, and updated through mapped-only fields.
-
-### ACCP-018 — guided export-profile setup — completed
-
-Guided language/profile routing, live deck/model identity, mapped-only writes, and real-Anki acceptance are now baseline behavior.
-
-### ACCP-021 — batch backfill review and import — completed
-
-ACCP-021 is now baseline behavior. It builds the staged-candidate UI, commits selected evidence into the normal corpus, retains unselected staged evidence, and preserves the irreversible corpus-success boundary when a later staged reclassification read fails.
-
-### ACCP-022 — staged refresh/reclassification recovery — completed
-
-Explicit Staged refresh/reclassification, durable staged identity, worker reconstruction, and stale-snapshot recovery are baseline behavior.
-
-### ACCP-012 — onboarding and user journey — completed
-
-ACCP-012 is now baseline behavior. Sequential Inbox review, live destination preview, focus/keyboard behavior, and review-session identity reconciliation are part of the starting point for corpus identity operations.
-
----
-
-## Gate E — corpus operations and card quality
-
-### ACCP-004 — explicit merge and split — completed baseline
-
-ACCP-004 is now baseline behavior. Lexical-unit ID is primary, canonical/content keys are non-unique lookup data, and merge/split are explicit transactional operations with retained Collector/Anki identity semantics.
-
-### ACCP-005 — learning-card policy v2 — completed
-
-ACCP-005 is now baseline behavior. Word/chunk/sentence decisions use one authoritative study-content derivation, Ready approval is content-sensitive, and review/export parity is enforced without persisting derived proposals.
-
----
-
-## Gate F — optional assistance and learning-value decisions
-
-### ACCP-006 — morphology/canonical-form assistance — completed
-
-ACCP-006 is now baseline behavior. Canonical-form suggestions are advisory, provider output is ephemeral, and lexical identity changes only through explicit acceptance using the existing canonical-edit path.
-
-### ACCP-007 — learning-value decision — completed
-
-ACCP-007 is now baseline behavior. Deterministic local learning-value recommendations remain separate from Inbox/Ready/Archived workflow state and do not authorize export.
-
----
-
-## Phase 1 feature sequence: complete
-
-The documented Phase 1 product-feature sequence is complete after ACCP-007.
+Recommendation remains separate from workflow state: it does not imply Ready and does not automatically Archive.
 
 ## Release-readiness remediation
 
-1. ACCP-023 — reproducible production build
-2. ACCP-024 — restore post-commit consistency
-3. ACCP-025 — public truth + durable distribution
+- **ACCP-023 — completed.** Reproducible production build, frozen dependency graph, production runtime checks, deterministic ZIP, and UTF-8 ZIP filename handling.
+- **ACCP-024 — completed.** Restore commit-boundary consistency and committed-success recovery semantics.
+- **ACCP-025 — current / final Phase 1 release gate.** Reconcile public truth, freeze and accept one exact RC, merge that exact tree, create the first versioned release, publish the exact artifact to the Chrome Web Store, and expose the durable normal-user install path.
 
-ACCP-023 and ACCP-024 are independent P2 remediation gates and may proceed in parallel. ACCP-025 depends on both remediation gates plus final release-candidate acceptance.
+ACCP-025 must not claim completion before the Chrome Web Store listing is actually installable.
 
----
-
-## Original Duolingo-to-Anki acceptance path
-
-The end-to-end motivating workflow is considered complete only when the following chain has passed real acceptance:
+## Current ACCP-025 order
 
 ```text
-ACCP-019 staged batch pipeline
-    ↓
-ACCP-020 visible Duolingo backfill
-    ↓
-ACCP-021 staged review/import
-    ↓
-normal lexical/card review
-    ↓
-ACCP-013/014/016/017/018 export profile
-    ↓
-existing Anki deck + existing user note type
+Tranche A
+  public docs/assets truth
+  -> exact RC build/package evidence
+  -> bounded real RC acceptance
+  -> independent full-snapshot review
+  -> master merge decision
+
+Tranche B
+  exact reviewed tree becomes canonical main
+  -> tag v0.1.0
+  -> GitHub Release ZIP + checksum
+  -> verify artifact identity
+  -> Chrome Web Store publication
+  -> publish real install URL
+  -> close/supersede stale PR #68
+  -> close issue #80
 ```
 
-The acceptance run should prove:
+No tag, GitHub Release, or Chrome Web Store submission should be created from an unmerged implementation branch.
 
-- only user-visible Duolingo material is collected;
-- no private API/network interception is used;
-- duplicates are not silently multiplied;
-- imported candidates do not become Ready automatically;
-- chosen material reaches the intended language deck/profile;
-- the user's existing note type/templates/CSS remain unchanged;
-- Anki note identity remains idempotent.
+## After ACCP-025
 
----
+Phase 1 is closed.
 
-## Quality gates for every item
+Further product work requires a new explicit roadmap / Phase 2 decision. Do not silently revive completed Phase 1 tickets as active planned work.
 
-Every implementation PR preserves:
+## Quality gates
+
+Repository changes preserve:
 
 ```bash
 npm run check
@@ -156,17 +80,9 @@ npm run check
 
 UI changes keep Chromium E2E and accessibility checks green.
 
-Storage/backup changes require:
+Storage/backup changes require deterministic migration/restore coverage. Anki discovery/routing/model work requires real-Anki acceptance in addition to mocks. Source-session work requires browser-level privacy/permission coverage.
 
-- frozen migration fixture where schema changes;
-- deterministic backup migration/validation;
-- round-trip tests.
-
-Anki discovery/routing/model work requires real-Anki manual acceptance in addition to mocks.
-
-Backfill/source-session work requires browser-level privacy/permission tests in addition to DOM fixtures.
-
-No item may silently:
+No change may silently:
 
 - duplicate study material;
 - move an exported card to a different deck;
