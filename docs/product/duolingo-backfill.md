@@ -6,15 +6,13 @@ Support a common recovery workflow:
 
 > Revisit language material already studied in Duolingo, collect useful visible words and phrases in bulk, deduplicate them, review them, and export the approved items through the learner's normal Anki profile.
 
-The implementation work is tracked by ACCP-019, ACCP-020, and ACCP-021.
+The shipped Phase 1 implementation is provided by ACCP-019, ACCP-020, and ACCP-021.
 
-## Current baseline
+## Current implementation
 
-Collector already supports explicit text selection on Duolingo through the visible-DOM source adapter.
+Collector supports explicit text selection on Duolingo through the visible-DOM source adapter. That remains the smallest everyday capture path.
 
-That remains the safest everyday capture path.
-
-The planned backfill workflow adds an opt-in batch path without changing the privacy boundary.
+Phase 1 also ships an opt-in visible-material backfill path without changing the privacy boundary. Candidates are staged first, reviewed/selected explicitly, then committed into the ordinary corpus before normal review and Ready authorization.
 
 ## Target workflow
 
@@ -60,7 +58,7 @@ existing Hebrew Anki deck/model
 
 ## Capture modes
 
-Collector should support three conceptually separate capture modes.
+Collector distinguishes three conceptually separate capture modes. The first two are implemented in Phase 1; the third remains outside the current release unless a future roadmap explicitly authorizes it.
 
 ### 1. Explicit selection
 
@@ -72,18 +70,18 @@ This remains the baseline for normal browsing.
 
 The user explicitly asks Collector to inspect visible material.
 
-Two sub-modes are planned:
+Two sub-modes are implemented:
 
-- one-shot scan of the currently rendered page/lesson state;
-- explicitly started/stopped session that accumulates candidates as the user manually moves through a lesson/review and new DOM becomes visible.
+- one-shot scan of the currently rendered supported Duolingo study state;
+- explicitly started/stopped session that accumulates candidates as the user manually moves through supported lesson/review material and new DOM becomes visible.
 
 The session is not background browsing collection. It is scoped to an explicit user action and visible source material.
 
-### 3. Explicit bulk import
+### 3. Explicit bulk import — not Phase 1
 
-A future source may provide a legitimate file/list/export that the user chooses to import.
+A later source could provide a legitimate file/list/export selected by the user. Phase 1 does not ship that product path.
 
-That should reuse the same staged-candidate pipeline rather than inventing another persistence path.
+If a future roadmap authorizes it, it should reuse the staged-candidate pipeline rather than inventing another persistence boundary.
 
 ## Candidate vs learning item
 
