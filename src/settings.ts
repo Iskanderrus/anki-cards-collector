@@ -271,9 +271,7 @@ export function migrateSettings(value: unknown): CollectorSettings {
 
 export async function loadSettings(): Promise<CollectorSettings> {
   const stored = await chrome.storage.local.get("collectorSettings");
-  const settings = migrateSettings(stored.collectorSettings);
-  await chrome.storage.local.set({ collectorSettings: settings });
-  return settings;
+  return migrateSettings(stored.collectorSettings);
 }
 
 export async function saveSettings(settings: CollectorSettings): Promise<void> {
