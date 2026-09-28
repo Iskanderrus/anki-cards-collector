@@ -1,58 +1,97 @@
 # Anki Cards Collector
 
-I built this because I kept running into the same small annoyance while studying languages: the useful phrase is usually on a web page, while Anki is somewhere else.
+Anki Cards Collector is a local-first Chromium extension for collecting useful language from the web, reviewing it as study material, and explicitly sending approved cards to Anki.
 
-Anki Cards Collector keeps that gap small. Select a word, phrase, or sentence, collect it into a local inbox, keep the context, and decide later whether it deserves a card.
+It exists to keep the gap between “I want to remember this” and a durable Anki card small without turning browsing into background scraping. The extension has no application server, no account system, and no telemetry.
 
-This repository contains the public implementation: deliberately small, local-first, and usable without an account or application server.
+## Install
 
-## What it does
+**Phase 1 release candidate. Chrome Web Store publication is pending final acceptance of the exact release candidate.**
+
+There is no public Chrome Web Store install URL yet. The normal-user installation path will be the published Chrome Web Store listing once the accepted `v0.1.0` release is live. Until then, Developer Mode is an evaluator/developer path, not the public installation route.
+
+See the [release checklist](docs/release.md) for the exact release/distribution gate.
+
+## Daily workflow
+
+1. Select a useful word, phrase, or sentence on a web page.
+2. Choose **Collect** in the side panel or **Collect for Anki** from the selection context menu.
+3. The capture enters **Inbox** with visible context and privacy-filtered source metadata.
+4. Review the lexical unit, observed evidence, learner note, deterministic study-content proposal, and learning-value recommendation.
+5. Edit when needed and explicitly mark the item **Ready**.
+6. Open **Export Ready** to preview the actual resolved Anki destinations.
+7. With Anki Desktop + AnkiConnect running, export to the configured deck/note type.
+
+Ready is the export authorization boundary. A recommendation is guidance only: it is not Ready, and an Archive-for-now recommendation does not automatically archive anything.
+
+Visible Duolingo backfill is a separate explicit flow:
+
+```text
+visible Duolingo material
+  -> Staged
+  -> select/import evidence
+  -> Inbox
+  -> review
+  -> explicit Ready
+  -> Anki
+```
+
+Staged material never writes directly to Anki.
+
+## What Collector does
 
 - captures an explicit text selection from the current page;
-- keeps the surrounding visible context and a privacy-filtered source URL;
-- works on arbitrary web pages, not only one learning platform;
-- has a small Duolingo adapter for visible DOM context, without private APIs or network interception;
-- separates a canonical lexical unit from the surface forms actually observed on pages;
-- deduplicates lexical units while preserving repeated occurrences and their observed forms;
-- gives every item an inbox / ready / archived review state;
-- supports keyboard-first review with J/K or arrow navigation and E/R/I/A actions;
-- lets you correct the expression, language, context, and learner note before export;
-- derives one reviewable learning-card proposal from each captured lexical unit instead of treating raw text as a finished card;
-- explains why a proposal was chosen and blocks overly broad or underspecified captures from becoming ready;
-- exports ready items through AnkiConnect with live batch progress and per-item failure reporting;
-- updates previously exported notes instead of blindly creating duplicates;
-- lets you choose an Anki deck for each language so one Ready batch can safely export to several decks;
-- pins an exported item's Anki deck so changing a later language rule cannot silently move it;
-- provides TSV fallback plus versioned JSON backup and restore;
-- validates and previews a JSON restore before writing anything;
-- lets source URL retention be set to origin+path, non-tracking query parameters, or no URL;
-- stores the collection locally in IndexedDB.
+- keeps surrounding visible context and a privacy-filtered source URL;
+- works on ordinary web pages through on-demand `activeTab` + `scripting`;
+- provides an optional visible-DOM Duolingo adapter without private APIs or network interception;
+- separates canonical lexical units from their observed surface-form occurrences;
+- deduplicates evidence without collapsing intentionally separate lexical identities;
+- supports Inbox / Ready / Archived workflow states;
+- derives deterministic reviewable study content from accepted local evidence;
+- provides optional advisory canonical-form assistance that changes nothing until explicitly accepted;
+- provides deterministic **Study / Improve / Evidence only / Archive for now** guidance without changing workflow state automatically;
+- supports multiple language routes, decks, export profiles, and explicit mapped existing Anki note types;
+- preserves user-owned note-type fields/templates/CSS and writes only configured mapped fields;
+- exports idempotently through AnkiConnect and recovers from deleted/stale note identities;
+- provides TSV fallback plus validated JSON backup/restore;
+- stores the corpus locally in IndexedDB.
 
-The extension does **not** continuously watch browsing, scrape credentials, read cookies, call Duolingo private APIs, or send study data to a server.
+## Anki integration
 
-## A 60-second walkthrough
+AnkiConnect is a localhost-only integration. Collector uses it only after an explicit user action for operations such as:
 
-1. Open a page containing language you want to keep.
-2. Select a useful expression.
-3. Open the extension side panel and click **Collect selection** (or use **Collect for Anki** from the selection context menu).
-4. Review the captured expression and context. Correct them or add a learner note if needed.
-5. Mark it **Ready**.
-6. With Anki + AnkiConnect running, click **Send ready to Anki**.
+- connection/catalog refresh;
+- deck/model/note-type inspection;
+- guided export-profile setup and profile revalidation;
+- bounded representative existing-card inspection where applicable;
+- export, update, move, and stale/deleted-note recovery.
 
-If Anki is not available, download the ready items as TSV. JSON backup preserves the local corpus and can be restored through a validated dry run.
+Collector does not continuously poll Anki.
 
-## Why the data model has two objects
+Language routes resolve to configured export profiles. Per-item bindings pin exported identity so changing a later default route cannot silently move an existing Anki note. Mapped user-owned note types remain user-owned: Collector does not add fields or rewrite templates/CSS.
 
-A phrase and an encounter with that phrase are not the same thing.
+## What is stored
 
-The learning target and the text that appeared on a page are not always identical. I may observe `tengo ganas de`, but decide that the canonical unit I want to keep is `tener ganas de`.
+Persistent corpus state lives locally and includes lexical units, occurrences, review states, notes, stable Collector IDs, and export bindings. Collector settings include source-retention policy plus Anki export profiles and language routes.
 
-The model therefore separates:
+Backup format v4 preserves the durable corpus, export bindings, and Collector settings. It is **not** a full browser-session snapshot: transient Staged/session state, onboarding presentation state, and in-memory UI/review-session state are outside the backup guarantee.
 
-- **LexicalUnit** — the canonical thing I may want to learn;
-- **Occurrence** — one observed surface form, its context, and its source.
+If a restore has already committed the corpus/settings and a later UI refresh fails, the restored data remains durable. Reload the extension UI; the restore is not rolled back.
 
-If `tengo ganas de`, `tenía ganas de`, and `tener ganas de` are explicitly merged into one lexical unit, those forms remain separate occurrences rather than being flattened away. A later capture of an already-observed surface form routes back to that unit only when ownership is unambiguous; if an intentional split leaves several plausible owners, Collector requires explicit ownership resolution instead of guessing.
+See [backup and restore](docs/backup-and-restore.md) and [privacy boundary](docs/privacy.md).
+
+## Privacy boundary
+
+Collector does **not**:
+
+- continuously watch browsing;
+- scrape cookies, credentials, authentication tokens, browser history, or page network traffic;
+- use a private Duolingo API;
+- send study material to an application server;
+- include telemetry or analytics;
+- depend on a remote morphology/canonical-form provider.
+
+Source URLs are reduced according to the configured retention policy before they enter the corpus.
 
 ## Architecture
 
@@ -63,97 +102,65 @@ flowchart LR
     Adapter --> Repo[Capture repository]
     Repo --> DB[(IndexedDB)]
     DB --> Panel[React side panel]
-    Panel --> Policy[Learning-card policy]
-    Policy --> Review[Human review / Ready]
+    Panel --> Policy[Study-content + learning-value policy]
+    Policy --> Review[Human review / explicit Ready]
     Review --> Anki[AnkiConnect on localhost]
     Review --> TSV[TSV export]
     DB --> Backup[JSON backup / restore]
 ```
 
-There is no application backend. The background service worker coordinates user-triggered capture; the side panel owns review and export; Dexie keeps persistence behind a repository boundary.
+There is no application backend. The background service worker coordinates explicit capture/backfill operations; the side panel owns review, setup, backup/restore, and export; Dexie keeps durable corpus persistence behind repository boundaries.
 
-More detail: [architecture](docs/architecture.md) · [learning-card policy](docs/learning-card-policy.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
+More detail: [architecture](docs/architecture.md) · [user journey](docs/product/user-journey.md) · [learning-card policy](docs/learning-card-policy.md) · [privacy](docs/privacy.md) · [ADRs](docs/decisions/)
 
-## Design choices worth discussing
+## Build from source / contribute
 
-This project is intentionally not a feature catalogue.
-
-- **Local-first over a backend.** The current workflow does not need accounts, deployment, or remote data retention.
-- **Manual capture over ambient scraping.** The extension wakes up because the user selected something.
-- **Generic web first.** A source-specific integration is an adapter, not the product boundary.
-- **Stable Collector IDs.** Export is an upsert workflow, not a repeated “add note” button.
-- **Captured evidence is not automatically a card.** Review derives one bounded proposal and requires explicit approval.
-- **No invented semantics.** If the corpus does not contain a meaning or usable retrieval cue, the policy asks for review instead of fabricating one.
-- **Partial failure isolation.** One rejected Anki note does not hide or stop the rest of a ready batch.
-- **Observed forms survive canonicalization.** Inflected or contextual surface forms live on occurrences instead of being overwritten by the canonical learning target.
-- **Context survives deduplication.** Repeated encounters become occurrences rather than duplicate cards.
-- **Explicit edit collisions.** Changing expression/language never silently merges two collected items.
-- **Dry-run restore.** Backup parsing, merge planning, and transactional restore share the same invariants.
-- **Privacy-filtered sources.** Raw page URLs are reduced before persistence; credentials/fragments never reach the local corpus.
-- **Plain fallbacks.** TSV and JSON keep the user's data useful even if AnkiConnect is unavailable.
-
-The decisions and their consequences are recorded in the ADRs instead of being hidden in code comments.
-
-## Run it locally
+This is separate from the future normal-user Chrome Web Store install path.
 
 Requirements:
 
 - Node.js 22.23.3
 - npm 11.6.0
 - a recent Chromium-based browser with Side Panel support
-- Anki + [AnkiConnect](https://ankiweb.net/shared/info/2055492159) for direct export (optional)
+- Anki + [AnkiConnect](https://ankiweb.net/shared/info/2055492159) for direct Anki operations
+
+Canonical verification uses the committed dependency graph:
 
 ```bash
 npm ci
 npm run check
 ```
 
-Then:
+To evaluate the unpacked extension:
 
-1. open `chrome://extensions`;
-2. enable **Developer mode**;
-3. choose **Load unpacked**;
-4. select the generated `dist/` directory.
+1. run the production build;
+2. open `chrome://extensions`;
+3. enable **Developer mode**;
+4. choose **Load unpacked**;
+5. select `dist/`.
 
-The extension only requests localhost host access for AnkiConnect. Page access is provided at the moment of an explicit user action through `activeTab` + `scripting`.
-
-## Development
-
-The canonical clean verification path uses the committed lockfile with `npm ci`. Use `npm install` only when deliberately changing dependencies and commit the resulting `package-lock.json` update.
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
-
-`npm run check` runs all three and also asserts that the production manifest has no persistent all-sites content script or broad host permission.
-
-A small Playwright suite loads the real unpacked Chromium extension and exercises selection capture, empty-selection failure, the shared context-menu handler, side-panel refresh, keyboard review, and restricted-page failure. The same browser job runs axe against the rendered side panel to catch WCAG A/AA regressions. CI builds a test-only extension variant for that suite; its E2E hook and localhost fixture permission are not present in the production bundle.
-
-Tests currently focus on the parts where accidental regressions are expensive: text normalisation, source URL sanitisation, deterministic learning-card proposals, deduplication with occurrence preservation, edit collisions and identity, backup validation/merge behaviour, review state, Anki upserts and partial failures, portable export formatting, a frozen IndexedDB v1 migration fixture, and browser permission/capture boundaries.
+Use `npm install` only when deliberately changing dependencies and commit the resulting lockfile update.
 
 ## Release package
 
 ```bash
+npm ci
 npm run package:store
 ```
 
-This creates a validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. Release builds use explicit production React semantics and the pinned Node 22.23.3 / npm 11.6.0 toolchain. CI also produces a synthetic 640x400 store screenshot from the real Chromium extension flow.
+This produces a deterministic validated Chrome Web Store ZIP plus SHA-256 checksum in `release/`. Release builds use production React semantics, contain no source maps or TypeScript sources, and are built with the pinned Node/npm toolchain.
 
-The repository does not contain Chrome Web Store credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
+Build-time extension icons are generated into `dist/icons/` from the committed brand source asset. CI also generates a synthetic 640x400 screenshot from the real extension UI for Chrome Web Store use.
 
-## Scope
-
-The public repository is intentionally focused on the local capture → review → Anki workflow. Its roadmap covers maintenance and hardening of that implementation only.
-
-See the [maintenance roadmap](docs/roadmap.md).
+The repository contains no Chrome Web Store publisher credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
 
 ## Project status
 
-**Working public release.**
+**Phase 1 feature work is complete. ACCP-025 is the final release/distribution gate.**
 
-Repository-side release packaging and store validation are implemented. First publication still requires the Chrome Web Store dashboard/account steps described in the release checklist.
+ACCP-023 (reproducible production build) and ACCP-024 (restore post-commit consistency) are merged. The remaining Phase 1 work is to accept one exact release candidate, merge it, create/tag the exact `v0.1.0` release artifact, publish that exact artifact to the Chrome Web Store, expose the durable public install URL here, and close the superseded public-roadmap PR.
+
+Further product work requires a new explicit roadmap / Phase 2 decision.
 
 ## Disclaimer
 
