@@ -8,7 +8,6 @@ Requirements:
 
 - Node.js 22.23.3
 - npm 11.6.0
-- the system `zip` command
 
 Run:
 
@@ -24,7 +23,7 @@ The command:
 3. creates `release/anki-cards-collector-<version>.zip` with `manifest.json` at the archive root;
 4. creates a matching `.sha256` checksum.
 
-The package script normalizes file timestamps and feeds a sorted file list to `zip -X`. CI proves reproducibility by checking out the same commit into two independent workspaces, running `npm ci` and `npm run package:store` in each, and requiring byte-identical ZIP SHA-256 hashes.
+Packaging uses an in-repo deterministic ZIP writer with fixed UTC timestamps and fixed file modes. Host `SOURCE_DATE_EPOCH`, file mtimes, and umask do not affect the archive bytes. CI proves reproducibility with independent workspaces and an adversarial packaging check that varies umask, mtimes, and `SOURCE_DATE_EPOCH` while requiring byte-identical ZIP SHA-256 hashes.
 
 Dependency maintenance may use `npm install`; canonical verification and release packaging must use `npm ci` so `package.json`/lockfile drift fails closed.
 

@@ -16,6 +16,7 @@
     "check:store": "node scripts/check-store-package.mjs",
     "check:release": "npm run build:release && npm run check:store",
     "package:store": "npm run check:release && node scripts/package-release.mjs",
+    "check:package-reproducibility": "node scripts/check-package-reproducibility.mjs",
     "check:manual-migration-helper": "node scripts/manual-migration-check.mjs self-test"
   },
   "dependencies": {

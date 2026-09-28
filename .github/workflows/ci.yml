@@ -113,11 +113,15 @@ jobs:
       - name: Clean build A
         working-directory: build-a
         run: |
+          umask 0002
+          export SOURCE_DATE_EPOCH=1
           npm ci
           npm run package:store
       - name: Clean build B
         working-directory: build-b
         run: |
+          umask 0077
+          export SOURCE_DATE_EPOCH=1700000000
           npm ci
           npm run package:store
       - name: Verify byte-identical store ZIPs
@@ -138,3 +142,6 @@ jobs:
           echo "NODE_VERSION=$(node --version)"
           echo "NPM_VERSION=$(npm --version)"
           test "$BUILD_A_SHA256" = "$BUILD_B_SHA256"
+      - name: Adversarial packaging reproducibility
+        working-directory: build-a
+        run: npm run check:package-reproducibility
