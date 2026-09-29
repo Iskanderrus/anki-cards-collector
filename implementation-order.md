@@ -68,7 +68,26 @@ No tag, GitHub Release, or Chrome Web Store submission should be created from an
 
 Phase 1 is closed.
 
-Further product work requires a new explicit roadmap / Phase 2 decision. Do not silently revive completed Phase 1 tickets as active planned work.
+A first explicit Phase 2 integration boundary is now admitted:
+
+### ACCP-026 — Optional Qanbee Linguist connector — BLOCKED UNTIL RELEASE + CONTRACT
+
+ADR: `docs/decisions/0013-optional-qanbee-linguist-connector.md`  
+Plan: `docs/plans/ACCP-026-qanbee-linguist-connector.md`
+
+Start only after:
+
+```text
+ACCP-025 Chrome Web Store install path complete
+  -> qanbee-linguist owning repository exists
+  -> Linguist ingestion contract v1 frozen/reviewed
+  -> connector privacy/auth UX specified
+  -> ACCP-026 implementation
+```
+
+ACCP-026 is optional integration work, not a continuation of the Phase 1 release gate. Collector must remain fully useful without Qanbee, remote accounts, subscription, telemetry or QLI.
+
+Do not silently revive completed Phase 1 tickets as active planned work.
 
 ## Quality gates
 
@@ -90,3 +109,14 @@ No change may silently:
 - infer a target model solely from deck popularity;
 - turn staged source candidates directly into Ready cards;
 - rewrite lexical identity from an unapproved suggestion.
+
+
+## Phase 2 invariant
+
+```text
+Collector local corpus / review / Anki export = standalone product truth
+Collector -> Linguist = optional explicit connector
+Collector -> QLI = forbidden direct dependency
+```
+
+The Phase 2 connector must never become a reason to delay or weaken the public Phase 1 release.

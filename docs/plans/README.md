@@ -27,3 +27,10 @@ They describe the intended boundaries at the time each ticket was planned. They 
 The repository-level [implementation order](../../implementation-order.md) records current Phase 1 completion and the final ACCP-025 release gate.
 
 Further product work requires a new explicit roadmap / Phase 2 decision. Historical plan text that says “planned”, “future”, or “not implemented” should be read in its original ticket context rather than as current product status.
+
+
+## Admitted Phase 2 plan
+
+- [ACCP-026 — optional Qanbee Linguist connector](ACCP-026-qanbee-linguist-connector.md) — blocked until ACCP-025 is complete and the versioned Linguist ingestion contract exists.
+
+ACCP-026 does not change the Phase 1 local-first baseline and is not part of the v0.1.0 release gate.
