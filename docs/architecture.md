@@ -111,6 +111,8 @@ A new capture either creates a lexical unit or attaches another occurrence to on
 
 ACCP-004 identity operations live behind `CaptureRepository`. Explicit merge previews both units and their Anki state, preserves occurrence IDs, chooses one surviving lexical ID, and blocks reserved or incompatible external identities. Explicit split moves a proper subset of occurrence IDs to a newly generated lexical ID; the original retains its binding and the new unit starts unbound. Both operations are one Dexie transaction, revalidate current state at confirmation time, return changed study content to Inbox, and never call Anki directly. Dexie v5 makes `contentKey` non-unique without rewriting IDs; backup v4 permits the same content key on several distinct lexical units and restore matches identity by IDs rather than canonical text.
 
+Backup v4 serializes the durable corpus (`CollectedItem[]`), export bindings, and Collector settings. It intentionally excludes transient Staged/live-session state and in-memory UI/review-session state. Restore has an explicit commit boundary: once repository restore resolves successfully, the restored corpus/settings are durable; a later UI refresh failure is a committed-success warning and must not trigger rollback. See [backup and restore](backup-and-restore.md).
+
 An active Inbox review session remains a deterministic snapshot while these operations occur. Merge reconciliation substitutes the surviving ID once and removes stale/duplicate involved IDs. Split keeps the original ID in the current snapshot and does not auto-insert the newly created Inbox unit; that new identity enters a later review session.
 
 See [ADR 0012](decisions/0012-lexical-id-primary-identity.md).
@@ -200,9 +202,9 @@ For a Collector-managed profile, the Anki upsert path is:
 6. update it or create it;
 7. persist the returned note ID and destination snapshot in the binding.
 
-Changing an exported item's deck is a separate explicit operation. ACCP-013 permits that move only when the note type remains the same; note-type changes wait for ACCP-014 compatibility/mapping validation. The move is compensating: if Anki moves successfully but the new local binding cannot be saved, Collector attempts to move the note back to the original deck and reports a hard divergence if even that rollback fails.
+Changing an exported item's deck is a separate explicit operation. ACCP-013 permits an explicit same-note-type move; mapped user-owned note-type compatibility is handled by the completed ACCP-014/018 profile and field-mapping boundaries. The move is compensating: if Anki moves successfully but the new local binding cannot be saved, Collector attempts to move the note back to the original deck and reports a hard divergence if even that rollback fails.
 
-User-owned note types are not treated as Collector-managed. Profile ownership parsing is fail-closed: missing or unknown mode values are rejected rather than upgraded to mutating ownership. Even a syntactically `collector-managed` profile may enter schema mutation only when its model identity is the recognized Collector-owned `Collector Basic`. User-owned models can be inspected by the live catalog, but export through them is blocked until ACCP-014 supplies explicit field mapping. Collector does not add fields or rewrite templates/CSS merely because such a model exists.
+User-owned note types are not treated as Collector-managed. Profile ownership parsing is fail-closed: missing or unknown mode values are rejected rather than upgraded to mutating ownership. Even a syntactically `collector-managed` profile may enter schema mutation only when its model identity is the recognized Collector-owned `Collector Basic`. Completed ACCP-014/018 mapping allows export through explicitly configured user-owned models by writing mapped fields only; Collector does not add fields or rewrite templates/CSS on those models.
 
 The Collector ID is intentionally a first-class field of the Collector-managed model. Human-readable text can change; identity should not.
 

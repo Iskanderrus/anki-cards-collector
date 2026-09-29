@@ -66,6 +66,23 @@ The session is only a presentation over existing item state:
 
 Ready remains the explicit approval boundary for Anki export.
 
+## Study-content and learning-value guidance
+
+Three completed Phase 1 boundaries contribute to focused review without taking workflow control away from the user:
+
+- **ACCP-005** derives deterministic study content from accepted local evidence;
+- **ACCP-006** provides optional advisory canonical-form assistance only when explicitly requested;
+- **ACCP-007** derives a deterministic **Study / Improve / Evidence only / Archive for now** recommendation.
+
+The recommendation is guidance, not a workflow status:
+
+```text
+recommendation != Ready
+recommendation != automatic Archive
+```
+
+Ready remains explicit export authorization. An Archive-for-now recommendation does not mutate the item unless the user explicitly chooses Archive. Stronger accepted evidence can change the recommendation/study content; when effective approved study content changes, existing Ready approval is invalidated and the item returns to Inbox for explicit reapproval.
+
 Canonical-form assistance is optional inside focused review. The user explicitly requests a suggestion; Collector never runs it as a blocking capture step. A suggestion is visibly separate from the current canonical form and observed evidence. Dismiss changes nothing. **Use suggestion** applies the proposed canonical through the normal edit path, preserves observed evidence and Collector identity, and returns changed Ready study content to Inbox. Ambiguous suggestions require an explicit choice, while unsupported/unavailable assistance leaves manual Edit and export workflow intact.
 
 ## Staged material
@@ -169,4 +186,4 @@ This journey does not include:
 - silent Ready promotion;
 - silent Staged-to-Anki export;
 - silent movement of existing Anki cards between decks;
-- automatic learning-value decisions or other later-ticket autonomous learning policy.
+- automatic workflow mutation from learning-value recommendations (no silent Ready or Archive).

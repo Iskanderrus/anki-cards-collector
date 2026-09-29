@@ -1,10 +1,10 @@
 # Implementation plans
 
-These documents describe intended implementation boundaries for open ACCP work items.
+These documents are retained as implementation history for the completed Phase 1 work.
 
-They are plans, not claims about current behavior.
+They describe the intended boundaries at the time each ticket was planned. They are **not** an active backlog and should not override the shipped behavior or current public documentation.
 
-Open planned work:
+## Completed Phase 1 plans
 
 - [ACCP-002 — best occurrence selection](ACCP-002-best-occurrence-selection.md)
 - [ACCP-003 — canonicalization workflow](ACCP-003-canonicalization-workflow.md)
@@ -20,12 +20,10 @@ Open planned work:
 - [ACCP-016 — live Anki catalog](ACCP-016-anki-catalog.md)
 - [ACCP-017 — deck/model analysis and existing-card preview](ACCP-017-deck-model-analysis.md)
 - [ACCP-018 — guided export-profile setup](ACCP-018-guided-profile-setup.md)
-- [ACCP-021 — batch backfill review workflow](ACCP-021-backfill-review-workflow.md)
-
-See the repository-level [implementation order](../../implementation-order.md) for dependencies and recommended sequencing.
-
-
-Completed implementation plans retained for architecture/history:
-
 - [ACCP-019 — staged batch-capture pipeline](ACCP-019-batch-capture-pipeline.md)
 - [ACCP-020 — Duolingo visible lesson backfill](ACCP-020-duolingo-visible-backfill.md)
+- [ACCP-021 — batch backfill review workflow](ACCP-021-backfill-review-workflow.md)
+
+The repository-level [implementation order](../../implementation-order.md) records current Phase 1 completion and the final ACCP-025 release gate.
+
+Further product work requires a new explicit roadmap / Phase 2 decision. Historical plan text that says “planned”, “future”, or “not implemented” should be read in its original ticket context rather than as current product status.
