@@ -154,6 +154,10 @@ Build-time extension icons are generated into `dist/icons/` from the committed b
 
 The repository contains no Chrome Web Store publisher credentials. See [release checklist](docs/release.md) and [store listing copy](docs/store-listing.md).
 
+## Product lifecycle
+
+The product/distribution evidence contract is mapped in [docs/product/lifecycle.md](docs/product/lifecycle.md). It applies the proposed Agent Workflows Product Commercialization Lifecycle v0.1 in open-source/free mode without introducing a revenue gate.
+
 ## Project status
 
 **Phase 1 feature work is complete. ACCP-025 is the final release/distribution gate.**
