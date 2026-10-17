@@ -1,6 +1,6 @@
 # ADR-0014 — Optional Qanbee external-practice and bound-review bridge
 
-- **Status:** Proposed — pending family written-spec approval
+- **Status:** Accepted
 - **Date:** 2026-10-17
 - **Extends:** ADR-0013
 - **Family spec:** `Iskanderrus/Qanbee/docs/superpowers/specs/2026-10-17-alex-learning-anki-linguist-integration-design.md`
@@ -15,7 +15,7 @@ This must not become automatic whole-deck synchronization or transfer Anki/Colle
 
 ## Decision
 
-Collector may support a future optional **external-practice bridge** under these invariants:
+Collector may support an optional **external-practice bridge** under these invariants:
 
 1. Collector remains fully useful without Qanbee.
 2. Existing local capture/review/backup/Anki export behavior remains unchanged when the bridge is absent or disconnected.
@@ -27,7 +27,7 @@ Collector may support a future optional **external-practice bridge** under these
 8. Disconnect is explicit and must not delete local Anki cards or Collector corpus data by default.
 9. Transfer/retry semantics are idempotent.
 
-## Allowed future surfaces
+## Allowed surfaces
 
 ### Linguist -> Collector
 
@@ -66,16 +66,11 @@ Qanbee unavailability, auth failure, subscription state, stale contract or trans
 
 A failed review upload must not rewrite the Anki card, Collector lexical identity, Ready/Archived state, or local review history.
 
-## Relationship to ACCP-026
+## Relationship to ACCP-026 / ACCP-027
 
-ACCP-026 remains the existing first Phase-2 Collector -> Linguist connector ticket.
-
-After written-spec approval, implementation planning should decide whether:
-
-- ACCP-026 is broadened only enough to carry the shared connection/auth transport while preserving its original one-item-ingestion scope; and
-- a separate follow-up ticket owns Linguist-originated external-practice materialization and bound review return.
-
-Do not silently expand ACCP-026 before that planning step.
+- **ACCP-026** remains the first Phase-2 Collector -> Linguist connector and owns the shared connection/auth/remote-transport boundary while preserving its original explicit one-item ingestion scope.
+- **ACCP-027 / issue #85** owns Linguist-originated external-practice materialization, binding acknowledgement and bound-review return.
+- ACCP-027 reuses the ACCP-026 transport and existing Anki discovery/routing/export machinery; it must not create a parallel connector or raw note-routing implementation.
 
 ## Rejected alternatives
 
@@ -85,6 +80,6 @@ Do not silently expand ACCP-026 before that planning step.
 - deleting local Anki material when Qanbee disconnects;
 - treating review success as canonical Linguist mastery.
 
-## Approval gate
+## Review triggers
 
-This ADR remains **Proposed** until the family written spec is explicitly approved. It creates no active Phase-2 work or change to ACCP-025/026 sequencing by itself.
+Revisit if AnkiConnect review APIs cannot support a bounded reliable projection, if privacy requirements make review return disproportionate, or if user demand justifies a separately reviewed explicit broader sync mode.
